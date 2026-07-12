@@ -1,0 +1,82 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { downloadAndStore, getReadStream } from './index';
+import { NotFoundError, StorageError } from '../errors';
+
+describe('storage', () => {
+  let tempDir: string;
+  const originalEnv = process.env.LOCAL_STORAGE_DIR;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-test-'));
+    process.env.LOCAL_STORAGE_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    process.env.LOCAL_STORAGE_DIR = originalEnv;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('downloads and stores an image with metadata', async () => {
+    const imageBuffer = Buffer.from('fake-image-binary');
+    const url = 'https://cdn.example.com/image.png';
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'image/png' }),
+      arrayBuffer: async () => imageBuffer.buffer.slice(imageBuffer.byteOffset, imageBuffer.byteOffset + imageBuffer.byteLength),
+    } as unknown as Response);
+
+    const result = await downloadAndStore(url);
+
+    expect(result.contentType).toBe('image/png');
+    expect(result.sizeBytes).toBe(imageBuffer.length);
+    expect(result.storagePath).toMatch(/^\d{4}\/\d{2}\/[\w-]+\.png$/);
+
+    const absolutePath = path.join(tempDir, result.storagePath);
+    expect(fs.existsSync(absolutePath)).toBe(true);
+    expect(fs.readFileSync(absolutePath).toString()).toBe('fake-image-binary');
+  });
+
+  it('throws StorageError when download fails', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: new Headers(),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    } as unknown as Response);
+
+    await expect(downloadAndStore('https://cdn.example.com/missing.png')).rejects.toBeInstanceOf(StorageError);
+  });
+
+  it('throws StorageError on network error', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('network failure'));
+    await expect(downloadAndStore('https://cdn.example.com/image.png')).rejects.toBeInstanceOf(StorageError);
+  });
+
+  it('returns a readable stream for stored image', async () => {
+    const imageBuffer = Buffer.from('stream-test');
+    const storagePath = '2026/07/test.png';
+    const absolutePath = path.join(tempDir, storagePath);
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, imageBuffer);
+
+    const stream = getReadStream(storagePath);
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of stream as unknown as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk);
+    }
+    const result = Buffer.concat(chunks as unknown as Uint8Array[]);
+    expect(result.toString()).toBe('stream-test');
+  });
+
+  it('throws NotFoundError for missing file', () => {
+    expect(() => getReadStream('2026/07/missing.png')).toThrow(NotFoundError);
+  });
+
+  it('throws StorageError for path traversal attempt', () => {
+    expect(() => getReadStream('../../../etc/passwd')).toThrow(StorageError);
+  });
+});
