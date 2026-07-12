@@ -12,10 +12,10 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "test": "vitest run",
-    "test:unit": "vitest run **/*.unit.test.ts",
-    "test:contract": "vitest run **/*.contract.test.ts",
-    "test:integration": "vitest run **/*.integration.test.ts",
-    "test:smoke": "vitest run **/*.smoke.test.ts",
+    "test:unit": "vitest run .unit.test.ts",
+    "test:contract": "vitest run .contract.test.ts",
+    "test:integration": "vitest run .integration.test.ts",
+    "test:smoke": "vitest run .smoke.test.ts",
     "preflight": "npm run typecheck && npm run test:unit && npm run test:contract"
   },
   "dependencies": {
