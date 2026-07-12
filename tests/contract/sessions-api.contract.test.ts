@@ -53,7 +53,7 @@ describe('GET /api/sessions/:id', () => {
     vi.mocked(jobEngine.getGeneration).mockReset();
   });
 
-  it('returns session with generations and advances pending ones', async () => {
+  it('returns session with GenerationView generations and advances pending ones', async () => {
     vi.mocked(db.getSession).mockReturnValue({
       id: 'session-1',
       title: 'Demo',
@@ -80,7 +80,16 @@ describe('GET /api/sessions/:id', () => {
       createdAt: '2026-07-12T10:00:00.000Z',
       updatedAt: '2026-07-12T10:00:00.000Z',
       jobs: [],
-      images: [],
+      images: [
+        {
+          id: 'img-1',
+          jobId: 'job-1',
+          index: 0,
+          url: '/api/images/img-1',
+          width: 1024,
+          height: 1024,
+        },
+      ],
     });
 
     const response = await getSession(
@@ -89,7 +98,16 @@ describe('GET /api/sessions/:id', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(jobEngine.getGeneration).toHaveBeenCalledWith('gen-1', { db: expect.anything() });
+    expect(jobEngine.getGeneration).toHaveBeenCalledWith('gen-1', {
+      db: expect.anything(),
+    });
+
+    const body = await response.json();
+    expect(body.id).toBe('session-1');
+    expect(body.updatedAt).toBe('2026-07-12T10:00:00.000Z');
+    expect(body.generations).toHaveLength(1);
+    expect(body.generations[0].images[0].url).toBe('/api/images/img-1');
+    expect(body.generations[0].images[0].storagePath).toBeUndefined();
   });
 
   it('returns 404 for missing session', async () => {
