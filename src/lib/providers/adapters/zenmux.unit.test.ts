@@ -82,4 +82,25 @@ describe('ZenmuxProvider', () => {
     const result = await provider.submit(makeNormalizedRequest(), 'openai/gpt-image-2');
     expect(result.kind).toBe('failed');
   });
+
+  it('maps aspectRatio to OpenAI size string', async () => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        created: 123,
+        data: [{ url: 'https://cdn.zenmux.ai/img1.png' }],
+      }),
+    });
+
+    await provider.submit(
+      makeNormalizedRequest({ aspectRatio: '3:2', width: undefined, height: undefined }),
+      'openai/gpt-image-2',
+    );
+
+    const fetchCall = vi.mocked(global.fetch).mock.calls[0];
+    const body = JSON.parse(fetchCall[1]?.body as string);
+    expect(body.size).toBe('1536x1024');
+  });
 });

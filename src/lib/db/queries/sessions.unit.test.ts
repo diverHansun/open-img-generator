@@ -8,6 +8,7 @@ import {
   getSession,
 } from './sessions';
 import { createGenerationAndJob } from './generations';
+import { NotFoundError } from '../../errors';
 
 const now = '2026-07-12T10:00:00.000Z';
 
@@ -88,5 +89,10 @@ describe('sessions queries', () => {
     const found = getSession('session-1', db);
     expect(found.generations).toHaveLength(1);
     expect(found.generations[0].jobs).toHaveLength(1);
+  });
+
+  it('throws NotFoundError when session not found', () => {
+    const { db } = createTestDb();
+    expect(() => getSession('missing', db)).toThrow(NotFoundError);
   });
 });

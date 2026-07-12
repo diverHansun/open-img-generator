@@ -76,4 +76,10 @@ describe('validator', () => {
       validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', width: 999, height: 999 }), { db }),
     ).toThrow('Unsupported size');
   });
+
+  it('throws when only width is provided', () => {
+    expect(() =>
+      validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', width: 1024 }), { db }),
+    ).toThrow('Both width and height are required');
+  });
 });

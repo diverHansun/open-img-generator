@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createTestDb } from '../../../../tests/helpers/db';
 import { createGenerationAndJob } from './generations';
 import { createImage, imageExists, getImage } from './images';
+import { NotFoundError } from '../../errors';
 
 const now = '2026-07-12T10:00:00.000Z';
 
@@ -72,8 +73,13 @@ describe('images queries', () => {
     expect(imageExists('job-2', 0, db)).toBe(false);
   });
 
-  it('throws when image not found', () => {
+  it('throws NotFoundError when image not found', () => {
     const { db } = createTestDb();
     expect(() => getImage('missing', db)).toThrow('Image not found: missing');
+    try {
+      getImage('missing', db);
+    } catch (err) {
+      expect(err).toBeInstanceOf(NotFoundError);
+    }
   });
 });

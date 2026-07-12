@@ -73,30 +73,32 @@ export async function completeSync(
   const storeResult = await storeImages(jobId, images, client);
   const now = new Date().toISOString();
 
-  if (storeResult.kind === 'ok') {
-    updateGenerationJob(jobId, { status: 'completed', updatedAt: now }, client);
-  } else {
-    updateGenerationJob(
-      jobId,
-      {
-        status: 'failed',
-        error: JSON.stringify({
-          code: 'STORAGE_ERROR',
-          message: storeResult.error.message,
-          retryable: false,
-        }),
-        updatedAt: now,
-      },
-      client,
-    );
-  }
+  client.transaction((tx) => {
+    if (storeResult.kind === 'ok') {
+      updateGenerationJob(jobId, { status: 'completed', updatedAt: now }, tx);
+    } else {
+      updateGenerationJob(
+        jobId,
+        {
+          status: 'failed',
+          error: JSON.stringify({
+            code: 'STORAGE_ERROR',
+            message: storeResult.error.message,
+            retryable: false,
+          }),
+          updatedAt: now,
+        },
+        tx,
+      );
+    }
 
-  const finalStatus = deriveGenerationStatus(generationId, client);
-  updateGeneration(
-    generationId,
-    { status: finalStatus, updatedAt: now },
-    client,
-  );
+    const finalStatus = deriveGenerationStatus(generationId, tx);
+    updateGeneration(
+      generationId,
+      { status: finalStatus, updatedAt: now },
+      tx,
+    );
+  });
 }
 
 export async function advance(
@@ -124,8 +126,9 @@ export async function advance(
   try {
     handle = JSON.parse(job.providerHandle ?? '{}') as JobHandle;
   } catch {
-    updateGenerationJob(
+    updateJobAndGeneration(
       job.id,
+      job.generationId,
       {
         status: 'failed',
         error: JSON.stringify({
@@ -137,14 +140,14 @@ export async function advance(
       },
       client,
     );
-    syncGenerationStatus(job.generationId, client);
     return;
   }
 
   const provider = getById(handle.providerId);
   if (!provider || !provider.poll) {
-    updateGenerationJob(
+    updateJobAndGeneration(
       job.id,
+      job.generationId,
       {
         status: 'failed',
         error: JSON.stringify({
@@ -156,7 +159,6 @@ export async function advance(
       },
       client,
     );
-    syncGenerationStatus(job.generationId, client);
     return;
   }
 
@@ -186,15 +188,17 @@ async function applyPollResult(
 
   switch (pollResult.status) {
     case 'pending':
-      updateGenerationJob(
+      updateJobAndGeneration(
         job.id,
+        job.generationId,
         { status: 'pending', updatedAt: now },
         client,
       );
       break;
     case 'running':
-      updateGenerationJob(
+      updateJobAndGeneration(
         job.id,
+        job.generationId,
         { status: 'running', updatedAt: now },
         client,
       );
@@ -203,8 +207,9 @@ async function applyPollResult(
       await completeSync(job.generationId, job.id, pollResult.images, client);
       return;
     case 'failed':
-      updateGenerationJob(
+      updateJobAndGeneration(
         job.id,
+        job.generationId,
         {
           status: 'failed',
           error: JSON.stringify(pollResult.error),
@@ -214,15 +219,36 @@ async function applyPollResult(
       );
       break;
     case 'cancelled':
-      updateGenerationJob(
+      updateJobAndGeneration(
         job.id,
+        job.generationId,
         { status: 'cancelled', updatedAt: now },
         client,
       );
       break;
   }
+}
 
-  syncGenerationStatus(job.generationId, client);
+export function updateJobAndGeneration(
+  jobId: string,
+  generationId: string,
+  jobPatch: {
+    status: GenerationStatus;
+    error?: string | null;
+    providerHandle?: string | null;
+    updatedAt: string;
+  },
+  client: DbClient,
+): void {
+  client.transaction((tx) => {
+    updateGenerationJob(jobId, jobPatch, tx);
+    const status = deriveGenerationStatus(generationId, tx);
+    updateGeneration(
+      generationId,
+      { status, updatedAt: jobPatch.updatedAt },
+      tx,
+    );
+  });
 }
 
 export function syncGenerationStatus(

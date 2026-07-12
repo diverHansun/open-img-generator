@@ -8,6 +8,24 @@ import type {
 import { postJson, ProviderHttpError, createProviderError } from '../http-client';
 import { zenmuxCapabilities } from '../capabilities/zenmux';
 
+function resolveSize(req: NormalizedRequest): string {
+  if (req.width && req.height) {
+    return `${req.width}x${req.height}`;
+  }
+
+  const aspectRatioMap: Record<string, string> = {
+    '1:1': '1024x1024',
+    '3:2': '1536x1024',
+    '2:3': '1024x1536',
+  };
+
+  if (req.aspectRatio && aspectRatioMap[req.aspectRatio]) {
+    return aspectRatioMap[req.aspectRatio];
+  }
+
+  return '1024x1024';
+}
+
 function buildRequestBody(req: NormalizedRequest): Record<string, unknown> {
   const body: Record<string, unknown> = {
     prompt: req.prompt,
@@ -15,14 +33,7 @@ function buildRequestBody(req: NormalizedRequest): Record<string, unknown> {
   };
 
   body.n = req.count ?? 1;
-
-  if (req.width && req.height) {
-    body.size = `${req.width}x${req.height}`;
-  } else if (req.aspectRatio) {
-    body.size = req.aspectRatio;
-  } else {
-    body.size = '1024x1024';
-  }
+  body.size = resolveSize(req);
 
   for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
     if (key !== 'size') {

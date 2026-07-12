@@ -101,3 +101,32 @@ export async function getJson(
 
   return responseBody;
 }
+
+export async function putJson(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs = 15_000,
+): Promise<unknown> {
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  let responseBody: unknown;
+  try {
+    responseBody = await response.json();
+  } catch {
+    responseBody = null;
+  }
+
+  if (!response.ok) {
+    throw new ProviderHttpError(
+      `HTTP ${response.status}: ${response.statusText}`,
+      response.status,
+      responseBody,
+    );
+  }
+
+  return responseBody;
+}

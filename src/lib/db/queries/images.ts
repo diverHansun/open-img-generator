@@ -2,6 +2,7 @@ import { eq, and } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { images } from '../schema';
 import type { Image } from '../schema';
+import { NotFoundError } from '../../errors';
 
 export type CreateImageParams = {
   id: string;
@@ -52,7 +53,7 @@ export function imageExists(
 export function getImage(id: string, client: DbClient = db): Image {
   const row = client.select().from(images).where(eq(images.id, id)).get();
   if (!row) {
-    throw new Error(`Image not found: ${id}`);
+    throw new NotFoundError(`Image not found: ${id}`);
   }
   return row;
 }

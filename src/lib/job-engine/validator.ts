@@ -47,8 +47,13 @@ export function validate(
     );
   }
 
-  if (params.width || params.height) {
-    const size = `${params.width ?? ''}x${params.height ?? ''}`;
+  if (params.width !== undefined || params.height !== undefined) {
+    if (params.width === undefined || params.height === undefined) {
+      throw new ValidationError(
+        'Both width and height are required when specifying size',
+      );
+    }
+    const size = `${params.width}x${params.height}`;
     if (
       capabilities.supportedSizes.length > 0 &&
       !capabilities.supportedSizes.includes(size)

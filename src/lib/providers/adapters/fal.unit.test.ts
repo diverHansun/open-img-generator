@@ -131,4 +131,19 @@ describe('FalProvider', () => {
       expect(result.error.code).toBe('PROVIDER_ERROR');
     }
   });
+
+  it('cancels via cancelUrl', async () => {
+    mockFetch({
+      ok: true,
+      status: 202,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({}),
+    });
+
+    const result = await provider.cancel(makeJobHandle());
+    expect(result.status).toBe('cancelled');
+
+    const fetchCall = vi.mocked(global.fetch).mock.calls[0];
+    expect(fetchCall[1]?.method).toBe('PUT');
+  });
 });

@@ -11,7 +11,7 @@ import {
 } from '../db';
 import { getById } from '../providers';
 import type { NormalizedRequest } from '../providers';
-import { completeSync, advance, syncGenerationStatus } from './lifecycle';
+import { completeSync, advance, updateJobAndGeneration } from './lifecycle';
 import { NotFoundError } from '../errors';
 import type { GenerationWithJobsAndImages } from '../db';
 import type {
@@ -106,16 +106,16 @@ export async function submitGeneration(
         .run();
       break;
     case 'failed':
-      ctx.db
-        .update(generationJobs)
-        .set({
+      updateJobAndGeneration(
+        jobId,
+        generationId,
+        {
           status: 'failed',
           error: JSON.stringify(submitResult.error),
           updatedAt: new Date().toISOString(),
-        })
-        .where(eq(generationJobs.id, jobId))
-        .run();
-      syncGenerationStatus(generationId, ctx.db);
+        },
+        ctx.db,
+      );
       break;
   }
 

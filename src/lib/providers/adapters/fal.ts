@@ -7,8 +7,16 @@ import type {
   PollResult,
   JobHandle,
 } from '../types';
-import { getJson, postJson, ProviderHttpError, createProviderError } from '../http-client';
+import { getJson, postJson, putJson, ProviderHttpError, createProviderError } from '../http-client';
 import { falCapabilities } from '../capabilities/fal';
+
+function resolveSize(req: NormalizedRequest): string {
+  if (typeof req.providerOptions?.image_size === 'string') {
+    return req.providerOptions.image_size;
+  }
+  // fal flux/schnell uses enum sizes; ignore pixel width/height and aspectRatio here.
+  return 'square_hd';
+}
 
 function buildRequestBody(req: NormalizedRequest): Record<string, unknown> {
   const body: Record<string, unknown> = {
@@ -22,10 +30,7 @@ function buildRequestBody(req: NormalizedRequest): Record<string, unknown> {
     body.seed = req.seed;
   }
 
-  const size = req.providerOptions?.image_size ?? resolveSize(req);
-  if (size) {
-    body.image_size = size;
-  }
+  body.image_size = resolveSize(req);
 
   for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
     if (key !== 'image_size') {
@@ -34,16 +39,6 @@ function buildRequestBody(req: NormalizedRequest): Record<string, unknown> {
   }
 
   return body;
-}
-
-function resolveSize(req: NormalizedRequest): string | undefined {
-  if (req.width && req.height) {
-    return `${req.width}x${req.height}`;
-  }
-  if (req.aspectRatio) {
-    return req.aspectRatio;
-  }
-  return undefined;
 }
 
 function parseImages(payload: unknown): ProviderImageRef[] {
@@ -118,6 +113,7 @@ export class FalProvider implements ImageProvider {
       const statusData = (await getJson(
         handle.statusUrl,
         this.authHeaders(),
+        15_000,
       )) as Record<string, unknown>;
       const status = String(statusData.status ?? '').toUpperCase();
 
@@ -137,6 +133,7 @@ export class FalProvider implements ImageProvider {
       const responseData = (await getJson(
         handle.responseUrl,
         this.authHeaders(),
+        15_000,
       )) as Record<string, unknown>;
       const images = parseImages(responseData);
       if (images.length === 0) {
@@ -146,6 +143,22 @@ export class FalProvider implements ImageProvider {
         };
       }
       return { status: 'completed', images };
+    } catch (err) {
+      return { status: 'failed', error: this.mapError(err) };
+    }
+  }
+
+  async cancel(handle: JobHandle): Promise<PollResult> {
+    if (!handle.cancelUrl) {
+      return {
+        status: 'failed',
+        error: createProviderError(400, 'Cancel URL not available', false),
+      };
+    }
+
+    try {
+      await putJson(handle.cancelUrl, this.authHeaders(), 15_000);
+      return { status: 'cancelled' };
     } catch (err) {
       return { status: 'failed', error: this.mapError(err) };
     }

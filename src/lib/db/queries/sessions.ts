@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { sessions, generations } from '../schema';
 import type { Session } from '../schema';
+import { NotFoundError } from '../../errors';
 import {
   fetchGenerationDetails,
   type GenerationWithJobsAndImages,
@@ -90,7 +91,7 @@ export function getSession(
     .where(eq(sessions.id, id))
     .get();
   if (!session) {
-    throw new Error(`Session not found: ${id}`);
+    throw new NotFoundError(`Session not found: ${id}`);
   }
   const gens = listGenerationsBySession(id, client);
   return { ...session, generations: gens };
