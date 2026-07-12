@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { ReadableStream } from 'node:stream/web';
 import { randomUUID } from 'node:crypto';
 import { NotFoundError, StorageError } from '../errors';
 
@@ -91,5 +90,5 @@ export function getReadStream(storagePath: string): ReadableStream<Uint8Array> {
   }
 
   const nodeStream = fs.createReadStream(absolutePath);
-  return Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
+  return Readable.toWeb(nodeStream) as unknown as ReadableStream<Uint8Array>;
 }
