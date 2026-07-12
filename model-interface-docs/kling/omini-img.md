@@ -1,0 +1,1 @@
+https://klingai.com/document-api/apiReference/model/OmniImage
