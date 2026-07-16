@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^20.0.0 || ^22.0.0 || ^24.0.0"
+  },
   "description": "Open-source multi-provider AI image generator (backend-first, web-then-app).",
   "scripts": {
     "dev": "next dev",
