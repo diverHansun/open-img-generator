@@ -11,7 +11,13 @@ import {
 } from '../db';
 import { getById } from '../providers';
 import type { NormalizedRequest, ProviderCapabilities, ImageProvider } from '../providers';
-import { completeSync, advance, updateJobAndGeneration, syncGenerationStatus } from './lifecycle';
+import {
+  completeSync,
+  advance,
+  updateJobAndGeneration,
+  updateJobAndGenerationIfNotCancelled,
+  syncGenerationStatus,
+} from './lifecycle';
 import { NotFoundError } from '../errors';
 import type { GenerationWithJobsAndImages } from '../db';
 import type {
@@ -81,7 +87,7 @@ async function submitTarget(
       );
       return;
     }
-    updateJobAndGeneration(
+    updateJobAndGenerationIfNotCancelled(
       job.id,
       job.generationId,
       {
@@ -154,7 +160,7 @@ async function submitTarget(
       await completeSync(job.generationId, job.id, submitResult.images, client);
       return;
     case 'async':
-      updateJobAndGeneration(
+      updateJobAndGenerationIfNotCancelled(
         job.id,
         job.generationId,
         {
@@ -166,7 +172,7 @@ async function submitTarget(
       );
       return;
     case 'failed':
-      updateJobAndGeneration(
+      updateJobAndGenerationIfNotCancelled(
         job.id,
         job.generationId,
         {
@@ -191,7 +197,7 @@ async function submitTargetSafely(
   } catch (err) {
     const currentJob = getGenerationJob(job.id, client);
     if (currentJob?.status === 'cancelled' || currentJob?.cancelRequestedAt) return;
-    updateJobAndGeneration(
+    updateJobAndGenerationIfNotCancelled(
       job.id,
       job.generationId,
       {

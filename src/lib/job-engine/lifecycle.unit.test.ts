@@ -1,7 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createTestDb } from '../../../tests/helpers/db';
-import { createGenerationAndJob, getGenerationWithJobsAndImages } from '../db/queries/generations';
-import { storeImages, completeSync, advance } from './lifecycle';
+import {
+  createGenerationAndJob,
+  getGenerationWithJobsAndImages,
+  requestGenerationJobCancellation,
+  getGenerationJob,
+} from '../db/queries/generations';
+import {
+  storeImages,
+  completeSync,
+  advance,
+  updateJobAndGenerationIfNotCancelled,
+} from './lifecycle';
 import type { ProviderImageRef, PollResult } from '../providers';
 
 vi.mock('../storage', async (importOriginal) => {
@@ -137,6 +147,30 @@ describe('lifecycle', () => {
       const gen = getGenerationWithJobsAndImages('gen-1', db);
       expect(gen!.status).toBe('completed');
       expect(gen!.jobs[0].status).toBe('completed');
+    });
+
+    it('does not apply a late submit result after cancellation is requested', () => {
+      const { db } = createTestDb();
+      const job = seedGeneration(db);
+      const requestedAt = new Date().toISOString();
+
+      expect(requestGenerationJobCancellation(job.id, requestedAt, db)).toBe(true);
+      updateJobAndGenerationIfNotCancelled(
+        job.id,
+        job.generationId,
+        {
+          status: 'pending',
+          providerHandle: JSON.stringify({ externalId: 'late-submit' }),
+          updatedAt: new Date().toISOString(),
+        },
+        db,
+      );
+
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        status: 'pending',
+        providerHandle: null,
+        cancelRequestedAt: requestedAt,
+      });
     });
   });
 

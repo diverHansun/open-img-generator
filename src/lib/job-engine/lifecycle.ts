@@ -326,6 +326,39 @@ export function updateJobAndGeneration(
   });
 }
 
+/**
+ * Applies a submit-phase result only while cancellation has not been
+ * requested. Provider submission happens outside SQLite transactions, so a
+ * cancel request can win between the pre-submit read and this write. Keeping
+ * this guard separate from updateJobAndGeneration is intentional: the cancel
+ * path itself must still be able to write the terminal `cancelled` state.
+ */
+export function updateJobAndGenerationIfNotCancelled(
+  jobId: string,
+  generationId: string,
+  jobPatch: {
+    status: GenerationStatus;
+    error?: string | null;
+    providerHandle?: string | null;
+    pollLeaseUntil?: string | null;
+    nextPollAt?: string | null;
+    cancelRequestedAt?: string | null;
+    updatedAt: string;
+  },
+  client: DbClient,
+): void {
+  client.transaction((tx) => {
+    const updated = updateGenerationJobIfNotCancelled(jobId, jobPatch, tx);
+    if (!updated) return;
+    const status = deriveGenerationStatus(generationId, tx);
+    updateGeneration(
+      generationId,
+      { status, updatedAt: jobPatch.updatedAt },
+      tx,
+    );
+  });
+}
+
 export function syncGenerationStatus(
   generationId: string,
   client: DbClient,

@@ -224,11 +224,10 @@ if (!tableExists('sessions')) {
     generationSessionId?.notnull === 1;
   if (isLatest) {
     createAncillarySchema();
-    if (!columnInfo('generation_jobs', 'next_poll_at')) {
-      sqlite.exec('ALTER TABLE generation_jobs ADD COLUMN next_poll_at TEXT');
-    }
-    if (!columnInfo('generation_jobs', 'cancel_requested_at')) {
-      sqlite.exec('ALTER TABLE generation_jobs ADD COLUMN cancel_requested_at TEXT');
+    for (const column of ['poll_lease_until', 'next_poll_at', 'cancel_requested_at']) {
+      if (!columnInfo('generation_jobs', column)) {
+        sqlite.exec(`ALTER TABLE generation_jobs ADD COLUMN ${column} TEXT`);
+      }
     }
   } else {
     deletedOrphanGenerations = migrateLegacySchema();
