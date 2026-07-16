@@ -23,7 +23,7 @@
 
 ## 已知残留（后续里程碑）
 
-1. 完整 History / Gallery / Models 独立页面仍后置；本轮完成对应 API、web-client 与 Generate 门禁接线。
+1. History / Gallery / Models 目前采用单页 view-state，后续可按需要拆成 App Router 路由。
 2. **user-config** 仅文档占位，不阻塞当前单用户 `.env` 配置。
 
 ---
@@ -45,4 +45,4 @@
 | generations list sessionId / 瘦摘要 / 不 poll | 已锁定：§15.2 |
 | GET /api/projects/:id；Session 不删 | 已锁定：§12 |
 | 代码与文档差 | 后端 §12–§16 已实现；Session/History 列表只读 |
-| 范围 | 完整 History/Gallery 页面与 user-config 另拆 |
+| 范围 | History/Gallery/Models 当前已接入；user-config 另拆 |

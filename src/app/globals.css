@@ -731,6 +731,45 @@ select:focus-visible {
   color: var(--muted);
 }
 
+.image-result-tile {
+  isolation: isolate;
+}
+
+.image-preview-button {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.favorite-button {
+  position: absolute;
+  z-index: 2;
+  top: 7px;
+  right: 7px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 55%);
+  border-radius: 50%;
+  background: rgb(31 26 22 / 58%);
+  color: white;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.favorite-button:hover,
+.favorite-button.favorited {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .image-tile img {
   display: block;
   width: 100%;
@@ -836,6 +875,284 @@ select:focus-visible {
   align-items: center;
   margin-top: 34px;
   padding: 11px 15px;
+}
+
+.recent-generations,
+.library-page {
+  margin-top: 12px;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.recent-generations {
+  margin-top: 12px;
+}
+
+.library-page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.compact-heading {
+  margin-bottom: 9px;
+}
+
+.library-page-heading h2 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: -.02em;
+}
+
+.library-page-heading p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.library-item-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.library-item-meta strong {
+  font: 650 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.library-item-meta time,
+.library-item-meta > time {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.recent-generation-list,
+.history-list,
+.models-page-list,
+.provider-page-list {
+  display: grid;
+  gap: 8px;
+}
+
+.recent-generation-item,
+.history-item,
+.model-page-row,
+.provider-page-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+}
+
+.recent-generation-item > div:first-child,
+.history-item-copy,
+.model-page-row > div:first-child,
+.provider-page-row > div:first-child {
+  min-width: 0;
+}
+
+.recent-generation-item p,
+.history-item-copy p,
+.model-page-row span,
+.provider-page-row span {
+  overflow: hidden;
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-generation-actions,
+.history-item-images,
+.gallery-card-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.library-thumb {
+  display: block;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+}
+
+.library-thumb img,
+.gallery-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-empty {
+  display: grid;
+  gap: 5px;
+  padding: 22px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface) 75%, var(--bg));
+  color: var(--muted);
+  text-align: center;
+  font-size: 10px;
+}
+
+.library-empty strong {
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.library-inline-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--danger) 28%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--danger) 6%, var(--surface));
+  color: var(--danger);
+  font-size: 10px;
+}
+
+.library-load-more {
+  display: block;
+  margin: 12px auto 0;
+}
+
+.history-job-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.gallery-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+}
+
+.gallery-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  background: var(--bg);
+}
+
+.gallery-card-copy {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px 4px;
+}
+
+.gallery-card-copy strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-card-copy p {
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-card-copy small {
+  color: var(--faint);
+  font-size: 8px;
+}
+
+.gallery-card-actions {
+  justify-content: space-between;
+  padding: 4px 8px 8px;
+}
+
+.danger-action {
+  color: var(--danger);
+}
+
+.model-page-row > div:first-child,
+.provider-page-row > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.model-page-row small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.model-page-row strong,
+.provider-page-row strong {
+  font-size: 12px;
+}
+
+.model-page-row span,
+.provider-page-row span {
+  margin-top: 0;
+  font-size: 9px;
+}
+
+.toggle-button {
+  min-width: 76px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.toggle-button.enabled {
+  border-color: color-mix(in oklch, var(--ok) 35%, var(--border));
+  background: color-mix(in oklch, var(--ok) 10%, var(--surface));
+  color: var(--ok);
+}
+
+.advanced-textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .provider-health-summary,

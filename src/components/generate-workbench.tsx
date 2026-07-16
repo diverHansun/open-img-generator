@@ -9,6 +9,7 @@ import {
   GenerationPollingController,
   type GenerationStatus,
   type GenerationTarget,
+  type GenerationSummary,
   type GenerationView,
   type HealthView,
   type JobView,
@@ -17,6 +18,7 @@ import {
   type Session,
   type SubmitGenerationResponse,
 } from '@/lib/web-client';
+import { LibraryPage, type LibraryView } from './library-pages';
 
 const DEFAULT_PROMPT =
   'A cozy reading nook in a sunlit apartment, mid-century modern armchair, wooden bookshelf, potted plants, warm afternoon light, photorealistic.';
@@ -35,8 +37,8 @@ const TERMINAL_STATUSES = new Set<GenerationStatus>(['completed', 'failed', 'can
 
 const NAV_ITEMS = [
   { id: 'generate', label: 'Generate', enabled: true },
-  { id: 'history', label: 'History', enabled: false },
-  { id: 'gallery', label: 'Gallery', enabled: false },
+  { id: 'history', label: 'History', enabled: true },
+  { id: 'gallery', label: 'Gallery', enabled: true },
   { id: 'models', label: 'Models', enabled: true },
   { id: 'providers', label: 'Providers', enabled: true },
   { id: 'settings', label: 'Settings', enabled: false },
@@ -135,6 +137,8 @@ function ResultsGrid({
   providerNames,
   modelNames,
   onPreview,
+  onFavorite,
+  favoriteImageIds,
 }: {
   jobs: DisplayJob[];
   count: number;
@@ -142,6 +146,8 @@ function ResultsGrid({
   providerNames: Map<string, string>;
   modelNames: Map<string, string>;
   onPreview: (url: string) => void;
+  onFavorite: (imageId: string) => void;
+  favoriteImageIds: Set<string>;
 }) {
   const fallbackAspect = aspectRatio.replace(':', ' / ');
 
@@ -165,18 +171,35 @@ function ResultsGrid({
             </div>
 
             <div className="image-strip">
-              {job.images.map((image) => (
-                <button
-                  className="image-tile"
-                  type="button"
-                  key={image.id}
-                  style={{ aspectRatio: image.width && image.height ? `${image.width} / ${image.height}` : fallbackAspect }}
-                  onClick={() => onPreview(image.url)}
-                >
-                  <img src={image.url} alt={`${providerNames.get(job.provider) ?? job.provider} 生成结果`} />
-                  <span className="image-hover">Preview</span>
-                </button>
-              ))}
+              {job.images.map((image) => {
+                const isFavorite = favoriteImageIds.has(image.id);
+                return (
+                  <div
+                    className="image-tile image-result-tile"
+                    key={image.id}
+                    style={{ aspectRatio: image.width && image.height ? `${image.width} / ${image.height}` : fallbackAspect }}
+                  >
+                    <button
+                      className="image-preview-button"
+                      type="button"
+                      onClick={() => onPreview(image.url)}
+                      aria-label="Preview generated image"
+                    >
+                      <img src={image.url} alt={`${providerNames.get(job.provider) ?? job.provider} 生成结果`} />
+                      <span className="image-hover">Preview</span>
+                    </button>
+                    <button
+                      className={isFavorite ? 'favorite-button favorited' : 'favorite-button'}
+                      type="button"
+                      onClick={() => onFavorite(image.id)}
+                      aria-label={isFavorite ? 'Already favorited' : 'Add to favorites'}
+                      aria-pressed={isFavorite}
+                    >
+                      {isFavorite ? '♥' : '♡'}
+                    </button>
+                  </div>
+                );
+              })}
               {isWaiting
                 ? Array.from({ length: Math.max(count, 1) }, (_, index) => (
                     <div
@@ -202,6 +225,15 @@ function ResultsGrid({
   );
 }
 
+function EmptyRecentState() {
+  return (
+    <div className="library-empty recent-empty">
+      <strong>No recent generations</strong>
+      <span>完成一次提交后，当前 Session 的最近记录会显示在这里。</span>
+    </div>
+  );
+}
+
 export function GenerateWorkbench() {
   const apiClient = useMemo(() => createApiClient(), []);
   const pollingRef = useRef<GenerationPollingController | null>(null);
@@ -212,9 +244,11 @@ export function GenerateWorkbench() {
   const providerHealthRef = useRef<HTMLElement | null>(null);
 
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [providerCatalog, setProviderCatalog] = useState<ProviderInfo[]>([]);
   const [providerState, setProviderState] = useState<ProviderLoadState>('loading');
   const [health, setHealth] = useState<HealthView | null>(null);
   const [healthState, setHealthState] = useState<HealthLoadState>('loading');
+  const [activeView, setActiveView] = useState<'generate' | LibraryView>('generate');
   const [projects, setProjects] = useState<Project[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [assetState, setAssetState] = useState<AssetLoadState>('loading');
@@ -232,6 +266,11 @@ export function GenerateWorkbench() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [negativePrompt, setNegativePrompt] = useState('');
+  const [recentGenerations, setRecentGenerations] = useState<GenerationSummary[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+  const [recentError, setRecentError] = useState<string | null>(null);
+  const [favoriteImageIds, setFavoriteImageIds] = useState<Set<string>>(() => new Set());
 
   const applyProviders = useCallback((nextProviders: ProviderInfo[]) => {
     setProviders(nextProviders);
@@ -265,6 +304,7 @@ export function GenerateWorkbench() {
     if (!mountedRef.current) return;
 
     if (providerResult.status === 'fulfilled') {
+      setProviderCatalog(providerResult.value);
       const disabled = new Set(
         preferenceResult.status === 'fulfilled'
           ? preferenceResult.value.items
@@ -338,6 +378,41 @@ export function GenerateWorkbench() {
       cancelled = true;
     };
   }, [apiClient, currentProjectId]);
+
+  const loadRecentGenerations = useCallback(async () => {
+    if (!currentSessionId) {
+      setRecentGenerations([]);
+      setRecentError(null);
+      return;
+    }
+    setRecentLoading(true);
+    try {
+      const page = await apiClient.listGenerations({ sessionId: currentSessionId, limit: 10 });
+      setRecentGenerations(page.items);
+      setRecentError(null);
+    } catch (reason) {
+      setRecentError(reason instanceof Error ? reason.message : '最近历史加载失败');
+    } finally {
+      setRecentLoading(false);
+    }
+  }, [apiClient, currentSessionId]);
+
+  useEffect(() => {
+    void loadRecentGenerations();
+  }, [loadRecentGenerations, generation?.updatedAt]);
+
+  const loadFavoriteIds = useCallback(async () => {
+    try {
+      const page = await apiClient.listFavorites({ limit: 100 });
+      setFavoriteImageIds(new Set(page.items.map((item) => item.imageId)));
+    } catch {
+      // Favorites remain optional for the generation path; the Gallery page exposes the error.
+    }
+  }, [apiClient]);
+
+  useEffect(() => {
+    void loadFavoriteIds();
+  }, [loadFavoriteIds]);
 
   const beginPolling = useCallback(async (selfLink: string, sequence: number) => {
     const controller = new GenerationPollingController(apiClient);
@@ -469,6 +544,15 @@ export function GenerateWorkbench() {
     }
   };
 
+  const addFavorite = async (imageId: string) => {
+    try {
+      await apiClient.addFavorite(imageId);
+      setFavoriteImageIds((current) => new Set(current).add(imageId));
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : '收藏失败');
+    }
+  };
+
   const createProject = async () => {
     const title = newProjectTitle.trim();
     if (!title) return;
@@ -522,6 +606,9 @@ export function GenerateWorkbench() {
           mode: 'text-to-image',
           aspectRatio,
           count,
+          negativePrompt: controls.canSetNegativePrompt && negativePrompt.trim()
+            ? negativePrompt.trim()
+            : undefined,
           seed: controls.canSetSeed && seed.trim() ? Number(seed) : undefined,
         },
         providers,
@@ -559,9 +646,22 @@ export function GenerateWorkbench() {
   };
 
   const navigate = (id: typeof NAV_ITEMS[number]['id']) => {
-    if (id === 'generate') promptRef.current?.focus();
-    if (id === 'models') inspectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    if (id === 'providers') providerHealthRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (id === 'settings') return;
+    setActiveView(id as 'generate' | LibraryView);
+    if (id === 'generate') {
+      void loadWorkspace();
+      void loadFavoriteIds();
+      window.setTimeout(() => promptRef.current?.focus(), 0);
+    }
+  };
+
+  const openGeneration = (id: string) => {
+    setActiveView('generate');
+    const selfLink = `/api/generations/${encodeURIComponent(id)}`;
+    window.localStorage.setItem(ACTIVE_GENERATION_KEY, selfLink);
+    window.history.replaceState(null, '', `/?generation=${encodeURIComponent(id)}`);
+    // A detail open is intentionally the only list-to-detail action that may advance poll.
+    window.location.reload();
   };
 
   const hasActiveGeneration = Boolean(pending || generation);
@@ -576,6 +676,19 @@ export function GenerateWorkbench() {
       ? 'Backend connected'
       : 'Backend unavailable';
 
+  const pageTitle = activeView === 'generate'
+    ? 'Generate'
+    : activeView[0].toUpperCase() + activeView.slice(1);
+  const pageDescription = activeView === 'generate'
+    ? 'Compose a prompt, choose models and settings, and generate images.'
+    : activeView === 'history'
+      ? 'Browse recent generations by Project and Session.'
+      : activeView === 'gallery'
+        ? 'Browse the images you chose to keep.'
+        : activeView === 'models'
+          ? 'Manage the enabled model pool used by Generate.'
+          : 'Inspect configured providers and backend health.';
+
   return (
     <div className="app-shell">
       <aside className="left-rail">
@@ -583,7 +696,7 @@ export function GenerateWorkbench() {
           {NAV_ITEMS.map((item) => (
             <button
               type="button"
-              className={item.id === 'generate' ? 'nav-item active' : 'nav-item'}
+              className={item.id === activeView ? 'nav-item active' : 'nav-item'}
               key={item.id}
               aria-label={item.label}
               disabled={!item.enabled}
@@ -605,8 +718,8 @@ export function GenerateWorkbench() {
       <main className="workspace">
         <header className="page-header">
           <div>
-            <h1>Generate</h1>
-            <p>Compose a prompt, choose models and settings, and generate images.</p>
+            <h1>{pageTitle}</h1>
+            <p>{pageDescription}</p>
           </div>
           <div className={`header-status health-${healthState}`}>
             <span className="live-dot" />
@@ -666,11 +779,13 @@ export function GenerateWorkbench() {
           </form>
         </section>
 
-        {!currentSessionId && assetState !== 'loading' ? (
-          <div className="workspace-gate" role="status">
-            先选择或创建 Project，再选择或创建 Session，工作台才允许提交生成。
-          </div>
-        ) : null}
+        {activeView === 'generate' ? (
+          <>
+            {!currentSessionId && assetState !== 'loading' ? (
+              <div className="workspace-gate" role="status">
+                先选择或创建 Project，再选择或创建 Session，工作台才允许提交生成。
+              </div>
+            ) : null}
 
         <section className="prompt-panel" aria-labelledby="prompt-title">
           <div className="panel-heading">
@@ -796,6 +911,8 @@ export function GenerateWorkbench() {
                 providerNames={providerNames}
                 modelNames={modelNames}
                 onPreview={setPreviewUrl}
+                onFavorite={(imageId) => void addFavorite(imageId)}
+                favoriteImageIds={favoriteImageIds}
               />
             </article>
           ) : (
@@ -808,6 +925,44 @@ export function GenerateWorkbench() {
               <button type="button" onClick={() => promptRef.current?.focus()} disabled={providers.length === 0}>Start generating</button>
             </article>
           )}
+        </section>
+
+        <section className="recent-generations" aria-labelledby="recent-generations-title">
+          <div className="library-page-heading compact-heading">
+            <div>
+              <h2 id="recent-generations-title">Recent 10</h2>
+              <p>当前 Session 的只读摘要；点击 Open detail 才会进入唯一可推进 poll 的详情接口。</p>
+            </div>
+            <button type="button" className="secondary-button" onClick={() => void loadRecentGenerations()} disabled={recentLoading || !currentSessionId}>
+              {recentLoading ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
+          {recentError ? <div className="library-inline-error" role="alert">{recentError}</div> : null}
+          {!recentError && !recentLoading && currentSessionId && recentGenerations.length === 0 ? (
+            <EmptyRecentState />
+          ) : null}
+          <div className="recent-generation-list">
+            {recentGenerations.map((item) => (
+              <article className="recent-generation-item" key={item.id}>
+                <div>
+                  <div className="library-item-meta">
+                    <strong>#{item.id.slice(0, 8)}</strong>
+                    <span className={`status-badge status-${item.status}`}><span className="status-dot" />{statusLabel(item.status)}</span>
+                    <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time>
+                  </div>
+                  <p>{item.prompt}</p>
+                </div>
+                <div className="recent-generation-actions">
+                  {item.images.slice(0, 2).map((image) => (
+                    <button type="button" className="library-thumb" key={image.id} onClick={() => setPreviewUrl(image.url)} aria-label="Preview recent result">
+                      <img src={image.url} alt="Recent result" />
+                    </button>
+                  ))}
+                  <button type="button" className="text-action" onClick={() => openGeneration(item.id)}>Open detail</button>
+                </div>
+              </article>
+            ))}
+          </div>
         </section>
 
         <section className="provider-health-card" ref={providerHealthRef} aria-label="Provider status">
@@ -825,9 +980,22 @@ export function GenerateWorkbench() {
             <Icon name="refresh" /> Refresh status
           </button>
         </section>
+          </>
+        ) : (
+          <LibraryPage
+            view={activeView}
+            apiClient={apiClient}
+            currentSessionId={currentSessionId}
+            providers={providerCatalog}
+            health={health}
+            healthLabel={healthLabel}
+            onPreview={setPreviewUrl}
+            onOpenGeneration={openGeneration}
+          />
+        )}
       </main>
 
-      <aside className="inspector" ref={inspectorRef}>
+      {activeView === 'generate' ? <aside className="inspector" ref={inspectorRef}>
         <section className="inspector-section">
           <div className="inspector-heading">
             <h2>Models</h2>
@@ -910,6 +1078,20 @@ export function GenerateWorkbench() {
             </span>
           </label>
 
+          {controls.canSetNegativePrompt ? (
+            <label className="inspector-control">
+              <span>Negative prompt</span>
+              <textarea
+                className="advanced-textarea"
+                value={negativePrompt}
+                onChange={(event) => setNegativePrompt(event.target.value)}
+                placeholder="What should be excluded?"
+                maxLength={1_000}
+                disabled={isGenerating}
+              />
+            </label>
+          ) : null}
+
           <p className="parameter-note">参数来自后端 Provider capabilities；多选模型时仅允许提交共同支持的值。</p>
         </section>
 
@@ -917,7 +1099,7 @@ export function GenerateWorkbench() {
           <div><Icon name="database" /><span><strong>API connection</strong><small>{healthLabel}</small></span></div>
           <button type="button" aria-label="刷新后端连接" onClick={() => void loadWorkspace()}><Icon name="refresh" /></button>
         </section>
-      </aside>
+      </aside> : null}
 
       {previewUrl ? (
         <div className="preview-overlay" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setPreviewUrl(null)}>

@@ -94,5 +94,5 @@ src/
 1. ✅ `src/lib/db` schema + 显式幂等迁移（projects / favorites / prefs；收紧 NOT NULL；删除无 Session 旧 generation）
 2. ✅ `src/lib/library/` + §14 API 路由；Session/History 列表只读
 3. ✅ job-engine / 测试改为 sessionId 必填；扇出上限 8，目标提交并发隔离
-4. ✅ web-client 全资源 API；Generate 工作台接入 Project/Session 门禁与模型偏好
-5. 后续 UI 里程碑：完整 History / Gallery / Models 页面；user-config 另开
+4. ✅ web-client 全资源 API；Generate 工作台接入 Project/Session 门禁、Recent 10、收藏和 negativePrompt
+5. ✅ 同页 view-state 接入 History / Gallery / Models / Providers；user-config 另开

@@ -52,13 +52,10 @@ Workbench 在 pending 阶段即渲染 job 行（可用 POST 回显或乐观占�
 
 ```
 src/app/page.tsx                 # 壳 + 视图切换（或后续 app router 多路由）
-src/components/
+  src/components/
   project-gate.tsx
   generate-workbench.tsx         # 已有，扩展
-  history-page.tsx               # 新
-  gallery-page.tsx               # 新
-  models-page.tsx                # 新
-  providers-page.tsx             # 新
+  library-pages.tsx              # History / Gallery / Models / Providers view-state 页面
 src/lib/web-client/              # API/poll/capabilities（见 web-client 文档）
 ```
 
