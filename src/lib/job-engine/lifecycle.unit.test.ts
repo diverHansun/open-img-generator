@@ -140,7 +140,7 @@ describe('lifecycle', () => {
   });
 
   describe('advance', () => {
-    it('skips when optimistic lock fails', async () => {
+    it('skips when job is already terminal', async () => {
       const { db } = createTestDb();
       const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
       // Simulate another request already advanced the job to completed.
@@ -151,6 +151,47 @@ describe('lifecycle', () => {
 
       await advance({ ...job, status: 'pending' }, db);
       expect(poll).not.toHaveBeenCalled();
+    });
+
+    it('polls a running job without overwriting its real status to claim a lock', async () => {
+      const { db } = createTestDb();
+      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
+      db.update(generationJobs).set({ status: 'running' }).where(eq(generationJobs.id, job.id)).run();
+
+      const poll = vi.fn().mockResolvedValue({ status: 'pending' } as PollResult);
+      vi.mocked(providers.getById).mockReturnValue({
+        id: 'fal',
+        poll,
+      } as unknown as ReturnType<typeof providers.getById>);
+
+      await advance({ ...job, status: 'running' }, db);
+
+      expect(poll).toHaveBeenCalledTimes(1);
+      const stored = getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]!;
+      expect(stored.status).toBe('pending');
+      expect(stored.pollLeaseUntil).toBeNull();
+    });
+
+    it('allows only one concurrent poll while a lease is active', async () => {
+      const { db } = createTestDb();
+      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
+      let finishPoll!: (result: PollResult) => void;
+      const poll = vi.fn().mockImplementation(
+        () => new Promise<PollResult>((resolve) => { finishPoll = resolve; }),
+      );
+      vi.mocked(providers.getById).mockReturnValue({
+        id: 'fal',
+        poll,
+      } as unknown as ReturnType<typeof providers.getById>);
+
+      const first = advance(job, db);
+      const second = advance(job, db);
+      await Promise.resolve();
+      expect(poll).toHaveBeenCalledTimes(1);
+
+      finishPoll({ status: 'pending' });
+      await Promise.all([first, second]);
+      expect(getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]!.pollLeaseUntil).toBeNull();
     });
 
     it('polls completed and stores images', async () => {

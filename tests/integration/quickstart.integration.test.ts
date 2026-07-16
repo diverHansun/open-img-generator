@@ -80,11 +80,9 @@ describe('quickstart vertical slice', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: 'zenmux',
-          model: 'openai/gpt-image-2',
+          targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
           prompt: 'A cat wearing a space helmet',
-          width: 1024,
-          height: 1024,
+          aspectRatio: '1:1',
         }),
       }),
     );
@@ -153,8 +151,7 @@ describe('quickstart vertical slice', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: 'fal',
-          model: 'fal-ai/flux/schnell',
+          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
           prompt: 'A dog',
           seed: 42,
           sessionId: session.id,
@@ -183,5 +180,22 @@ describe('quickstart vertical slice', () => {
     const sessionDetailBody = await sessionDetail.json();
     expect(sessionDetailBody.generations).toHaveLength(1);
     expect(sessionDetailBody.generations[0].status).toBe('completed');
+  });
+
+  it('rejects the retired top-level provider/model request shape', async () => {
+    const response = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'fal',
+          model: 'fal-ai/flux/schnell',
+          prompt: 'A cat',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: 'At least one target is required' });
   });
 });

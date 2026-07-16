@@ -39,23 +39,46 @@ function generateStoragePath(contentType: string): string {
 }
 
 export async function downloadAndStore(url: string): Promise<DownloadAndStoreResult> {
-  let response: Response;
-  try {
-    response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-  } catch (err) {
-    throw new StorageError(`Failed to download image from ${url}`, err);
-  }
-
-  if (!response.ok) {
-    throw new StorageError(`Download failed with status ${response.status}: ${url}`);
-  }
-
-  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? 'application/octet-stream';
+  let contentType = 'application/octet-stream';
   let buffer: ArrayBuffer;
-  try {
-    buffer = await response.arrayBuffer();
-  } catch (err) {
-    throw new StorageError(`Failed to read image body from ${url}`, err);
+
+  if (url.startsWith('data:')) {
+    const match = /^data:([^;,]+)?;base64,(.*)$/s.exec(url);
+    if (!match) {
+      throw new StorageError('Invalid Base64 image data URL');
+    }
+
+    contentType = match[1] ?? contentType;
+    try {
+      const decoded = Buffer.from(match[2]!, 'base64');
+      if (decoded.length === 0) {
+        throw new Error('empty image payload');
+      }
+      buffer = decoded.buffer.slice(
+        decoded.byteOffset,
+        decoded.byteOffset + decoded.byteLength,
+      );
+    } catch (err) {
+      throw new StorageError('Failed to decode Base64 image data', err);
+    }
+  } else {
+    let response: Response;
+    try {
+      response = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+    } catch (err) {
+      throw new StorageError(`Failed to download image from ${url}`, err);
+    }
+
+    if (!response.ok) {
+      throw new StorageError(`Download failed with status ${response.status}: ${url}`);
+    }
+
+    contentType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? contentType;
+    try {
+      buffer = await response.arrayBuffer();
+    } catch (err) {
+      throw new StorageError(`Failed to read image body from ${url}`, err);
+    }
   }
 
   ensureRootExists();

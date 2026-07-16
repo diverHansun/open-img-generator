@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lte, or } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { generations, generationJobs, images } from '../schema';
 import type { Generation, GenerationJob, Image } from '../schema';
@@ -30,6 +30,7 @@ export type CreateGenerationJobParams = {
   provider: string;
   model: string;
   status: GenerationStatus;
+  pollLeaseUntil?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -38,6 +39,7 @@ export type UpdateGenerationJobPatch = {
   status?: GenerationStatus;
   providerHandle?: string | null;
   error?: string | null;
+  pollLeaseUntil?: string | null;
   updatedAt: string;
 };
 
@@ -47,11 +49,15 @@ export type GenerationWithJobsAndImages = Generation & {
   images: Image[];
 };
 
-export function createGenerationAndJob(
+export function createGenerationWithJobs(
   genParams: CreateGenerationParams,
-  jobParams: CreateGenerationJobParams,
+  jobParams: CreateGenerationJobParams[],
   client: DbClient = db,
-): { generation: Generation; job: GenerationJob } {
+): { generation: Generation; jobs: GenerationJob[] } {
+  if (jobParams.length === 0) {
+    throw new Error('A generation requires at least one job');
+  }
+
   return client.transaction((tx) => {
     tx.insert(generations)
       .values({
@@ -65,17 +71,20 @@ export function createGenerationAndJob(
       .run();
 
     tx.insert(generationJobs)
-      .values({
-        id: jobParams.id,
-        generationId: jobParams.generationId,
-        provider: jobParams.provider,
-        model: jobParams.model,
-        status: jobParams.status,
-        providerHandle: null,
-        error: null,
-        createdAt: jobParams.createdAt,
-        updatedAt: jobParams.updatedAt,
-      })
+      .values(
+        jobParams.map((job) => ({
+          id: job.id,
+          generationId: job.generationId,
+          provider: job.provider,
+          model: job.model,
+          status: job.status,
+          providerHandle: null,
+          error: null,
+          pollLeaseUntil: job.pollLeaseUntil ?? null,
+          createdAt: job.createdAt,
+          updatedAt: job.updatedAt,
+        })),
+      )
       .run();
 
     const generation = tx
@@ -83,13 +92,22 @@ export function createGenerationAndJob(
       .from(generations)
       .where(eq(generations.id, genParams.id))
       .get()!;
-    const job = tx
+    const jobs = tx
       .select()
       .from(generationJobs)
-      .where(eq(generationJobs.id, jobParams.id))
-      .get()!;
-    return { generation, job };
+      .where(eq(generationJobs.generationId, genParams.id))
+      .all();
+    return { generation, jobs };
   });
+}
+
+export function createGenerationAndJob(
+  genParams: CreateGenerationParams,
+  jobParams: CreateGenerationJobParams,
+  client: DbClient = db,
+): { generation: Generation; job: GenerationJob } {
+  const { generation, jobs } = createGenerationWithJobs(genParams, [jobParams], client);
+  return { generation, job: jobs[0]! };
 }
 
 export function updateGeneration(
@@ -123,6 +141,7 @@ export function updateGenerationJob(
       status: patch.status,
       providerHandle: patch.providerHandle,
       error: patch.error,
+      pollLeaseUntil: patch.pollLeaseUntil,
       updatedAt: patch.updatedAt,
     })
     .where(eq(generationJobs.id, id))
@@ -132,6 +151,29 @@ export function updateGenerationJob(
     .from(generationJobs)
     .where(eq(generationJobs.id, id))
     .get()!;
+}
+
+export function tryClaimPollLease(
+  id: string,
+  now: string,
+  leaseUntil: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set({ pollLeaseUntil: leaseUntil, updatedAt: now })
+    .where(
+      and(
+        eq(generationJobs.id, id),
+        inArray(generationJobs.status, ['pending', 'running']),
+        or(
+          isNull(generationJobs.pollLeaseUntil),
+          lte(generationJobs.pollLeaseUntil, now),
+        ),
+      ),
+    )
+    .run();
+  return result.changes > 0;
 }
 
 export function getGenerationWithJobsAndImages(
@@ -183,9 +225,9 @@ export function aggregateGenerationStatus(
   jobs: Pick<GenerationJob, 'status'>[],
 ): GenerationStatus {
   const statuses = jobs.map((j) => j.status);
-  if (statuses.some((s) => s === 'failed')) return 'failed';
-  if (statuses.some((s) => s === 'cancelled')) return 'cancelled';
-  if (statuses.every((s) => s === 'completed')) return 'completed';
   if (statuses.some((s) => s === 'running')) return 'running';
-  return 'pending';
+  if (statuses.some((s) => s === 'pending')) return 'pending';
+  if (statuses.some((s) => s === 'completed')) return 'completed';
+  if (statuses.some((s) => s === 'cancelled')) return 'cancelled';
+  return 'failed';
 }

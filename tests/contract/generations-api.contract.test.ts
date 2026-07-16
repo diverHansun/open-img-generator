@@ -25,7 +25,7 @@ describe('POST /api/generations', () => {
       new Request('http://localhost:3000/api/generations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat' }),
+        body: JSON.stringify({ targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }], prompt: 'A cat' }),
       }),
     );
 
@@ -43,7 +43,7 @@ describe('POST /api/generations', () => {
       new Request('http://localhost:3000/api/generations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat' }),
+        body: JSON.stringify({ targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }], prompt: 'A cat' }),
       }),
     );
 

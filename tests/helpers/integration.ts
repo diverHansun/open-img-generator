@@ -31,6 +31,7 @@ export function createIntegrationDb() {
       status TEXT NOT NULL,
       provider_handle TEXT,
       error TEXT,
+      poll_lease_until TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

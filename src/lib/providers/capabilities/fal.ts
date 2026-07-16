@@ -15,7 +15,7 @@ export const falCapabilities: ProviderCapabilities[] = [
       'landscape_4_3',
       'landscape_16_9',
     ],
-    supportedAspectRatios: [],
+    supportedAspectRatios: ['1:1', '4:3', '3:4', '16:9', '9:16'],
     supportsNegativePrompt: false,
     supportsSeed: true,
     protocol: 'async',

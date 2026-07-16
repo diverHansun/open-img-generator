@@ -20,66 +20,103 @@ describe('validator', () => {
 
   function makeParams(overrides: Partial<SubmitGenerationParams> = {}): SubmitGenerationParams {
     return {
-      provider: 'fal',
-      model: 'fal-ai/flux/schnell',
+      targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
       prompt: 'A cat',
       ...overrides,
     };
   }
 
-  it('passes for valid fal request', () => {
+  it('passes for a valid Fal request', () => {
     expect(() => validate(makeParams(), { db })).not.toThrow();
   });
 
-  it('throws when provider not enabled', () => {
+  it('rejects an empty target list', () => {
+    expect(() => validate(makeParams({ targets: [] }), { db })).toThrow('At least one target');
+  });
+
+  it('rejects duplicate targets', () => {
+    expect(() =>
+      validate(
+        makeParams({
+          targets: [
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+          ],
+        }),
+        { db },
+      ),
+    ).toThrow('Duplicate target');
+  });
+
+  it('throws when a target provider is not enabled', () => {
     delete process.env.FAL_KEY;
-    expect(() => validate(makeParams(), { db })).toThrow('Provider not enabled');
+    expect(() => validate(makeParams(), { db })).toThrow('Provider not enabled: fal');
   });
 
-  it('throws when model not found', () => {
-    expect(() => validate(makeParams({ model: 'unknown/model' }), { db })).toThrow('Model not found');
+  it('throws when a target model is not found', () => {
+    expect(() =>
+      validate(makeParams({ targets: [{ provider: 'fal', model: 'unknown/model' }] }), { db }),
+    ).toThrow('Model not found');
   });
 
-  it('throws when count exceeds max', () => {
+  it('throws when count exceeds a selected target maximum', () => {
     expect(() => validate(makeParams({ count: 10 }), { db })).toThrow('Count 10 exceeds max 4');
   });
 
-  it('throws when sync provider count > 1', () => {
+  it('throws when a sync target uses count greater than one', () => {
     expect(() =>
-      validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', count: 2 }), { db }),
+      validate(
+        makeParams({
+          targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
+          count: 2,
+        }),
+        { db },
+      ),
     ).toThrow('Sync provider supports count=1 only in MVP');
   });
 
-  it('throws when seed not supported', () => {
+  it('allows a seed when only some selected targets support it', () => {
     expect(() =>
-      validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', seed: 42 }), { db }),
-    ).toThrow('Seed not supported');
+      validate(
+        makeParams({
+          targets: [
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+            { provider: 'zenmux', model: 'openai/gpt-image-2' },
+          ],
+          seed: 42,
+        }),
+        { db },
+      ),
+    ).not.toThrow();
   });
 
-  it('throws when negative prompt not supported', () => {
+  it('rejects a negative prompt when any selected target does not support it', () => {
     expect(() =>
       validate(makeParams({ negativePrompt: 'bad' }), { db }),
-    ).toThrow('Negative prompt not supported');
+    ).toThrow('Negative prompt not supported by every selected target');
   });
 
-  it('throws when session not found', () => {
+  it('rejects an aspect ratio not supported by every selected target', () => {
+    expect(() =>
+      validate(
+        makeParams({
+          targets: [
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+            { provider: 'zenmux', model: 'openai/gpt-image-2' },
+          ],
+          aspectRatio: '16:9',
+        }),
+        { db },
+      ),
+    ).toThrow('Unsupported aspect ratio');
+  });
+
+  it('throws when session is not found', () => {
     expect(() => validate(makeParams({ sessionId: 'missing' }), { db })).toThrow('Session not found');
   });
 
   it('passes when session exists', () => {
     createSession({ id: 's1', title: 'Test', createdAt: 'now', updatedAt: 'now' }, db);
     expect(() => validate(makeParams({ sessionId: 's1' }), { db })).not.toThrow();
-  });
-
-  it('throws for unsupported size', () => {
-    expect(() =>
-      validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', width: 999, height: 999 }), { db }),
-    ).toThrow('Unsupported size');
-  });
-
-  it('throws when only width is provided', () => {
-    expect(() =>
-      validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', width: 1024 }), { db }),
-    ).toThrow('Both width and height are required');
   });
 });

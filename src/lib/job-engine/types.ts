@@ -1,13 +1,15 @@
 import type { ProviderId, ProviderMode } from '../providers/types';
 
-export type SubmitGenerationParams = {
+export type GenerationTarget = {
   provider: ProviderId;
   model: string;
+};
+
+export type SubmitGenerationParams = {
+  targets: GenerationTarget[];
   prompt: string;
   sessionId?: string;
   mode?: ProviderMode;
-  width?: number;
-  height?: number;
   aspectRatio?: string;
   count?: number;
   negativePrompt?: string;

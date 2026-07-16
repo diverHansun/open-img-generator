@@ -50,13 +50,30 @@ function parseImages(payload: unknown): ProviderImageRef[] {
   const rawData = data.data;
   if (!Array.isArray(rawData)) return [];
 
+  const outputFormat = typeof data.output_format === 'string' ? data.output_format : 'png';
+  const formatContentType: Record<string, string> = {
+    jpeg: 'image/jpeg',
+    jpg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+  };
+
   return rawData.map((item, idx) => {
     const img = item as Record<string, unknown>;
+    const url = typeof img.url === 'string' ? img.url : '';
+    const base64 = typeof img.b64_json === 'string' ? img.b64_json : '';
+    const contentType =
+      typeof img.content_type === 'string'
+        ? img.content_type
+        : formatContentType[outputFormat] ?? 'image/png';
     return {
-      url: String(img.url ?? ''),
+      // ZenMux GPT image models return b64_json by default. Keeping it as a
+      // data URL lets the shared storage layer persist both URL and Base64
+      // provider responses without leaking provider-specific logic into it.
+      url: url || (base64 ? `data:${contentType};base64,${base64}` : ''),
       width: null,
       height: null,
-      contentType: 'image/png',
+      contentType,
       index: idx,
       revisedPrompt:
         typeof img.revised_prompt === 'string' ? img.revised_prompt : undefined,

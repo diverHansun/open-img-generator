@@ -38,8 +38,7 @@ describe('sync generation end-to-end (zenmux)', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: 'zenmux',
-          model: 'openai/gpt-image-2',
+          targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
           prompt: 'A cat',
         }),
       }),

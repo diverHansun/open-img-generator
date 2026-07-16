@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createTestDb } from '../../../tests/helpers/db';
 import { createSession } from '../db/queries/sessions';
-import { sessions } from '../db';
+import { sessions, getGenerationWithJobsAndImages } from '../db';
 import { submitGeneration, getGeneration } from './orchestrator';
 import * as providers from '../providers';
 import * as storage from '../storage';
@@ -54,7 +54,7 @@ describe('orchestrator', () => {
             modes: ['text-to-image'],
             maxCount: 4,
             supportedSizes: ['square_hd'],
-            supportedAspectRatios: [],
+            supportedAspectRatios: ['1:1'],
             supportsNegativePrompt: false,
             supportsSeed: true,
             protocol: 'async',
@@ -64,6 +64,16 @@ describe('orchestrator', () => {
       ]),
       ...config,
     } as ImageProvider;
+  }
+
+  function makeParams(
+    overrides: Partial<Parameters<typeof submitGeneration>[0]> = {},
+  ): Parameters<typeof submitGeneration>[0] {
+    return {
+      targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
+      prompt: 'A cat',
+      ...overrides,
+    };
   }
 
   describe('submitGeneration', () => {
@@ -86,7 +96,7 @@ describe('orchestrator', () => {
       );
 
       const result = await submitGeneration(
-        { provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat' },
+        makeParams(),
         { db },
       );
 
@@ -129,7 +139,7 @@ describe('orchestrator', () => {
       );
 
       const result = await submitGeneration(
-        { provider: 'zenmux', model: 'openai/gpt-image-2', prompt: 'A cat' },
+        makeParams({ targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }] }),
         { db },
       );
 
@@ -147,11 +157,128 @@ describe('orchestrator', () => {
       );
 
       const result = await submitGeneration(
-        { provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat' },
+        makeParams(),
         { db },
       );
 
       expect(result.status).toBe('failed');
+    });
+
+    it('fans out targets independently and omits seed for unsupported models', async () => {
+      vi.mocked(storage.downloadAndStore).mockResolvedValue({
+        storagePath: '2026/07/img.png',
+        contentType: 'image/png',
+        sizeBytes: 1234,
+      });
+      const falSubmit = vi.fn().mockResolvedValue({
+        kind: 'async',
+        handle: {
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          externalId: 'req-1',
+          statusUrl: 'https://status',
+          responseUrl: 'https://response',
+          cancelUrl: null,
+          submittedAt: now,
+        },
+      } as ProviderSubmitResult);
+      const zenmuxSubmit = vi.fn().mockResolvedValue({
+        kind: 'sync',
+        images: [{ url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 }],
+      } as ProviderSubmitResult);
+      const fal = makeProvider({ submit: falSubmit });
+      const zenmux = makeProvider({
+        id: 'zenmux',
+        submit: zenmuxSubmit,
+        capabilities: new Map([
+          [
+            'openai/gpt-image-2',
+            {
+              providerId: 'zenmux',
+              model: 'openai/gpt-image-2',
+              displayName: 'GPT Image 2',
+              modes: ['text-to-image'],
+              maxCount: 4,
+              supportedSizes: ['1024x1024'],
+              supportedAspectRatios: ['1:1'],
+              supportsNegativePrompt: false,
+              supportsSeed: false,
+              protocol: 'sync',
+              defaultSize: '1024x1024',
+            },
+          ],
+        ]),
+      });
+      vi.mocked(providers.getById).mockImplementation((id) =>
+        id === 'fal' ? fal : id === 'zenmux' ? zenmux : undefined,
+      );
+
+      const result = await submitGeneration(
+        makeParams({
+          targets: [
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+            { provider: 'zenmux', model: 'openai/gpt-image-2' },
+          ],
+          aspectRatio: '1:1',
+          seed: 42,
+        }),
+        { db },
+      );
+
+      expect(result.status).toBe('pending');
+      expect(falSubmit).toHaveBeenCalledWith(expect.objectContaining({ seed: 42 }), 'fal-ai/flux/schnell');
+      expect(zenmuxSubmit).toHaveBeenCalledWith(expect.objectContaining({ seed: undefined }), 'openai/gpt-image-2');
+      expect(getGenerationWithJobsAndImages(result.generationId, db)!.jobs).toHaveLength(2);
+    });
+
+    it('keeps a completed target visible when a sibling target fails', async () => {
+      vi.mocked(storage.downloadAndStore).mockResolvedValue({
+        storagePath: '2026/07/img.png',
+        contentType: 'image/png',
+        sizeBytes: 1234,
+      });
+      const fal = makeProvider({
+        submit: vi.fn().mockResolvedValue({
+          kind: 'failed',
+          error: { code: 'PROVIDER_ERROR', message: 'Fal down', retryable: false },
+        } as ProviderSubmitResult),
+      });
+      const zenmux = makeProvider({
+        id: 'zenmux',
+        submit: vi.fn().mockResolvedValue({
+          kind: 'sync',
+          images: [{ url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 }],
+        } as ProviderSubmitResult),
+        capabilities: new Map([
+          [
+            'openai/gpt-image-2',
+            {
+              providerId: 'zenmux', model: 'openai/gpt-image-2', displayName: 'GPT Image 2',
+              modes: ['text-to-image'], maxCount: 4, supportedSizes: ['1024x1024'],
+              supportedAspectRatios: ['1:1'], supportsNegativePrompt: false,
+              supportsSeed: false, protocol: 'sync', defaultSize: '1024x1024',
+            },
+          ],
+        ]),
+      });
+      vi.mocked(providers.getById).mockImplementation((id) =>
+        id === 'fal' ? fal : id === 'zenmux' ? zenmux : undefined,
+      );
+
+      const result = await submitGeneration(
+        makeParams({
+          targets: [
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+            { provider: 'zenmux', model: 'openai/gpt-image-2' },
+          ],
+          aspectRatio: '1:1',
+        }),
+        { db },
+      );
+
+      const view = await getGeneration(result.generationId, { db });
+      expect(view.status).toBe('completed');
+      expect(view.jobs.map((job) => job.status).sort()).toEqual(['completed', 'failed']);
     });
 
     it('touches session when sessionId provided', async () => {
@@ -174,7 +301,7 @@ describe('orchestrator', () => {
       );
 
       await submitGeneration(
-        { provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat', sessionId: 's1' },
+        makeParams({ sessionId: 's1' }),
         { db },
       );
 
@@ -219,7 +346,7 @@ describe('orchestrator', () => {
       );
 
       const submitResult = await submitGeneration(
-        { provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat' },
+        makeParams(),
         { db },
       );
 
@@ -230,4 +357,3 @@ describe('orchestrator', () => {
     });
   });
 });
-

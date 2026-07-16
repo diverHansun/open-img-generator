@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { createTestDb } from '../../../../tests/helpers/db';
 import {
   createGenerationAndJob,
+  createGenerationWithJobs,
   updateGeneration,
   updateGenerationJob,
   getGenerationWithJobsAndImages,
   aggregateGenerationStatus,
+  tryClaimPollLease,
 } from './generations';
 import { createImage } from './images';
 
@@ -40,6 +42,23 @@ describe('generations queries', () => {
     const { generation, job } = createGenerationAndJob(makeGenParams(), makeJobParams(), db);
     expect(generation.prompt).toBe('A cat');
     expect(job.provider).toBe('fal');
+  });
+
+  it('creates every target job in the same transaction', () => {
+    const { db } = createTestDb();
+    const { jobs } = createGenerationWithJobs(
+      makeGenParams(),
+      [
+        makeJobParams({ id: 'job-fal' }),
+        {
+          ...makeJobParams({ id: 'job-zenmux' }),
+          provider: 'zenmux',
+          model: 'openai/gpt-image-2',
+        },
+      ],
+      db,
+    );
+    expect(jobs.map((job) => job.id)).toEqual(['job-fal', 'job-zenmux']);
   });
 
   it('returns undefined for missing generation', () => {
@@ -102,13 +121,28 @@ describe('generations queries', () => {
     expect(updated.updatedAt).toBe(later);
   });
 
+  it('claims a poll lease once until it expires', () => {
+    const { db } = createTestDb();
+    createGenerationAndJob(makeGenParams(), makeJobParams({ status: 'running' }), db);
+    const now = '2026-07-12T10:00:00.000Z';
+    const leaseUntil = '2026-07-12T10:00:35.000Z';
+
+    expect(tryClaimPollLease('job-1', now, leaseUntil, db)).toBe(true);
+    expect(tryClaimPollLease('job-1', now, leaseUntil, db)).toBe(false);
+    expect(tryClaimPollLease('job-1', '2026-07-12T10:00:36.000Z', '2026-07-12T10:01:11.000Z', db)).toBe(true);
+
+    const job = getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]!;
+    expect(job.status).toBe('running');
+    expect(job.pollLeaseUntil).toBe('2026-07-12T10:01:11.000Z');
+  });
+
   describe('aggregateGenerationStatus', () => {
-    it('returns failed if any job failed', () => {
-      expect(aggregateGenerationStatus([{ status: 'completed' }, { status: 'failed' }])).toBe('failed');
+    it('returns completed for a terminal partial success', () => {
+      expect(aggregateGenerationStatus([{ status: 'completed' }, { status: 'failed' }])).toBe('completed');
     });
 
-    it('returns cancelled if any job cancelled and none failed', () => {
-      expect(aggregateGenerationStatus([{ status: 'cancelled' }, { status: 'completed' }])).toBe('cancelled');
+    it('returns completed when a completed job is paired with a cancelled job', () => {
+      expect(aggregateGenerationStatus([{ status: 'cancelled' }, { status: 'completed' }])).toBe('completed');
     });
 
     it('returns completed when all jobs completed', () => {

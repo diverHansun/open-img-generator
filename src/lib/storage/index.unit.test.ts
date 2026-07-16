@@ -40,6 +40,15 @@ describe('storage', () => {
     expect(fs.readFileSync(absolutePath).toString()).toBe('fake-image-binary');
   });
 
+  it('decodes and stores a Base64 image data URL', async () => {
+    const result = await downloadAndStore('data:image/png;base64,ZmFrZS1pbWFnZS1iaW5hcnk=');
+
+    expect(result.contentType).toBe('image/png');
+    expect(result.sizeBytes).toBe(Buffer.byteLength('fake-image-binary'));
+    const absolutePath = path.join(tempDir, result.storagePath);
+    expect(fs.readFileSync(absolutePath).toString()).toBe('fake-image-binary');
+  });
+
   it('throws StorageError when download fails', async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,

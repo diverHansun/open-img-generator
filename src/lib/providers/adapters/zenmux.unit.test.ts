@@ -52,6 +52,27 @@ describe('ZenmuxProvider', () => {
     expect(body.n).toBe(1);
   });
 
+  it('normalizes ZenMux Base64 responses as data URLs', async () => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        created: 123,
+        output_format: 'webp',
+        data: [{ b64_json: 'aGVsbG8=', revised_prompt: 'A warm mug' }],
+      }),
+    });
+
+    const result = await provider.submit(makeNormalizedRequest(), 'openai/gpt-image-2');
+
+    expect(result.kind).toBe('sync');
+    if (result.kind === 'sync') {
+      expect(result.images[0]?.url).toBe('data:image/webp;base64,aGVsbG8=');
+      expect(result.images[0]?.contentType).toBe('image/webp');
+    }
+  });
+
   it('returns failed on HTTP error', async () => {
     mockFetch({
       ok: false,

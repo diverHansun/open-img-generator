@@ -1,4 +1,3 @@
-import { eq, and, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import {
   updateGenerationJob,
@@ -7,9 +6,9 @@ import {
   imageExists,
   getGenerationWithJobsAndImages,
   aggregateGenerationStatus,
+  tryClaimPollLease,
   type DbClient,
   type GenerationJob,
-  generationJobs,
 } from '../db';
 import { getById } from '../providers';
 import type { JobHandle, PollResult, ProviderImageRef } from '../providers';
@@ -20,6 +19,8 @@ import type { GenerationStatus } from './types';
 export type StoreImagesResult =
   | { kind: 'ok'; count: number }
   | { kind: 'failed'; error: StorageError };
+
+export const POLL_LEASE_MS = 35_000;
 
 export async function storeImages(
   jobId: string,
@@ -75,7 +76,11 @@ export async function completeSync(
 
   client.transaction((tx) => {
     if (storeResult.kind === 'ok') {
-      updateGenerationJob(jobId, { status: 'completed', updatedAt: now }, tx);
+      updateGenerationJob(
+        jobId,
+        { status: 'completed', pollLeaseUntil: null, updatedAt: now },
+        tx,
+      );
     } else {
       updateGenerationJob(
         jobId,
@@ -86,6 +91,7 @@ export async function completeSync(
             message: storeResult.error.message,
             retryable: false,
           }),
+          pollLeaseUntil: null,
           updatedAt: now,
         },
         tx,
@@ -105,20 +111,11 @@ export async function advance(
   job: GenerationJob,
   client: DbClient,
 ): Promise<void> {
-  const now = new Date().toISOString();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const leaseUntil = new Date(now.getTime() + POLL_LEASE_MS).toISOString();
 
-  const lockResult = client
-    .update(generationJobs)
-    .set({ status: 'running', updatedAt: now })
-    .where(
-      and(
-        eq(generationJobs.id, job.id),
-        inArray(generationJobs.status, ['pending', 'running']),
-      ),
-    )
-    .run();
-
-  if (lockResult.changes === 0) {
+  if (!tryClaimPollLease(job.id, nowIso, leaseUntil, client)) {
     return;
   }
 
@@ -136,6 +133,7 @@ export async function advance(
           message: 'Failed to parse provider handle',
           retryable: false,
         }),
+        pollLeaseUntil: null,
         updatedAt: new Date().toISOString(),
       },
       client,
@@ -155,6 +153,7 @@ export async function advance(
           message: `Provider ${handle.providerId} not available`,
           retryable: false,
         }),
+        pollLeaseUntil: null,
         updatedAt: new Date().toISOString(),
       },
       client,
@@ -191,7 +190,7 @@ async function applyPollResult(
       updateJobAndGeneration(
         job.id,
         job.generationId,
-        { status: 'pending', updatedAt: now },
+        { status: 'pending', pollLeaseUntil: null, updatedAt: now },
         client,
       );
       break;
@@ -199,7 +198,7 @@ async function applyPollResult(
       updateJobAndGeneration(
         job.id,
         job.generationId,
-        { status: 'running', updatedAt: now },
+        { status: 'running', pollLeaseUntil: null, updatedAt: now },
         client,
       );
       break;
@@ -213,6 +212,7 @@ async function applyPollResult(
         {
           status: 'failed',
           error: JSON.stringify(pollResult.error),
+          pollLeaseUntil: null,
           updatedAt: now,
         },
         client,
@@ -222,7 +222,7 @@ async function applyPollResult(
       updateJobAndGeneration(
         job.id,
         job.generationId,
-        { status: 'cancelled', updatedAt: now },
+        { status: 'cancelled', pollLeaseUntil: null, updatedAt: now },
         client,
       );
       break;
@@ -236,6 +236,7 @@ export function updateJobAndGeneration(
     status: GenerationStatus;
     error?: string | null;
     providerHandle?: string | null;
+    pollLeaseUntil?: string | null;
     updatedAt: string;
   },
   client: DbClient,

@@ -67,8 +67,7 @@ describe('async generation end-to-end (fal)', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: 'fal',
-          model: 'fal-ai/flux/schnell',
+          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
           prompt: 'A cat',
           seed: 42,
         }),

@@ -40,6 +40,27 @@ describe('FalProvider', () => {
     }
   });
 
+  it('maps public aspect ratios to Fal image_size values', async () => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        request_id: 'req-1',
+        status_url: 'https://status',
+        response_url: 'https://response',
+      }),
+    });
+
+    await provider.submit(
+      makeNormalizedRequest({ aspectRatio: '16:9' }),
+      'fal-ai/flux/schnell',
+    );
+
+    const [, init] = vi.mocked(global.fetch).mock.calls[0]!;
+    expect(JSON.parse(String(init?.body))).toMatchObject({ image_size: 'landscape_16_9' });
+  });
+
   it('returns failed on HTTP error', async () => {
     mockFetch({
       ok: false,

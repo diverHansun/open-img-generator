@@ -11,10 +11,18 @@ import { getJson, postJson, putJson, ProviderHttpError, createProviderError } fr
 import { falCapabilities } from '../capabilities/fal';
 
 function resolveSize(req: NormalizedRequest): string {
-  if (typeof req.providerOptions?.image_size === 'string') {
-    return req.providerOptions.image_size;
+  const aspectRatioMap: Record<string, string> = {
+    '1:1': 'square_hd',
+    '4:3': 'landscape_4_3',
+    '3:4': 'portrait_4_3',
+    '16:9': 'landscape_16_9',
+    '9:16': 'portrait_16_9',
+  };
+
+  if (req.aspectRatio && aspectRatioMap[req.aspectRatio]) {
+    return aspectRatioMap[req.aspectRatio];
   }
-  // fal flux/schnell uses enum sizes; ignore pixel width/height and aspectRatio here.
+
   return 'square_hd';
 }
 

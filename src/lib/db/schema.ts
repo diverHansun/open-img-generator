@@ -26,6 +26,7 @@ export const generationJobs = sqliteTable('generation_jobs', {
   status: text('status').notNull(),
   providerHandle: text('provider_handle'),
   error: text('error'),
+  pollLeaseUntil: text('poll_lease_until'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
