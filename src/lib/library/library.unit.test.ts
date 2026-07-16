@@ -110,6 +110,12 @@ describe('library domain', () => {
     expect(() => listGenerations({ projectId: 'missing-project' }, testDb.db)).toThrow(
       NotFoundError,
     );
+    expect(() => listGenerations({ sessionId: '' }, testDb.db)).toThrow(
+      'sessionId must not be empty',
+    );
+    expect(() => listGenerations({ projectId: '' }, testDb.db)).toThrow(
+      'projectId must not be empty',
+    );
   });
 
   it('favorites an image idempotently and returns its complete lineage', () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { downloadAndStore, getReadStream } from './index';
+import { downloadAndStore, getReadStream, removeStoredFile } from './index';
 import { NotFoundError, StorageError } from '../errors';
 
 describe('storage', () => {
@@ -87,5 +87,17 @@ describe('storage', () => {
 
   it('throws StorageError for path traversal attempt', () => {
     expect(() => getReadStream('../../../etc/passwd')).toThrow(StorageError);
+  });
+
+  it('removes a stored file within the storage root', () => {
+    const storagePath = '2026/07/loser.png';
+    const absolutePath = path.join(tempDir, storagePath);
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, 'loser');
+
+    removeStoredFile(storagePath);
+
+    expect(fs.existsSync(absolutePath)).toBe(false);
+    expect(() => removeStoredFile('../../../etc/passwd')).toThrow(StorageError);
   });
 });

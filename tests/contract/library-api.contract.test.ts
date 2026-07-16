@@ -303,6 +303,27 @@ describe('GET /api/generations list contracts', () => {
       expect.anything(),
     );
   });
+
+  it('rejects an explicitly empty sessionId with 400', () => {
+    vi.mocked(library.listGenerations).mockImplementation(() => {
+      throw new ValidationError('sessionId must not be empty');
+    });
+
+    const response = listGenerations(
+      new Request('http://localhost:3000/api/generations?sessionId='),
+    );
+
+    expect(response.status).toBe(400);
+    expect(library.listGenerations).toHaveBeenCalledWith(
+      {
+        sessionId: '',
+        projectId: undefined,
+        cursor: undefined,
+        limit: undefined,
+      },
+      expect.anything(),
+    );
+  });
 });
 
 function jsonRequest(
