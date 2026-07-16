@@ -49,7 +49,7 @@ export type GenerationTarget = {
 export type SubmitGenerationRequest = {
   prompt: string;
   targets: GenerationTarget[];
-  sessionId?: string;
+  sessionId: string;
   mode?: ProviderMode;
   aspectRatio?: string;
   count?: number;
@@ -82,11 +82,66 @@ export type ImageView = {
 
 export type GenerationView = {
   id: string;
-  sessionId: string | null;
+  sessionId: string;
   prompt: string;
   status: GenerationStatus;
   createdAt: string;
   updatedAt: string;
   jobs: JobView[];
   images: ImageView[];
+};
+
+export type Project = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Session = {
+  id: string;
+  projectId: string;
+  title: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GenerationSummary = Omit<GenerationView, 'jobs' | 'images'> & {
+  jobs: Array<{
+    id: string;
+    provider: ProviderId;
+    model: string;
+    status: GenerationStatus;
+    error: unknown | null;
+  }>;
+  images: Array<Omit<ImageView, 'index'>>;
+};
+
+export type Page<T> = {
+  items: T[];
+  nextCursor: string | null;
+};
+
+export type GalleryItem = {
+  favoriteId: string;
+  imageId: string;
+  url: string;
+  width: number | null;
+  height: number | null;
+  favoritedAt: string;
+  jobId: string;
+  provider: string;
+  model: string;
+  generationId: string;
+  prompt: string;
+  sessionId: string;
+  projectId: string;
+  projectTitle: string;
+};
+
+export type ModelPreference = {
+  provider: string;
+  model: string;
+  enabled: boolean;
+  updatedAt: string;
 };

@@ -50,21 +50,21 @@ describe('web-client capabilities', () => {
   it('builds the public targets request and rejects unsupported shared choices', () => {
     expect(
       buildSubmitGenerationRequest(
-        { prompt: 'A cat', targets, aspectRatio: '1:1', seed: 42 },
+        { prompt: 'A cat', targets, sessionId: 'session-1', aspectRatio: '1:1', seed: 42 },
         providers,
       ),
     ).toMatchObject({ targets, seed: 42 });
 
     expect(() =>
       buildSubmitGenerationRequest(
-        { prompt: 'A cat', targets, aspectRatio: '16:9' },
+        { prompt: 'A cat', targets, sessionId: 'session-1', aspectRatio: '16:9' },
         providers,
       ),
     ).toThrow('not shared');
 
     expect(() =>
       buildSubmitGenerationRequest(
-        { prompt: 'A cat', targets, aspectRatio: '1:1', count: 2 },
+        { prompt: 'A cat', targets, sessionId: 'session-1', aspectRatio: '1:1', count: 2 },
         providers,
       ),
     ).toThrow('Count exceeds');

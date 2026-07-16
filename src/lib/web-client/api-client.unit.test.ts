@@ -30,8 +30,40 @@ describe('web API client', () => {
     );
     const client = createApiClient(fetcher as typeof fetch);
 
-    await expect(client.submitGeneration({ prompt: 'A cat', targets: [] })).rejects.toEqual(
+    await expect(client.submitGeneration({ prompt: 'A cat', targets: [], sessionId: 'session-1' })).rejects.toEqual(
       new ApiClientError('Unsupported aspect ratio', 400),
+    );
+  });
+
+  it('encodes project-scoped sessions and read-only history queries', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [], nextCursor: null }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await client.listSessions('project/one');
+    await client.listGenerations({ sessionId: 'session one', limit: 10 });
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      '/api/projects/project%2Fone/sessions',
+      undefined,
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      '/api/generations?sessionId=session+one&limit=10',
+      undefined,
     );
   });
 });

@@ -3,7 +3,7 @@ import { GenerationPollingController, areAllJobsTerminal } from './polling';
 import type { GenerationView } from './types';
 
 const pending: GenerationView = {
-  id: 'gen-1', sessionId: null, prompt: 'A cat', status: 'pending',
+  id: 'gen-1', sessionId: 'session-1', prompt: 'A cat', status: 'pending',
   createdAt: '2026-07-15T00:00:00.000Z', updatedAt: '2026-07-15T00:00:00.000Z',
   jobs: [{ id: 'job-1', provider: 'fal', model: 'fal-ai/flux/schnell', status: 'pending' }],
   images: [],

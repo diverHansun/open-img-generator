@@ -12,7 +12,9 @@ import {
   type GenerationView,
   type HealthView,
   type JobView,
+  type Project,
   type ProviderInfo,
+  type Session,
   type SubmitGenerationResponse,
 } from '@/lib/web-client';
 
@@ -27,6 +29,8 @@ const RANDOM_PROMPTS = [
 ];
 
 const ACTIVE_GENERATION_KEY = 'open-image-generator.active-generation';
+const ACTIVE_PROJECT_KEY = 'open-image-generator.active-project';
+const ACTIVE_SESSION_PREFIX = 'open-image-generator.active-session.';
 const TERMINAL_STATUSES = new Set<GenerationStatus>(['completed', 'failed', 'cancelled']);
 
 const NAV_ITEMS = [
@@ -40,6 +44,7 @@ const NAV_ITEMS = [
 
 type ProviderLoadState = 'loading' | 'ready' | 'error';
 type HealthLoadState = 'loading' | 'ready' | 'error';
+type AssetLoadState = 'loading' | 'ready' | 'error';
 
 type PendingGeneration = SubmitGenerationResponse & {
   prompt: string;
@@ -210,6 +215,13 @@ export function GenerateWorkbench() {
   const [providerState, setProviderState] = useState<ProviderLoadState>('loading');
   const [health, setHealth] = useState<HealthView | null>(null);
   const [healthState, setHealthState] = useState<HealthLoadState>('loading');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [assetState, setAssetState] = useState<AssetLoadState>('loading');
+  const [currentProjectId, setCurrentProjectId] = useState('');
+  const [currentSessionId, setCurrentSessionId] = useState('');
+  const [newProjectTitle, setNewProjectTitle] = useState('');
+  const [newSessionTitle, setNewSessionTitle] = useState('');
   const [selectedTargets, setSelectedTargets] = useState<GenerationTarget[]>([]);
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [aspectRatio, setAspectRatio] = useState('1:1');
@@ -241,16 +253,35 @@ export function GenerateWorkbench() {
   const loadWorkspace = useCallback(async () => {
     setProviderState('loading');
     setHealthState('loading');
+    setAssetState('loading');
 
-    const [providerResult, healthResult] = await Promise.allSettled([
+    const [providerResult, healthResult, projectResult, preferenceResult] = await Promise.allSettled([
       apiClient.listProviders(),
       apiClient.getHealth(),
+      apiClient.listProjects(),
+      apiClient.listModelPreferences(),
     ]);
 
     if (!mountedRef.current) return;
 
     if (providerResult.status === 'fulfilled') {
-      applyProviders(providerResult.value);
+      const disabled = new Set(
+        preferenceResult.status === 'fulfilled'
+          ? preferenceResult.value.items
+              .filter((preference) => preference.enabled === false)
+              .map((preference) => `${preference.provider}:${preference.model}`)
+          : [],
+      );
+      applyProviders(
+        providerResult.value
+          .map((provider) => ({
+            ...provider,
+            models: provider.models.filter(
+              (model) => !disabled.has(`${provider.id}:${model.model}`),
+            ),
+          }))
+          .filter((provider) => provider.models.length > 0),
+      );
       setProviderState('ready');
     } else {
       setProviderState('error');
@@ -263,7 +294,50 @@ export function GenerateWorkbench() {
       setHealth(null);
       setHealthState('error');
     }
+    if (projectResult.status === 'fulfilled') {
+      setProjects(projectResult.value);
+      const saved = window.localStorage.getItem(ACTIVE_PROJECT_KEY);
+      const selected = projectResult.value.some((project) => project.id === saved)
+        ? saved!
+        : projectResult.value[0]?.id ?? '';
+      setCurrentProjectId(selected);
+      if (selected) window.localStorage.setItem(ACTIVE_PROJECT_KEY, selected);
+      setAssetState('ready');
+    } else {
+      setAssetState('error');
+    }
   }, [apiClient, applyProviders]);
+
+  useEffect(() => {
+    if (!currentProjectId) {
+      setSessions([]);
+      setCurrentSessionId('');
+      return;
+    }
+    let cancelled = false;
+    setAssetState('loading');
+    void apiClient.listSessions(currentProjectId).then((items) => {
+      if (cancelled || !mountedRef.current) return;
+      setSessions(items);
+      const storageKey = `${ACTIVE_SESSION_PREFIX}${currentProjectId}`;
+      const saved = window.localStorage.getItem(storageKey);
+      const selected = items.some((session) => session.id === saved)
+        ? saved!
+        : items[0]?.id ?? '';
+      setCurrentSessionId(selected);
+      if (selected) window.localStorage.setItem(storageKey, selected);
+      setAssetState('ready');
+    }).catch((error) => {
+      if (cancelled || !mountedRef.current) return;
+      setSessions([]);
+      setCurrentSessionId('');
+      setAssetState('error');
+      setRunError(error instanceof Error ? error.message : '会话加载失败');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, currentProjectId]);
 
   const beginPolling = useCallback(async (selfLink: string, sequence: number) => {
     const controller = new GenerationPollingController(apiClient);
@@ -379,10 +453,58 @@ export function GenerateWorkbench() {
     });
   };
 
+  const selectProject = (projectId: string) => {
+    setCurrentProjectId(projectId);
+    setCurrentSessionId('');
+    if (projectId) window.localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
+  };
+
+  const selectSession = (sessionId: string) => {
+    setCurrentSessionId(sessionId);
+    if (currentProjectId && sessionId) {
+      window.localStorage.setItem(
+        `${ACTIVE_SESSION_PREFIX}${currentProjectId}`,
+        sessionId,
+      );
+    }
+  };
+
+  const createProject = async () => {
+    const title = newProjectTitle.trim();
+    if (!title) return;
+    try {
+      const project = await apiClient.createProject(title);
+      setProjects((current) => [project, ...current]);
+      setNewProjectTitle('');
+      selectProject(project.id);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : '项目创建失败');
+    }
+  };
+
+  const createSession = async () => {
+    if (!currentProjectId) return;
+    try {
+      const session = await apiClient.createSession(
+        currentProjectId,
+        newSessionTitle.trim() || undefined,
+      );
+      setSessions((current) => [session, ...current]);
+      setNewSessionTitle('');
+      selectSession(session.id);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : '会话创建失败');
+    }
+  };
+
   const handleSubmit = async () => {
     if (!prompt.trim()) {
       setRunError('请先填写提示词');
       promptRef.current?.focus();
+      return;
+    }
+    if (!currentSessionId) {
+      setRunError('请先选择或创建一个 Project 与 Session');
       return;
     }
 
@@ -396,6 +518,7 @@ export function GenerateWorkbench() {
         {
           prompt: prompt.trim(),
           targets: selectedTargets,
+          sessionId: currentSessionId,
           mode: 'text-to-image',
           aspectRatio,
           count,
@@ -491,6 +614,64 @@ export function GenerateWorkbench() {
           </div>
         </header>
 
+        <section className="workspace-context" aria-label="Project and session context">
+          <div className="context-copy">
+            <strong>Workspace</strong>
+            <span>每次生成都必须归档到一个 Project 下的 Session。</span>
+          </div>
+          <label>
+            <span>Project</span>
+            <select
+              value={currentProjectId}
+              onChange={(event) => selectProject(event.target.value)}
+              disabled={assetState === 'loading'}
+            >
+              <option value="">Select project</option>
+              {projects.map((project) => (
+                <option value={project.id} key={project.id}>{project.title}</option>
+              ))}
+            </select>
+          </label>
+          <form onSubmit={(event) => { event.preventDefault(); void createProject(); }}>
+            <input
+              value={newProjectTitle}
+              onChange={(event) => setNewProjectTitle(event.target.value)}
+              placeholder="New project"
+              aria-label="New project title"
+            />
+            <button type="submit" disabled={!newProjectTitle.trim()}>Create</button>
+          </form>
+          <label>
+            <span>Session</span>
+            <select
+              value={currentSessionId}
+              onChange={(event) => selectSession(event.target.value)}
+              disabled={!currentProjectId || assetState === 'loading'}
+            >
+              <option value="">Select session</option>
+              {sessions.map((session) => (
+                <option value={session.id} key={session.id}>{session.title || 'Untitled session'}</option>
+              ))}
+            </select>
+          </label>
+          <form onSubmit={(event) => { event.preventDefault(); void createSession(); }}>
+            <input
+              value={newSessionTitle}
+              onChange={(event) => setNewSessionTitle(event.target.value)}
+              placeholder="New session (optional title)"
+              aria-label="New session title"
+              disabled={!currentProjectId}
+            />
+            <button type="submit" disabled={!currentProjectId}>Create</button>
+          </form>
+        </section>
+
+        {!currentSessionId && assetState !== 'loading' ? (
+          <div className="workspace-gate" role="status">
+            先选择或创建 Project，再选择或创建 Session，工作台才允许提交生成。
+          </div>
+        ) : null}
+
         <section className="prompt-panel" aria-labelledby="prompt-title">
           <div className="panel-heading">
             <h2 id="prompt-title">Prompt</h2>
@@ -526,7 +707,7 @@ export function GenerateWorkbench() {
                 type="button"
                 className="generate-button"
                 onClick={() => void handleSubmit()}
-                disabled={isGenerating || providerState !== 'ready' || selectedTargets.length === 0 || !prompt.trim()}
+                disabled={isGenerating || providerState !== 'ready' || selectedTargets.length === 0 || !prompt.trim() || !currentSessionId}
               >
                 <Icon name="sparkles" />
                 {isGenerating ? 'Generating…' : 'Generate'}

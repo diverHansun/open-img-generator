@@ -197,6 +197,83 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.workspace-context {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, .8fr) minmax(190px, 1fr);
+  gap: 10px 12px;
+  align-items: end;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.context-copy {
+  display: grid;
+  grid-row: span 2;
+  gap: 4px;
+  align-self: center;
+}
+
+.context-copy strong {
+  font-size: 12px;
+}
+
+.context-copy span,
+.workspace-context label > span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.workspace-context label,
+.workspace-context form {
+  display: grid;
+  gap: 5px;
+}
+
+.workspace-context form {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.workspace-context select,
+.workspace-context input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  font-size: 10px;
+}
+
+.workspace-context button {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.workspace-context button:disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+.workspace-gate {
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in oklch, var(--warn) 35%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--warn) 7%, var(--surface));
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .live-dot {
   width: 6px;
   height: 6px;
@@ -1158,6 +1235,15 @@ select:focus-visible {
     padding: 25px max(18px, 4vw) 42px;
   }
 
+  .workspace-context {
+    grid-template-columns: minmax(140px, .7fr) 1fr;
+  }
+
+  .context-copy {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+
   .inspector {
     position: static;
     display: grid;
@@ -1205,6 +1291,14 @@ select:focus-visible {
 
   .header-status {
     display: none;
+  }
+
+  .workspace-context {
+    grid-template-columns: 1fr;
+  }
+
+  .context-copy {
+    grid-column: auto;
   }
 
   .prompt-panel {
