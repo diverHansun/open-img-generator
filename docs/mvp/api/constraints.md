@@ -64,7 +64,7 @@ loop:
 | 机制 | 说明 |
 |------|------|
 | poll lease claim | `UPDATE generation_jobs SET poll_lease_until=?, updated_at=? WHERE id=? AND status IN ('pending','running') AND (poll_lease_until IS NULL OR poll_lease_until<=?)`；影响行数 0 则跳过该 job 的 poll |
-| 租约时长 | 35 秒；覆盖一次 Fal status/response 轮询超时预算。进程崩溃后，下一次 GET 在租约到期后可恢复推进 |
+| 租约时长 | 120 秒；覆盖 Fal status/response + 图片转存的完整最坏路径。进程崩溃后，下一次 GET 在租约到期后可恢复推进 |
 | 状态与锁 | claim **不修改 status**。`pending` / `running` 始终表示厂商真实进度，poll 结果写入后清空 `poll_lease_until` |
 | 转存幂等 | `db.imageExists(jobId, index)` 为 true 则跳过该张 downloadAndStore |
 | 已终态 | job 已 `completed`/`failed`/`cancelled` 时不再 poll；generation 全部 job 终态时 GET 不触发 advance |
@@ -171,7 +171,7 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
 | GET | `/api/projects/:id` | 单条 Project |
 | PATCH/DELETE | `/api/projects/:id` | 更新 title；删除**仅允许无 Session 的空 Project**（否则 409） |
 | GET/POST | `/api/projects/:id/sessions` | 列出 / 在该 Project 下创建 Session |
-| GET | `/api/sessions/:id` | Session 元数据；`?include=generations` 时附带该 session 下 generations（**会对其中未终结项推进 poll**） |
+| GET | `/api/sessions/:id` | Session 元数据；`?include=generations` 时附带该 session 下 generations（**只读，不推进 poll**） |
 | PATCH | `/api/sessions/:id` | 更新 title |
 | POST | `/api/sessions/:id/move` | body `{ "toProjectId": "..." }`；Session **MVP 不提供 DELETE** |
 | GET | `/api/generations` | **列表**；query 见 §14.2；**默认不推进 poll** |
@@ -231,7 +231,8 @@ POST 只校验 **session 存在**（`sessionExists`）；**不要求** body 带 
 | Session 层 | GET/POST | `/api/projects/:id/sessions` |
 | Session 改名 / 搬家 | PATCH / POST move | `/api/sessions/:id`、`/api/sessions/:id/move` |
 | Generation 列表 | GET | `/api/generations?sessionId=` 或 `?projectId=`（**不 poll**） |
-| 详情（可推进） | GET | `/api/generations/:id` 或 `GET /api/sessions/:id?include=generations` |
+| 单条详情（唯一推进入口） | GET | `/api/generations/:id` |
+| Session 聚合列表（只读） | GET | `/api/sessions/:id?include=generations` |
 | 看图 / 收藏 | GET images；POST/DELETE favorites | 同 Generate |
 
 **无**「一次返回整棵 Project 树」的聚合端点（MVP 多次请求）。
@@ -417,8 +418,10 @@ pool = registry.enabledModels
 已有 SQLite 若存在 `generations.session_id IS NULL` 或无 `projects` 表：
 
 1. 创建表 `projects` / `favorites` / `model_preferences`；`sessions` 增加 `project_id`。
-2. Backfill：插入 Project（如 title=`__migrated__`）+ 每条无 project 的 session 挂上；无 session 的 generation 挂到该 Project 下新建 Session。
+2. Backfill：若存在旧 Session，插入 Project（title=`Migrated project`）并将旧 Session 挂上；**无 Session 或指向无效 Session 的 generation 直接删除**（本地 MVP 数据已确认可丢弃）。其 jobs/images 随迁移过滤删除。
 3. 再收紧 `NOT NULL` 与废弃旧 `POST /api/sessions`。
+
+执行入口：`npm run db:migrate`。脚本可重复执行，并在结束前运行 SQLite foreign-key check。
 
 迁移脚本归属实现任务，不在运行时隐式乱建（测试 helper 可自动建）。
 

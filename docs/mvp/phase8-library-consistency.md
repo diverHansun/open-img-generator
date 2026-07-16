@@ -21,11 +21,10 @@
 
 ---
 
-## 已知残留（实现时处理，非文档矛盾）
+## 已知残留（后续里程碑）
 
-1. **代码未跟上文档**: `schema.ts` 仍为旧 nullable session；测试 fixture 需 backfill。
-2. **job-engine/architecture.md** 未逐段改写（validator 描述仍通用正确）；goals/dfd/use-case 已对齐必填 session。
-3. **user-config** 仅文档占位，不阻塞 library 编码。
+1. 完整 History / Gallery / Models 独立页面仍后置；本轮完成对应 API、web-client 与 Generate 门禁接线。
+2. **user-config** 仅文档占位，不阻塞当前单用户 `.env` 配置。
 
 ---
 
@@ -33,7 +32,7 @@
 
 - [x] db / job-engine goals / dfd sessionId / api constraints / web-ui 套件 / library 套件 / web-client / user-config / providers Non-Duties
 - [x] 扫并修订 job-engine dfd/use-case、api/quickstart 中过时「可选 session」
-- [ ] 实现阶段：schema 迁移 + 测试更新
+- [x] schema 显式迁移 + 测试 fixture 更新 + 本地 7 条孤儿 generation 清理
 
 ---
 
@@ -45,5 +44,5 @@
 | model-preferences 默认全开 + PUT 校验 | 已锁定：§15.4 |
 | generations list sessionId / 瘦摘要 / 不 poll | 已锁定：§15.2 |
 | GET /api/projects/:id；Session 不删 | 已锁定：§12 |
-| 代码与文档差 | **预期差**：schema 仍旧；实现前勿当代码已改 |
-| 范围 | 后端可按 §14 开实现；UI 视觉后置；user-config 另拆 |
+| 代码与文档差 | 后端 §12–§16 已实现；Session/History 列表只读 |
+| 范围 | 完整 History/Gallery 页面与 user-config 另拆 |

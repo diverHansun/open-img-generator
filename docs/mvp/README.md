@@ -21,13 +21,13 @@ src/
     ├── storage/                  →  docs/mvp/storage/         （已有 · 基本不动）
     ├── prompt/                   →  docs/mvp/prompt/          （已有 · 基本不动）
     ├── web-client/               →  docs/mvp/web-client/      （文档已补）
-    ├── library/                  →  docs/mvp/library/         （新建文档 · 待实现代码）
+    ├── library/                  →  docs/mvp/library/         （已实现：资产域与只读历史）
     └── user-config/              →  docs/mvp/user-config/     （边界文档 · 后续实现）
 ```
 
 | 代码路径 | 文档目录 | 本轮动作 | 一句话职责 |
 |----------|----------|----------|------------|
-| `src/lib/library/` | `docs/mvp/library/` | **新建文档**（先文档后代码） | Project / Session 归属、History、Favorite、模型启用偏好 |
+| `src/lib/library/` | `docs/mvp/library/` | **已实现** | Project / Session 归属、History、Favorite、模型启用偏好 |
 | `src/lib/db/` | `docs/mvp/db/` | **已修订** | schema + queries；业务库唯一真相 |
 | `src/lib/job-engine/` | `docs/mvp/job-engine/` | **已修订** | 扇出生成与状态推进；不管 History/Gallery/Project CRUD |
 | `src/lib/providers/` | `docs/mvp/providers/` | **小修订** | 厂商适配；密钥来源仍 env（本轮） |
@@ -87,12 +87,12 @@ src/
 
 ---
 
-## 5. 下一步（实现，非本文档）
+## 5. 实施状态（2026-07-16）
 
 **API 契约权威**: `docs/mvp/api/constraints.md` **§12–§16**（页面矩阵、DTO、迁移）。
 
-1. `src/lib/db` schema 迁移（projects / favorites / prefs；收紧 NOT NULL）+ backfill（§16）
-2. 实现 `src/lib/library/` + API 路由（按 §14 矩阵）
-3. job-engine / 测试改为 sessionId 必填
-4. web-ui（后置视觉）：ProjectGate、History、Gallery、Models、状态可见性
-5. user-config 实现里程碑另开
+1. ✅ `src/lib/db` schema + 显式幂等迁移（projects / favorites / prefs；收紧 NOT NULL；删除无 Session 旧 generation）
+2. ✅ `src/lib/library/` + §14 API 路由；Session/History 列表只读
+3. ✅ job-engine / 测试改为 sessionId 必填；扇出上限 8，目标提交并发隔离
+4. ✅ web-client 全资源 API；Generate 工作台接入 Project/Session 门禁与模型偏好
+5. 后续 UI 里程碑：完整 History / Gallery / Models 页面；user-config 另开

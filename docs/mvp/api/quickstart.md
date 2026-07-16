@@ -2,7 +2,7 @@
 
 > 前置: 配置 `.env`、执行 `npm install`、`npm run dev`
 > 约束: 见 [constraints.md](./constraints.md)
-> 修订: 2026-07-15 请求体改为 `targets[]`
+> 修订: 2026-07-16 `sessionId` 必填；Project/Session 先创建；列表 GET 全部只读
 
 ---
 
@@ -21,7 +21,7 @@ cp .env.example .env
 
 ```bash
 npm install
-npm run db:push   # 实现阶段：初始化 SQLite schema
+npm run db:migrate
 npm run dev
 ```
 
@@ -42,6 +42,18 @@ curl -s http://127.0.0.1:3000/api/providers | jq
 
 无 key 时返回 `[]`。检查各 model 的 `supportedAspectRatios`（公开比，非空）。
 
+先创建本次 quickstart 使用的 Project / Session（之后每个生成请求都引用它）：
+
+```bash
+PROJECT=$(curl -s -X POST http://127.0.0.1:3000/api/projects \
+  -H "Content-Type: application/json" \
+  -d '{"title":"quickstart"}' | jq -r .id)
+
+SESSION=$(curl -s -X POST http://127.0.0.1:3000/api/projects/$PROJECT/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"title":"first session"}' | jq -r .id)
+```
+
 ---
 
 ## 3. Sync 路径（ZenMux / openai/gpt-image-2）
@@ -51,6 +63,7 @@ curl -s -X POST http://127.0.0.1:3000/api/generations \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "A cat wearing a space helmet",
+    "sessionId": "'"$SESSION"'",
     "aspectRatio": "1:1",
     "targets": [
       { "provider": "zenmux", "model": "openai/gpt-image-2" }
@@ -89,6 +102,7 @@ curl -s -X POST http://127.0.0.1:3000/api/generations \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "A cat wearing a space helmet",
+    "sessionId": "'"$SESSION"'",
     "aspectRatio": "1:1",
     "seed": 42,
     "targets": [
@@ -124,6 +138,7 @@ curl -s -X POST http://127.0.0.1:3000/api/generations \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "A red balloon over a quiet lake",
+    "sessionId": "'"$SESSION"'",
     "aspectRatio": "1:1",
     "count": 1,
     "targets": [
@@ -137,33 +152,17 @@ curl -s -X POST http://127.0.0.1:3000/api/generations \
 
 ---
 
-## 6. 带 Project / Session 的生成（必填）
+## 6. Project / Session 与只读历史
 
 ```bash
-PROJECT=$(curl -s -X POST http://127.0.0.1:3000/api/projects \
-  -H "Content-Type: application/json" \
-  -d '{"title":"demo"}' | jq -r .id)
-
-SESSION=$(curl -s -X POST http://127.0.0.1:3000/api/projects/$PROJECT/sessions \
-  -H "Content-Type: application/json" \
-  -d '{"title":"session-1"}' | jq -r .id)
-
-curl -s -X POST http://127.0.0.1:3000/api/generations \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"prompt\": \"A dog\",
-    \"aspectRatio\": \"1:1\",
-    \"sessionId\": \"$SESSION\",
-    \"targets\": [
-      { \"provider\": \"fal\", \"model\": \"fal-ai/flux/schnell\" }
-    ]
-  }" | jq
-
-curl -s http://127.0.0.1:3000/api/sessions/$SESSION | jq
-# generations 内 pending 项会被惰性 poll 推进
+curl -s http://127.0.0.1:3000/api/projects | jq
+curl -s http://127.0.0.1:3000/api/projects/$PROJECT/sessions | jq
+curl -s "http://127.0.0.1:3000/api/generations?sessionId=$SESSION&limit=10" | jq
+curl -s "http://127.0.0.1:3000/api/sessions/$SESSION?include=generations" | jq
 ```
 
-缺少 `sessionId` → 400。
+最后两个列表请求都**不会**推进 pending/running job。只有
+`GET /api/generations/:id` 会推进 poll。缺少 `sessionId` 的 POST → 400。
 ---
 
 ## 7. 常见错误

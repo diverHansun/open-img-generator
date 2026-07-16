@@ -131,9 +131,9 @@ API 层: GET /api/generations/:id
 
 Session / Project CRUD 由 **library + API** 负责，不经 job-engine。Session 必属某 Project（db 约束）。
 
-### 2.4 GET session / project 树 — 嵌套推进
+### 2.4 GET session / project 树 — 只读聚合
 
-`GET /api/sessions/:id`（或 History 聚合）：对每个 pending/running 的 generation 调用 `getGeneration`（推进其下全部 jobs）。列表类 `GET /api/generations?limit=` **默认不**推进（见 library/api）。
+`GET /api/sessions/:id?include=generations` 与 History 列表只经 library 读取已存状态，**不调用** job-engine。只有 `GET /api/generations/:id` 会调用 `getGeneration` 并推进其下全部未终结 jobs。
 
 ### 2.5 图片访问
 

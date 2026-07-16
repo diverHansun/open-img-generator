@@ -94,7 +94,7 @@
 |--------|------|
 | 每 target 收到正确 model + 裁剪后的 NormalizedRequest | mock provider.submit 断言 |
 | 聚合函数与 constraints §8 一致 | 单元表驱动测试 |
-| GET session 嵌套 getGeneration | API/合同测试 |
+| GET session/history 只读，不调用 getGeneration 推进 | API/合同测试 |
 
 ---
 

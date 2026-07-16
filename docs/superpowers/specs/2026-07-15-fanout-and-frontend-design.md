@@ -40,7 +40,7 @@ Non-goals for this slice:
 | 2 | Shared size input | Public **`aspectRatio`** on the request; each adapter maps to vendor size |
 | 3 | Parameter UI source | **Capabilities of currently selected models only** |
 | 4 | Unsupported params | If capabilities do not declare Guidance / Steps / Quality / Safety → **do not render** |
-| 5 | Session | Optional `sessionId` on generate (nullable), same as today |
+| 5 | Session | Snapshot decision: optional；**已被 `docs/mvp/` 取代，当前实现为必填** |
 
 ### 2.1 Capabilities → UI rules
 
@@ -73,7 +73,7 @@ Replace single `provider` + `model` with `targets[]`. Shared runtime params stay
 ```json
 {
   "prompt": "a red balloon over a quiet lake",
-  "sessionId": "optional-uuid",
+  "sessionId": "required-existing-session-uuid",
   "aspectRatio": "1:1",
   "width": null,
   "height": null,

@@ -295,4 +295,4 @@ src/lib/db/
 - **project_id / session_id 均为 NOT NULL**（2026-07-16；旧「独立生成」作废）
 - 不持久化 width/count/seed 等生成输入参数（设计决策，见 3.4）
 - 字段与 library / job-engine dfd-interface 一致
-- **迁移注意**: 已有 nullable session 数据需 backfill（建默认 Project + Session）后方可收紧约束
+- **迁移实现**: `npm run db:migrate` 将旧 Session 挂到迁移 Project；按用户确认删除无有效 Session 的 generation，再收紧约束并执行外键检查

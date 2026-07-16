@@ -19,7 +19,7 @@
 | UC-4 | 扇出部分失败 | 一 target submit 失败 | 该 job failed；另一 job 可 completed；generation 聚合为 completed（若有成功）或 failed（全败） |
 | UC-5 | 非法共享宽高比 | aspectRatio 不被某 target 支持 | 400，无库记录 |
 | UC-6 | 缺少 sessionId | POST 无 sessionId | 400，无库记录 |
-| UC-7 | Session 内查看 | GET session | 嵌套 getGeneration，推进所有未终结 jobs |
+| UC-7 | Session 内查看 | GET session | 只读返回历史；不推进任何未终结 job |
 
 ---
 

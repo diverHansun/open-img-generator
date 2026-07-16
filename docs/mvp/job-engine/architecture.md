@@ -148,7 +148,7 @@ src/lib/job-engine/
 
 **修订规则**:
 1. `poll_lease_until` 为空或过期时，`pending` / `running` job 均可原子 claim；claim 只写租约与 `updated_at`，不修改 status。
-2. 影响行数 0：另一请求正在租约期内推进，当前请求跳过。进程异常后租约（35 秒）到期，下一次 GET 可恢复。
+2. 影响行数 0：另一请求正在租约期内推进，当前请求跳过。进程异常后租约（120 秒）到期，下一次 GET 可恢复。
 3. poll 结果、解析失败、provider 不可用和转存结束都会清空租约；转存仍靠 `imageExists(jobId, index)` 幂等。
 
 详见 `api/constraints.md` §4。

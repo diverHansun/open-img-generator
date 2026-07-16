@@ -1,6 +1,6 @@
 # library 模块 · goals-duty
 
-> 模块路径: `src/lib/library/`（待实现；本轮先文档后代码）
+> 模块路径: `src/lib/library/`（已实现）
 > 文档顺序: ① goals-duty(本文) → ② architecture → ③ data-model → ④ dfd-interface → ⑤ use-case → ⑦ test
 > 修订说明: 2026-07-16 新建。承接 Project / History / Gallery(收藏) / 模型启用偏好。
 

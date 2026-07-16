@@ -10,7 +10,7 @@
 nvm use
 cp .env.example .env
 npm install
-npm run db:push
+npm run db:migrate
 npm run dev
 ```
 
@@ -28,7 +28,7 @@ ZENMUX_API_KEY=
 ## 生产运行
 
 ```bash
-npm run db:push
+npm run db:migrate
 npm run build
 npm start
 ```
