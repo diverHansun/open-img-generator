@@ -11,6 +11,7 @@ describe('images queries', () => {
     createGenerationAndJob(
       {
         id: 'gen-1',
+        sessionId: 'default-session',
         prompt: 'A cat',
         status: 'pending',
         createdAt: now,

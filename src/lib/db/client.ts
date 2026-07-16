@@ -14,6 +14,8 @@ function getDatabaseUrl(): string {
 
 export function createDbClient(url: string): DbClient {
   const sqlite = new Database(url);
+  sqlite.pragma('foreign_keys = ON');
+  sqlite.pragma('busy_timeout = 5000');
   return drizzle(sqlite);
 }
 

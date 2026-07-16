@@ -10,6 +10,7 @@ import {
 
 export type CreateSessionParams = {
   id: string;
+  projectId: string;
   title?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -28,6 +29,7 @@ export function createSession(
     .insert(sessions)
     .values({
       id: params.id,
+      projectId: params.projectId,
       title: params.title ?? null,
       createdAt: params.createdAt,
       updatedAt: params.updatedAt,

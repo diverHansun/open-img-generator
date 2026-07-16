@@ -13,10 +13,10 @@ import { createImage } from './images';
 
 const now = '2026-07-12T10:00:00.000Z';
 
-function makeGenParams(overrides: { id?: string; sessionId?: string | null } = {}) {
+function makeGenParams(overrides: { id?: string; sessionId?: string } = {}) {
   return {
     id: overrides.id ?? 'gen-1',
-    sessionId: overrides.sessionId ?? null,
+    sessionId: overrides.sessionId ?? 'default-session',
     prompt: 'A cat',
     status: 'pending' as const,
     createdAt: now,

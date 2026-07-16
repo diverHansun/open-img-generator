@@ -12,7 +12,7 @@ export type GenerationStatus =
 
 export type CreateGenerationParams = {
   id: string;
-  sessionId?: string | null;
+  sessionId: string;
   prompt: string;
   status: GenerationStatus;
   createdAt: string;
@@ -62,7 +62,7 @@ export function createGenerationWithJobs(
     tx.insert(generations)
       .values({
         id: genParams.id,
-        sessionId: genParams.sessionId ?? null,
+        sessionId: genParams.sessionId,
         prompt: genParams.prompt,
         status: genParams.status,
         createdAt: genParams.createdAt,

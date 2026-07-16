@@ -13,6 +13,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate-db.mjs",
     "db:push": "drizzle-kit push",
     "test": "vitest run",
     "test:unit": "vitest run .unit.test.ts",

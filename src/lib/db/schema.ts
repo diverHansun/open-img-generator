@@ -1,35 +1,87 @@
-import { sqliteTable, text, integer, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
-export const sessions = sqliteTable('sessions', {
-  id: text('id').primaryKey(),
-  title: text('title'),
-  createdAt: text('created_at').notNull(),
-  updatedAt: text('updated_at').notNull(),
-});
+export const projects = sqliteTable(
+  'projects',
+  {
+    id: text('id').primaryKey(),
+    title: text('title').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    updatedAtIndex: index('projects_updated_at_idx').on(table.updatedAt),
+  }),
+);
 
-export const generations = sqliteTable('generations', {
-  id: text('id').primaryKey(),
-  sessionId: text('session_id').references(() => sessions.id),
-  prompt: text('prompt').notNull(),
-  status: text('status').notNull(),
-  createdAt: text('created_at').notNull(),
-  updatedAt: text('updated_at').notNull(),
-});
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id),
+    title: text('title'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    projectUpdatedAtIndex: index('sessions_project_updated_at_idx').on(
+      table.projectId,
+      table.updatedAt,
+    ),
+  }),
+);
 
-export const generationJobs = sqliteTable('generation_jobs', {
-  id: text('id').primaryKey(),
-  generationId: text('generation_id')
-    .notNull()
-    .references(() => generations.id),
-  provider: text('provider').notNull(),
-  model: text('model').notNull(),
-  status: text('status').notNull(),
-  providerHandle: text('provider_handle'),
-  error: text('error'),
-  pollLeaseUntil: text('poll_lease_until'),
-  createdAt: text('created_at').notNull(),
-  updatedAt: text('updated_at').notNull(),
-});
+export const generations = sqliteTable(
+  'generations',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => sessions.id),
+    prompt: text('prompt').notNull(),
+    status: text('status').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    sessionCreatedAtIndex: index('generations_session_created_at_idx').on(
+      table.sessionId,
+      table.createdAt,
+    ),
+    createdAtIndex: index('generations_created_at_idx').on(table.createdAt),
+  }),
+);
+
+export const generationJobs = sqliteTable(
+  'generation_jobs',
+  {
+    id: text('id').primaryKey(),
+    generationId: text('generation_id')
+      .notNull()
+      .references(() => generations.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    status: text('status').notNull(),
+    providerHandle: text('provider_handle'),
+    error: text('error'),
+    pollLeaseUntil: text('poll_lease_until'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    generationIndex: index('generation_jobs_generation_idx').on(
+      table.generationId,
+    ),
+  }),
+);
 
 export const images = sqliteTable(
   'images',
@@ -37,7 +89,7 @@ export const images = sqliteTable(
     id: text('id').primaryKey(),
     generationJobId: text('generation_job_id')
       .notNull()
-      .references(() => generationJobs.id),
+      .references(() => generationJobs.id, { onDelete: 'cascade' }),
     index: integer('index').notNull(),
     storagePath: text('storage_path').notNull(),
     contentType: text('content_type').notNull(),
@@ -54,7 +106,38 @@ export const images = sqliteTable(
   }),
 );
 
+export const favorites = sqliteTable(
+  'favorites',
+  {
+    id: text('id').primaryKey(),
+    imageId: text('image_id')
+      .notNull()
+      .references(() => images.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    imageUnique: uniqueIndex('favorites_image_unique').on(table.imageId),
+    createdAtIndex: index('favorites_created_at_idx').on(table.createdAt),
+  }),
+);
+
+export const modelPreferences = sqliteTable(
+  'model_preferences',
+  {
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => ({
+    primaryKey: primaryKey({ columns: [table.provider, table.model] }),
+  }),
+);
+
+export type Project = typeof projects.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type Generation = typeof generations.$inferSelect;
 export type GenerationJob = typeof generationJobs.$inferSelect;
 export type Image = typeof images.$inferSelect;
+export type Favorite = typeof favorites.$inferSelect;
+export type ModelPreference = typeof modelPreferences.$inferSelect;
