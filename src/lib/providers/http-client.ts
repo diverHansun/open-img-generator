@@ -13,6 +13,10 @@ export class ProviderHttpError extends Error {
 
 export function mapHttpStatusToErrorCode(status: number): ProviderErrorCode {
   switch (status) {
+    case 0:
+      return 'UNKNOWN';
+    case 400:
+      return 'INVALID_REQUEST';
     case 401:
       return 'AUTH_FAILED';
     case 403:
@@ -32,7 +36,10 @@ export function createProviderError(
   retryable = false,
 ): ProviderError {
   return {
-    code: mapHttpStatusToErrorCode(status),
+    // Adapters pass status=0 for both transport failures and AbortSignal
+    // timeouts. The retryable bit distinguishes the latter without adding a
+    // provider-specific error type to this shared HTTP helper.
+    code: status === 0 && retryable ? 'TIMEOUT' : mapHttpStatusToErrorCode(status),
     message,
     retryable,
     httpStatus: status,

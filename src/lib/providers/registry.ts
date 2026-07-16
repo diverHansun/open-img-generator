@@ -1,38 +1,47 @@
 import type { ImageProvider, ProviderId, ProviderInfo } from './types';
 import { FalProvider } from './adapters/fal';
 import { ZenmuxProvider } from './adapters/zenmux';
+import { SiliconFlowProvider } from './adapters/siliconflow';
+import { ZhipuProvider } from './adapters/zhipu';
 
 const registry = new Map<ProviderId, ImageProvider>();
 
-function isEnabled(id: ProviderId): boolean {
-  switch (id) {
-    case 'fal':
-      return !!process.env.FAL_KEY;
-    case 'zenmux':
-      return !!process.env.ZENMUX_API_KEY;
-    default:
-      return false;
-  }
-}
+type ProviderDefinition = {
+  isEnabled: () => boolean;
+  create: () => ImageProvider;
+};
 
-function createAdapter(id: ProviderId): ImageProvider | undefined {
-  switch (id) {
-    case 'fal':
-      return new FalProvider();
-    case 'zenmux':
-      return new ZenmuxProvider();
-    default:
-      return undefined;
-  }
-}
+const providerOrder: ProviderId[] = [
+  'fal',
+  'zenmux',
+  'siliconflow',
+  'zhipu',
+  'doubao',
+  'qwen',
+  'kling',
+];
+
+const definitions: Partial<Record<ProviderId, ProviderDefinition>> = {
+  fal: { isEnabled: () => !!process.env.FAL_KEY, create: () => new FalProvider() },
+  zenmux: {
+    isEnabled: () => !!process.env.ZENMUX_API_KEY,
+    create: () => new ZenmuxProvider(),
+  },
+  siliconflow: {
+    isEnabled: () => !!process.env.SILICONFLOW_API_KEY,
+    create: () => new SiliconFlowProvider(),
+  },
+  zhipu: {
+    isEnabled: () => !!process.env.ZHIPU_API_KEY,
+    create: () => new ZhipuProvider(),
+  },
+};
 
 function ensureAdapter(id: ProviderId): ImageProvider | undefined {
-  if (!isEnabled(id)) return undefined;
+  const definition = definitions[id];
+  if (!definition || !definition.isEnabled()) return undefined;
   if (!registry.has(id)) {
-    const adapter = createAdapter(id);
-    if (adapter) {
-      registry.set(id, adapter);
-    }
+    registry.set(id, definition.create());
   }
   return registry.get(id);
 }
@@ -42,8 +51,7 @@ export function getById(id: ProviderId): ImageProvider | undefined {
 }
 
 export function listEnabled(): ProviderInfo[] {
-  const allIds: ProviderId[] = ['fal', 'zenmux'];
-  return allIds
+  return providerOrder
     .map((id) => {
       const provider = ensureAdapter(id);
       if (!provider) return undefined;

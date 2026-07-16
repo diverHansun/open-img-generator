@@ -49,7 +49,7 @@
 type ProviderId = "fal" | "zenmux" | "siliconflow" | "zhipu" | "doubao" | "qwen" | "kling"
 ```
 
-MVP 仅实现 `"fal"` 与 `"zenmux"`。其余值为 registry 预留，adapter 未实现前不会被启用。
+当前已实现 `"fal"`、`"zenmux"`、`"siliconflow"` 与 `"zhipu"`。`"doubao"`、`"qwen"`、`"kling"` 仍为 registry 预留，adapter 未实现前不会被启用。
 
 ### 3.2 ProviderMode
 
@@ -59,7 +59,7 @@ MVP 仅实现 `"fal"` 与 `"zenmux"`。其余值为 registry 预留，adapter �
 type ProviderMode = "text-to-image" | "image-to-image"
 ```
 
-MVP 两个首跑模型均支持 `text-to-image`。`image-to-image` 在 capabilities 中声明但 MVP 不暴露 API 参数。
+当前四个首跑模型均支持 `text-to-image`。`image-to-image` 在 capabilities 中保留类型位，但当前不暴露 API 参数。
 
 ### 3.3 NormalizedRequest
 
@@ -95,7 +95,7 @@ type SubmitResult =
 
 | kind | 含义 | 适用厂商 |
 |------|------|----------|
-| `sync` | 当场完成，images 含厂商临时 URL | zenmux |
+| `sync` | 当场完成，images 含厂商临时 URL | zenmux、siliconflow、zhipu |
 | `async` | 任务已提交，需后续 poll | fal |
 | `failed` | 单次调用失败（含超时、4xx、5xx） | 全部 |
 
@@ -253,6 +253,43 @@ type ProviderErrorCode =
 
 **扇出交集提示**: fal ∩ zenmux 的公开比目前主要为 `1:1`。web-ui 多选两模型时宽高比选项取交集；服务端仍按每 target 校验。
 
+### siliconflow / Kwai-Kolors/Kolors
+
+| 字段 | 值 |
+|------|-----|
+| protocol | `sync` |
+| modes | `["text-to-image"]` |
+| maxCount | 1（当前同步 job-engine 约束；厂商 batch 能力暂不向上暴露） |
+| supportedSizes | `["1024x1024", "960x1280", "768x1024", "720x1440", "720x1280"]` |
+| supportedAspectRatios | `["1:1", "3:4", "1:2", "9:16"]` |
+| supportsNegativePrompt | true |
+| supportsSeed | true |
+| defaultSize | `"1024x1024"` |
+
+#### SiliconFlow 公开比 → image_size 映射（adapter 内部）
+
+| aspectRatio | image_size |
+|-------------|------------|
+| `1:1` | `1024x1024` |
+| `3:4` | `960x1280` |
+| `1:2` | `720x1440` |
+| `9:16` | `720x1280` |
+
+### zhipu / glm-image
+
+| 字段 | 值 |
+|------|-----|
+| protocol | `sync` |
+| modes | `["text-to-image"]` |
+| maxCount | 1 |
+| supportedSizes | `["1280x1280", "1568x1056", "1056x1568", "1472x1088", "1088x1472", "1728x960", "960x1728"]` |
+| supportedAspectRatios | `["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"]` |
+| supportsNegativePrompt | false |
+| supportsSeed | false |
+| defaultSize | `"1280x1280"` |
+
+智谱 adapter 固定使用 `quality="hd"` 与 `watermark_enabled=true`，`user_id` 从 `ZHIPU_USER_ID` 读取，单用户默认值为 `local-user`。
+
 ---
 
 ## 5. Lifecycle & Ownership（生命周期与归属）
@@ -276,4 +313,4 @@ type ProviderErrorCode =
 - 所有概念均可在 dfd-interface.md 的数据流中找到使用场景
 - ProviderImageRef 明确标注为临时资源，与 db 模块的 Image 实体区分
 - SubmitResult/PollResult 的 kind/status 枚举覆盖 sync + async 两种协议路径
-- MVP 首跑模型的 capabilities 与 model-interface-docs 一致
+- 当前 Batch 1 模型的 capabilities 与对应厂商 API 文档一致；同步 provider 的 `maxCount=1` 是现有 job-engine 约束，而非厂商能力上限

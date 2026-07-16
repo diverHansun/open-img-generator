@@ -1,0 +1,143 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeNormalizedRequest } from '../../../../tests/factories';
+import { SiliconFlowProvider } from './siliconflow';
+
+describe('SiliconFlowProvider', () => {
+  let provider: SiliconFlowProvider;
+  const originalFetch = global.fetch;
+  const originalKey = process.env.SILICONFLOW_API_KEY;
+
+  beforeEach(() => {
+    provider = new SiliconFlowProvider();
+    process.env.SILICONFLOW_API_KEY = 'siliconflow-test-key';
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.SILICONFLOW_API_KEY;
+    else process.env.SILICONFLOW_API_KEY = originalKey;
+  });
+
+  function mockFetch(payload: unknown, status = 200) {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: status >= 200 && status < 300,
+      status,
+      statusText: status === 200 ? 'OK' : 'Bad Request',
+      json: async () => payload,
+    } as Response);
+  }
+
+  it('submits a sync Kolors request and parses image metadata', async () => {
+    mockFetch({ images: [{ url: 'https://cdn.siliconflow.cn/result.png' }], seed: 123 });
+
+    const result = await provider.submit(
+      makeNormalizedRequest({
+        width: undefined,
+        height: undefined,
+        aspectRatio: '9:16',
+        negativePrompt: 'blurry',
+        seed: 123,
+      }),
+      'Kwai-Kolors/Kolors',
+    );
+
+    expect(result.kind).toBe('sync');
+    if (result.kind === 'sync') {
+      expect(result.images).toEqual([
+        {
+          url: 'https://cdn.siliconflow.cn/result.png',
+          width: 720,
+          height: 1280,
+          contentType: 'image/png',
+          index: 0,
+        },
+      ]);
+    }
+
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(url).toBe('https://api.siliconflow.cn/v1/images/generations');
+    expect((init?.headers as Record<string, string>).Authorization).toBe(
+      'Bearer siliconflow-test-key',
+    );
+    expect(JSON.parse(init?.body as string)).toMatchObject({
+      model: 'Kwai-Kolors/Kolors',
+      prompt: 'A cat wearing a space helmet',
+      image_size: '720x1280',
+      batch_size: 1,
+      negative_prompt: 'blurry',
+      seed: 123,
+    });
+  });
+
+  it('passes non-reserved provider options through', async () => {
+    mockFetch({ images: [{ url: 'https://cdn.siliconflow.cn/result.png' }] });
+
+    await provider.submit(
+      makeNormalizedRequest({ providerOptions: { guidance_scale: 7, model: 'ignored' } }),
+      'Kwai-Kolors/Kolors',
+    );
+
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(JSON.parse(init?.body as string)).toMatchObject({ guidance_scale: 7 });
+    expect(JSON.parse(init?.body as string).model).toBe('Kwai-Kolors/Kolors');
+  });
+
+  it('maps provider HTTP errors and missing images', async () => {
+    mockFetch({ message: 'invalid image size' }, 422);
+    const invalid = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    expect(invalid.kind).toBe('failed');
+    if (invalid.kind === 'failed') {
+      expect(invalid.error.code).toBe('INVALID_REQUEST');
+      expect(invalid.error.message).toContain('invalid image size');
+    }
+
+    mockFetch({ images: [] });
+    const empty = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    expect(empty.kind).toBe('failed');
+
+    mockFetch({ message: 'bad request' }, 400);
+    const badRequest = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    expect(badRequest.kind).toBe('failed');
+    if (badRequest.kind === 'failed') {
+      expect(badRequest.error.code).toBe('INVALID_REQUEST');
+    }
+  });
+
+  it('maps a timeout to a retryable TIMEOUT error', async () => {
+    const timeout = Object.assign(new Error('request timed out'), { name: 'TimeoutError' });
+    global.fetch = vi.fn().mockRejectedValue(timeout);
+
+    const result = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    expect(result.kind).toBe('failed');
+    if (result.kind === 'failed') {
+      expect(result.error.code).toBe('TIMEOUT');
+      expect(result.error.retryable).toBe(true);
+    }
+  });
+
+  it.each([
+    [401, 'Invalid token', 'AUTH_FAILED', false],
+    [429, { message: 'rate limited' }, 'RATE_LIMITED', true],
+    [503, { code: 50505, message: 'service overloaded' }, 'PROVIDER_ERROR', true],
+  ])('maps HTTP %s with the correct retry policy', async (status, payload, code, retryable) => {
+    mockFetch(payload, status);
+
+    const result = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    expect(result.kind).toBe('failed');
+    if (result.kind === 'failed') {
+      expect(result.error.code).toBe(code);
+      expect(result.error.retryable).toBe(retryable);
+    }
+  });
+
+  it('keeps non-timeout transport failures as UNKNOWN', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('socket closed'));
+
+    const result = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    expect(result.kind).toBe('failed');
+    if (result.kind === 'failed') {
+      expect(result.error.code).toBe('UNKNOWN');
+      expect(result.error.retryable).toBe(false);
+    }
+  });
+});

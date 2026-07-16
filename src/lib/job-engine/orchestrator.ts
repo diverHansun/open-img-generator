@@ -37,6 +37,8 @@ function buildNormalizedRequest(
   return {
     prompt: processedPrompt,
     mode: params.mode,
+    width: params.width,
+    height: params.height,
     aspectRatio: params.aspectRatio,
     count: params.count,
     negativePrompt: params.negativePrompt,

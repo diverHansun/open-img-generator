@@ -149,6 +149,8 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
   "prompt": "string",
   "targets": [{ "provider": "fal", "model": "fal-ai/flux/schnell" }],
   "sessionId": "required-uuid",
+  "width": null,
+  "height": null,
   "aspectRatio": "1:1",
   "count": 1,
   "seed": null,
@@ -159,6 +161,7 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
 - **Breaking**: 不再接受顶层单独的 `provider` / `model`（实施时可短暂兼容单字段并内部转为 `targets`，但文档契约以 `targets` 为准）。
 - **Breaking (2026-07-16)**: `sessionId` **必填**；缺失或指向不存在 session → 400。Session 必须已属于某 Project（由 library 创建时保证）。
 - `aspectRatio` 为公开比；必须被**每一个** target 的 `supportedAspectRatios` 包含，否则 400。
+- `width` 与 `height` 必须同时提供，且必须是正整数；两者优先于 `aspectRatio` 交给各 adapter 翻译。
 - `seed`：对不支持的 target 在 NormalizedRequest 中省略，不因此 400。
 
 ---

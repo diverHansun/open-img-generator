@@ -221,6 +221,8 @@ describe('orchestrator', () => {
             { provider: 'zenmux', model: 'openai/gpt-image-2' },
           ],
           aspectRatio: '1:1',
+          width: 960,
+          height: 1280,
           seed: 42,
         }),
         { db },
@@ -228,6 +230,10 @@ describe('orchestrator', () => {
 
       expect(result.status).toBe('pending');
       expect(falSubmit).toHaveBeenCalledWith(expect.objectContaining({ seed: 42 }), 'fal-ai/flux/schnell');
+      expect(falSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 960, height: 1280, aspectRatio: '1:1' }),
+        'fal-ai/flux/schnell',
+      );
       expect(zenmuxSubmit).toHaveBeenCalledWith(expect.objectContaining({ seed: undefined }), 'openai/gpt-image-2');
       expect(getGenerationWithJobsAndImages(result.generationId, db)!.jobs).toHaveLength(2);
     });

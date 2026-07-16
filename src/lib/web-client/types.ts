@@ -51,6 +51,8 @@ export type SubmitGenerationRequest = {
   targets: GenerationTarget[];
   sessionId: string;
   mode?: ProviderMode;
+  width?: number;
+  height?: number;
   aspectRatio?: string;
   count?: number;
   negativePrompt?: string;

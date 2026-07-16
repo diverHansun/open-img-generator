@@ -34,6 +34,18 @@ export function validate(
   if (params.seed !== undefined && !Number.isInteger(params.seed)) {
     throw new ValidationError('Seed must be an integer');
   }
+  const hasWidth = params.width !== undefined;
+  const hasHeight = params.height !== undefined;
+  if (hasWidth !== hasHeight) {
+    throw new ValidationError('Width and height must be provided together');
+  }
+  if (
+    (hasWidth && !Number.isInteger(params.width)) ||
+    (hasHeight && !Number.isInteger(params.height)) ||
+    (hasWidth && (params.width! <= 0 || params.height! <= 0))
+  ) {
+    throw new ValidationError('Width and height must be positive integers');
+  }
   if (params.negativePrompt !== undefined && typeof params.negativePrompt !== 'string') {
     throw new ValidationError('Negative prompt must be a string');
   }

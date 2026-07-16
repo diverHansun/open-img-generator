@@ -134,4 +134,20 @@ describe('validator', () => {
     createSession({ id: 's1', projectId: 'default-project', title: 'Test', createdAt: 'now', updatedAt: 'now' }, db);
     expect(() => validate(makeParams({ sessionId: 's1' }), { db })).not.toThrow();
   });
+
+  it('accepts width and height together', () => {
+    expect(() => validate(makeParams({ width: 960, height: 1280 }), { db })).not.toThrow();
+  });
+
+  it('rejects incomplete or invalid dimensions', () => {
+    expect(() => validate(makeParams({ width: 960 }), { db })).toThrow(
+      'Width and height must be provided together',
+    );
+    expect(() => validate(makeParams({ width: 0, height: 1280 }), { db })).toThrow(
+      'Width and height must be positive integers',
+    );
+    expect(() => validate(makeParams({ width: 960.5, height: 1280 }), { db })).toThrow(
+      'Width and height must be positive integers',
+    );
+  });
 });

@@ -14,7 +14,7 @@
 |------|------|----------|
 | 上游调用方 | job-engine | 传入 NormalizedRequest，接收 SubmitResult / PollResult |
 | 上游调用方 | API 层（经 job-engine 或直接） | 通过 registry 获取 ProviderInfo 列表 |
-| 下游依赖 | 外部厂商 API | fal.ai queue API、ZenMux OpenAI Images API |
+| 下游依赖 | 外部厂商 API | fal.ai queue API、ZenMux、SiliconFlow、智谱图片生成 API |
 | 平级模块 | prompt | job-engine 在调用 providers 前先经 prompt 模块处理 prompt；providers 不直接依赖 prompt |
 
 ### 本文档范围
@@ -41,7 +41,7 @@ API 层
   → 返回 ProviderInfo[] 给 API 层
 ```
 
-### 2.2 Sync 路径（zenmux / openai/gpt-image-2）
+### 2.2 Sync 路径（zenmux / siliconflow / zhipu）
 
 ```
 job-engine
@@ -57,6 +57,8 @@ job-engine
   → 返回 SubmitResult { kind: "sync", images: [...] }
 → job-engine 拿到 images[].url，交给 storage 下载转存
 ```
+
+SiliconFlow 与智谱的差异只存在于 adapter 内部：前者提交 `image_size`/`batch_size`，解析响应 `images[].url`；后者提交 `size`/`quality`/`watermark_enabled`/`user_id`，解析响应 `data[].url`。两者均只返回厂商临时 URL，不在 providers 内下载或持久化。
 
 ### 2.3 Async 路径 — Submit（fal / fal-ai/flux/schnell）
 
@@ -138,15 +140,15 @@ MVP 不实现取消 API 端点，但 fal adapter 实现 cancel 方法，接口�
 | 输入 | provider id |
 | 输出 | `ImageProvider` 实例 |
 | 同步/异步 | 同步 |
-| 失败 | 抛出 `ProviderNotEnabledError`（该 id 无 env key 或 adapter 未实现） |
+| 失败 | 返回 `undefined`（该 id 无 env key 或 adapter 未实现） |
 
 ### 3.3 ImageProvider.submit(req, model)
 
 | 属性 | 值 |
 |------|-----|
 | 输入 | `NormalizedRequest` + model id 字符串 |
-| 输出 | `SubmitResult` |
-| 同步/异步 | 同步（函数本身同步返回；async 厂商返回的 SubmitResult.kind 为 "async"） |
+| 输出 | `Promise<SubmitResult>` |
+| 同步/异步 | 异步函数；async 厂商返回的 SubmitResult.kind 为 "async"，sync 厂商返回 "sync" |
 | 超时 | adapter 内通过 http-client 设置（建议 30s submit 超时） |
 | 副作用 | 向外部厂商发起 HTTP 请求 |
 
@@ -165,8 +167,8 @@ MVP 不实现取消 API 端点，但 fal adapter 实现 cancel 方法，接口�
 | 属性 | 值 |
 |------|-----|
 | 输入 | `JobHandle` |
-| 输出 | `void`（成功）或抛出 `ProviderError` |
-| 同步/异步 | 同步 |
+| 输出 | `Promise<PollResult>`（成功为 `status="cancelled"`，失败为 `status="failed"`） |
+| 同步/异步 | 异步函数 |
 | MVP | 实现但不暴露 API |
 
 ### 3.6 ImageProvider.id 与 ImageProvider.capabilities

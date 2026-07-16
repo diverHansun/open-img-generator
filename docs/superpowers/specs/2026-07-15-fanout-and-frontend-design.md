@@ -7,6 +7,8 @@
 
 This file remains as the product brainstorm snapshot; do not implement from it if it conflicts with `docs/mvp/`.
 
+**Implementation note (2026-07-16):** The current `mvp` branch has since added the first provider batch (SiliconFlow + Zhipu) behind the same capabilities/registry contract. The non-goal below describes the original brainstorm slice; it does not remove those providers from the current implementation. Kling remains a separate future adapter and must not reuse DashScope.
+
 ---
 
 # Fan-out + Frontend Workbench Design

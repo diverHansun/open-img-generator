@@ -10,6 +10,8 @@ export type SubmitGenerationParams = {
   prompt: string;
   sessionId: string;
   mode?: ProviderMode;
+  width?: number;
+  height?: number;
   aspectRatio?: string;
   count?: number;
   negativePrompt?: string;
