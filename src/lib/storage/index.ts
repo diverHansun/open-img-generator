@@ -38,6 +38,16 @@ function generateStoragePath(contentType: string): string {
   return path.join(String(year), month, `${id}${extensionFromContentType(contentType)}`);
 }
 
+function resolveStoragePath(storagePath: string): string {
+  const root = getStorageRoot();
+  const absolutePath = path.resolve(path.join(root, storagePath));
+  const relativeToRoot = path.relative(root, absolutePath);
+  if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
+    throw new StorageError(`Invalid storage path: ${storagePath}`);
+  }
+  return absolutePath;
+}
+
 export async function downloadAndStore(url: string): Promise<DownloadAndStoreResult> {
   let contentType = 'application/octet-stream';
   let buffer: ArrayBuffer;
@@ -83,7 +93,7 @@ export async function downloadAndStore(url: string): Promise<DownloadAndStoreRes
 
   ensureRootExists();
   const storagePath = generateStoragePath(contentType);
-  const absolutePath = path.join(getStorageRoot(), storagePath);
+  const absolutePath = resolveStoragePath(storagePath);
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
 
   try {
@@ -99,14 +109,18 @@ export async function downloadAndStore(url: string): Promise<DownloadAndStoreRes
   };
 }
 
-export function getReadStream(storagePath: string): ReadableStream<Uint8Array> {
-  const root = getStorageRoot();
-  const absolutePath = path.resolve(path.join(root, storagePath));
-  const relativeToRoot = path.relative(root, absolutePath);
-
-  if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
-    throw new StorageError(`Invalid storage path: ${storagePath}`);
+/** Best-effort cleanup for a file that lost an idempotent image insert race. */
+export function removeStoredFile(storagePath: string): void {
+  const absolutePath = resolveStoragePath(storagePath);
+  try {
+    fs.rmSync(absolutePath, { force: true });
+  } catch (err) {
+    throw new StorageError(`Failed to remove stored image ${storagePath}`, err);
   }
+}
+
+export function getReadStream(storagePath: string): ReadableStream<Uint8Array> {
+  const absolutePath = resolveStoragePath(storagePath);
 
   if (!fs.existsSync(absolutePath)) {
     throw new NotFoundError(`Image not found: ${storagePath}`);

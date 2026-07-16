@@ -48,7 +48,7 @@ export async function storeImages(
       return { kind: 'failed', error: storageError };
     }
 
-    createImageIfAbsent(
+    const inserted = createImageIfAbsent(
       {
         id: randomUUID(),
         jobId,
@@ -62,6 +62,13 @@ export async function storeImages(
       },
       client,
     );
+    if (!inserted) {
+      try {
+        storage.removeStoredFile(result.storagePath);
+      } catch {
+        // Cleanup is best effort; the existing image row remains authoritative.
+      }
+    }
     storedIndexes.push(ref.index);
   }
 

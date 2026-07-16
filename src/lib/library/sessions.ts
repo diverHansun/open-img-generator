@@ -7,7 +7,7 @@ import {
   type DbClient,
   type Session,
 } from '../db';
-import { NotFoundError, ValidationError } from '../errors';
+import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { getProject } from './projects';
 
 function normalizeTitle(title: unknown): string | null {
@@ -25,21 +25,28 @@ export function createSession(
   getProject(input.projectId, client);
   const now = new Date().toISOString();
   const id = randomUUID();
-  client.transaction((tx) => {
-    tx.insert(sessions)
-      .values({
-        id,
-        projectId: input.projectId,
-        title: normalizeTitle(input.title),
-        createdAt: now,
-        updatedAt: now,
-      })
-      .run();
-    tx.update(projects)
-      .set({ updatedAt: now })
-      .where(eq(projects.id, input.projectId))
-      .run();
-  });
+  try {
+    client.transaction((tx) => {
+      tx.insert(sessions)
+        .values({
+          id,
+          projectId: input.projectId,
+          title: normalizeTitle(input.title),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      tx.update(projects)
+        .set({ updatedAt: now })
+        .where(eq(projects.id, input.projectId))
+        .run();
+    });
+  } catch (err) {
+    if (err instanceof Error && /foreign key|constraint/i.test(err.message)) {
+      throw new ConflictError('Project was deleted before the Session was created');
+    }
+    throw err;
+  }
   return getSession(id, client);
 }
 

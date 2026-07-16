@@ -96,6 +96,12 @@ export function listGenerations(
   const limit = Math.min(input.limit ?? 10, 50);
   const after = decodeCursor(input.cursor);
 
+  if (input.projectId !== undefined && input.projectId.trim().length === 0) {
+    throw new ValidationError('projectId must not be empty');
+  }
+  if (input.sessionId !== undefined && input.sessionId.trim().length === 0) {
+    throw new ValidationError('sessionId must not be empty');
+  }
   if (input.projectId) getProject(input.projectId, client);
   if (input.sessionId && !sessionExists(input.sessionId, client)) {
     throw new NotFoundError(`Session not found: ${input.sessionId}`);
