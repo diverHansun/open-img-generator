@@ -71,6 +71,7 @@ API 层: POST /api/generations
            mode, width, height, aspectRatio, count,
            negativePrompt,
            seed: caps.supportsSeed ? seed : undefined,
+           referenceImages,
            providerOptions
          }  // 显式 pick，禁止 ...params 扩散；不含 provider/model/sessionId
 
@@ -112,7 +113,10 @@ API 层: GET /api/generations/:id
        → 收集 status ∈ {pending, running} 的 jobs
        → Promise.all(jobs.map(job => lifecycle.advance(job)))
            advance:
-             claim: UPDATE job SET poll_lease_until=? WHERE id=? AND status IN ('pending','running')
+             claim: UPDATE job SET poll_lease_until=?, next_poll_at=NULL WHERE id=?
+                    AND status IN ('pending','running') AND provider_handle IS NOT NULL
+                    AND cancel_requested_at IS NULL
+                    AND (next_poll_at IS NULL OR next_poll_at<=now)
                     AND (poll_lease_until IS NULL OR poll_lease_until<=now)
              行数 0 → return（跳过）
              反序列化 handle → provider.poll
@@ -123,6 +127,17 @@ API 层: GET /api/generations/:id
 ```
 
 已全部终态的 generation **不触发** poll。
+
+### 2.3 Cancel 流程（POST /api/generations/:id/cancel）
+
+```
+API → orchestrator.cancelGeneration
+  → 对 active jobs CAS 写 cancel_requested_at
+  → 有 provider.cancel 且有 handle 时尽力调用
+  → 统一写 cancelled、清理 lease/next_poll_at、同步 generation 聚合状态
+```
+
+没有远程取消端点的 provider（例如 Kling 标准图片 API）仍立即停止本地 poll，并在 job.error 写入 `CANCEL_UNSUPPORTED`。
 
 ### 2.3 Session 关联（必填，2026-07-16）
 
@@ -182,13 +197,14 @@ SubmitGenerationParams {
   seed?: number                  // 可选。构造每 target 的 NormalizedRequest 时：
                                  //   supportsSeed → 传入 seed；否则省略。
                                  // web-ui：任一选中模型 supportsSeed 则展示 seed 控件。
+  referenceImages?: string[]     // image-to-image 至少一张；按 adapter 限制裁剪/翻译
   providerOptions?: Record<string, unknown>
 }
 ```
 
 **Breaking change**: 移除顶层单字段 `provider` / `model`；改由 `targets[]` 表达。单模型请求为 `targets: [{ provider, model }]`。
 
-**持久化边界**: 除 prompt、sessionId、provider/model（在 jobs 行）外，运行时尺寸/count/seed 等**不入库**。
+**持久化边界**: 除 prompt、sessionId、provider/model（在 jobs 行）外，运行时尺寸/count/seed/referenceImages 等**不入库**。
 
 ### 3.2 getGeneration(id)
 

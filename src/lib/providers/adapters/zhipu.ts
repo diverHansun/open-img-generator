@@ -11,6 +11,7 @@ import {
   createProviderError,
 } from '../http-client';
 import { zhipuCapabilities } from '../capabilities/zhipu';
+import { resolveCredential } from '../../user-config';
 
 const API_URL = 'https://open.bigmodel.cn/api/paas/v4/images/generations';
 const RESERVED_KEYS = new Set([
@@ -93,7 +94,7 @@ export class ZhipuProvider implements ImageProvider {
   );
 
   private authHeaders(): Record<string, string> {
-    const key = process.env.ZHIPU_API_KEY;
+    const key = resolveCredential('ZHIPU_API_KEY');
     return key ? { Authorization: `Bearer ${key}` } : {};
   }
 

@@ -9,6 +9,7 @@ import type {
 } from '../types';
 import { getJson, postJson, putJson, ProviderHttpError, createProviderError } from '../http-client';
 import { falCapabilities } from '../capabilities/fal';
+import { resolveCredential } from '../../user-config';
 
 function resolveSize(req: NormalizedRequest): string {
   const aspectRatioMap: Record<string, string> = {
@@ -83,7 +84,7 @@ export class FalProvider implements ImageProvider {
   );
 
   private get apiKey(): string | undefined {
-    return process.env.FAL_KEY;
+    return resolveCredential('FAL_KEY');
   }
 
   private authHeaders(): Record<string, string> {

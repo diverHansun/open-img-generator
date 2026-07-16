@@ -73,6 +73,8 @@ export const generationJobs = sqliteTable(
     providerHandle: text('provider_handle'),
     error: text('error'),
     pollLeaseUntil: text('poll_lease_until'),
+    nextPollAt: text('next_poll_at'),
+    cancelRequestedAt: text('cancel_requested_at'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },

@@ -37,6 +37,8 @@ export function createTestDb() {
       provider_handle TEXT,
       error TEXT,
       poll_lease_until TEXT,
+      next_poll_at TEXT,
+      cancel_requested_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );

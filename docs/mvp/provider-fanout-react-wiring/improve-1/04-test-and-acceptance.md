@@ -59,7 +59,7 @@
 | 攻击面 / 失败模式 | 防御 | 残余风险 |
 |---|---|---|
 | 两个浏览器同时轮询 | SQL 原子 lease claim | 租约过期时极慢请求可能重叠；Provider poll 必须幂等或容错 |
-| 进程在 poll 中崩溃 | 过期 lease 可恢复 | 无后台 worker，直到下一次 GET 才恢复 |
+| 进程在 poll 中崩溃 | 过期 lease 可恢复 | 默认直到下一次 GET；开启 `JOB_WORKER_ENABLED` 后由 worker 扫描 due job |
 | 一个 Provider 返回失败 | job 级错误与部分成功聚合 | 用户仍需从 job 行理解失败原因，属于后续 UI 职责 |
 | 恶意客户端绕过前端限制 | 服务端逐 target validation | `providerOptions` 若以后开放，需要额外白名单 |
 | 密钥进入浏览器或仓库 | server-only registry、`.env` ignore、静态搜索 | 本地开发者仍需自行保护 `.env` 文件 |

@@ -1,0 +1,216 @@
+import type {
+  ImageProvider,
+  JobHandle,
+  NormalizedRequest,
+  PollResult,
+  ProviderCapabilities,
+  ProviderImageRef,
+  SubmitResult,
+} from '../types';
+import { getJson, postJson, ProviderHttpError, createProviderError } from '../http-client';
+import { klingCapabilities } from '../capabilities/kling';
+import { resolveCredential } from '../../user-config';
+
+const DEFAULT_BASE_URL = 'https://api-singapore.klingai.com';
+const RESERVED_KEYS = new Set([
+  'model_name',
+  'prompt',
+  'negative_prompt',
+  'image',
+  'image_reference',
+  'image_fidelity',
+  'human_fidelity',
+  'resolution',
+  'n',
+  'aspect_ratio',
+  'watermark_info',
+  'callback_url',
+  'external_task_id',
+]);
+
+function baseUrl(): string {
+  return (process.env.KLING_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
+}
+
+function generationsUrl(taskId?: string): string {
+  return `${baseUrl()}/v1/images/generations${taskId ? `/${encodeURIComponent(taskId)}` : ''}`;
+}
+
+function authHeaders(): Record<string, string> {
+  const key = resolveCredential('KLING_API_KEY');
+  return key ? { Authorization: `Bearer ${key}` } : {};
+}
+
+function normalizeReferenceImage(value: string): string {
+  return value.replace(/^data:[^;]+;base64,/i, '');
+}
+
+function buildRequestBody(req: NormalizedRequest, model: string): Record<string, unknown> {
+  if (req.referenceImages && req.referenceImages.length > 1) {
+    throw new Error('Kling standard image endpoint accepts at most one reference image');
+  }
+  const body: Record<string, unknown> = {
+    model_name: model,
+    prompt: req.prompt,
+    resolution: req.providerOptions?.resolution === '2k' ? '2k' : '1k',
+    n: req.count ?? 1,
+    watermark_info: { enabled: false },
+  };
+  if (req.aspectRatio) body.aspect_ratio = req.aspectRatio;
+  if (req.negativePrompt) body.negative_prompt = req.negativePrompt;
+  if (req.referenceImages?.[0]) {
+    body.image = normalizeReferenceImage(req.referenceImages[0]);
+    body.image_reference = 'subject';
+  }
+  if (typeof req.providerOptions?.image_fidelity === 'number') {
+    body.image_fidelity = req.providerOptions.image_fidelity;
+  }
+  if (typeof req.providerOptions?.human_fidelity === 'number') {
+    body.human_fidelity = req.providerOptions.human_fidelity;
+  }
+  if (req.providerOptions?.watermark_info && typeof req.providerOptions.watermark_info === 'object') {
+    body.watermark_info = req.providerOptions.watermark_info;
+  }
+  for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
+    if (!RESERVED_KEYS.has(key)) body[key] = value;
+  }
+  return body;
+}
+
+function parseStatus(value: unknown): string {
+  return typeof value === 'string' ? value.toLowerCase() : '';
+}
+
+function readEnvelopeError(payload: unknown): { code: number; message: string } | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const root = payload as Record<string, unknown>;
+  const rawCode = root.code;
+  const code = typeof rawCode === 'number'
+    ? rawCode
+    : typeof rawCode === 'string' && /^\d+$/.test(rawCode)
+      ? Number(rawCode)
+      : 0;
+  if (code === 0) return null;
+  return {
+    code,
+    message: typeof root.message === 'string' ? root.message : 'Kling request failed',
+  };
+}
+
+function parseImages(payload: unknown): ProviderImageRef[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const root = payload as Record<string, unknown>;
+  const data = root.data;
+  if (!data || typeof data !== 'object') return [];
+  const taskResult = (data as Record<string, unknown>).task_result;
+  if (!taskResult || typeof taskResult !== 'object') return [];
+  const rawImages = (taskResult as Record<string, unknown>).images;
+  if (!Array.isArray(rawImages)) return [];
+  return rawImages.flatMap((item, index) => {
+    if (!item || typeof item !== 'object') return [];
+    const image = item as Record<string, unknown>;
+    const url = typeof image.url === 'string' ? image.url : '';
+    if (!url) return [];
+    return [{
+      url,
+      width: null,
+      height: null,
+      contentType: 'image/png',
+      index,
+    }];
+  });
+}
+
+export class KlingProvider implements ImageProvider {
+  id = 'kling' as const;
+  displayName = 'Kling AI';
+  capabilities = new Map<string, ProviderCapabilities>(
+    klingCapabilities.map((capability) => [capability.model, capability]),
+  );
+
+  async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
+    try {
+      const data = await postJson(
+        generationsUrl(),
+        buildRequestBody(req, model),
+        authHeaders(),
+      );
+      const envelopeError = readEnvelopeError(data);
+      if (envelopeError) {
+        return {
+          kind: 'failed',
+          error: createProviderError(envelopeError.code === 401 ? 401 : 422, envelopeError.message),
+        };
+      }
+      const output = data && typeof data === 'object'
+        ? (data as Record<string, unknown>).data
+        : null;
+      const taskId = output && typeof output === 'object' && typeof (output as Record<string, unknown>).task_id === 'string'
+        ? (output as Record<string, unknown>).task_id as string
+        : '';
+      if (!taskId) {
+        return { kind: 'failed', error: createProviderError(500, 'No task_id in Kling response') };
+      }
+      const statusUrl = generationsUrl(taskId);
+      const handle: JobHandle = {
+        providerId: 'kling',
+        model,
+        externalId: taskId,
+        statusUrl,
+        responseUrl: statusUrl,
+        cancelUrl: null,
+        submittedAt: new Date().toISOString(),
+      };
+      return { kind: 'async', handle };
+    } catch (err) {
+      return { kind: 'failed', error: this.mapError(err) };
+    }
+  }
+
+  async poll(handle: JobHandle): Promise<PollResult> {
+    try {
+      const data = await getJson(handle.statusUrl, authHeaders(), 15_000);
+      const envelopeError = readEnvelopeError(data);
+      if (envelopeError) {
+        return { status: 'failed', error: createProviderError(422, envelopeError.message) };
+      }
+      const output = data && typeof data === 'object'
+        ? (data as Record<string, unknown>).data
+        : null;
+      const status = output && typeof output === 'object'
+        ? parseStatus((output as Record<string, unknown>).task_status)
+        : '';
+      if (status === 'submitted') return { status: 'pending' };
+      if (status === 'processing') return { status: 'running' };
+      if (status === 'succeed' || status === 'success' || status === 'completed') {
+        const images = parseImages(data);
+        return images.length > 0
+          ? { status: 'completed', images }
+          : { status: 'failed', error: createProviderError(500, 'No images in Kling response') };
+      }
+      if (status === 'failed' || status === 'canceled' || status === 'cancelled') {
+        const message = output && typeof output === 'object' && typeof (output as Record<string, unknown>).task_status_msg === 'string'
+          ? (output as Record<string, unknown>).task_status_msg as string
+          : `Kling task ${status}`;
+        return status === 'canceled' || status === 'cancelled'
+          ? { status: 'cancelled' }
+          : { status: 'failed', error: createProviderError(422, message) };
+      }
+      return { status: 'failed', error: createProviderError(500, `Unexpected Kling status: ${status || 'unknown'}`) };
+    } catch (err) {
+      return { status: 'failed', error: this.mapError(err) };
+    }
+  }
+
+  private mapError(err: unknown): ReturnType<typeof createProviderError> {
+    if (err instanceof ProviderHttpError) {
+      const body = err.body as Record<string, unknown> | null;
+      const message = body && typeof body.message === 'string' ? body.message : err.message;
+      return createProviderError(err.status, message, err.status === 429 || err.status >= 500);
+    }
+    if (err instanceof Error && err.name === 'TimeoutError') {
+      return createProviderError(0, err.message, true);
+    }
+    return createProviderError(0, err instanceof Error ? err.message : String(err), false);
+  }
+}

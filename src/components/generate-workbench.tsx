@@ -271,6 +271,9 @@ export function GenerateWorkbench() {
   const [recentLoading, setRecentLoading] = useState(false);
   const [recentError, setRecentError] = useState<string | null>(null);
   const [favoriteImageIds, setFavoriteImageIds] = useState<Set<string>>(() => new Set());
+  const [authRequired, setAuthRequired] = useState(false);
+  const [authToken, setAuthToken] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
 
   const applyProviders = useCallback((nextProviders: ProviderInfo[]) => {
     setProviders(nextProviders);
@@ -302,6 +305,15 @@ export function GenerateWorkbench() {
     ]);
 
     if (!mountedRef.current) return;
+
+    if ([providerResult, projectResult, preferenceResult].some(
+      (result) => result.status === 'rejected' && result.reason?.status === 401,
+    )) {
+      setAuthRequired(true);
+      setProviderState('error');
+      setAssetState('error');
+      return;
+    }
 
     if (providerResult.status === 'fulfilled') {
       setProviderCatalog(providerResult.value);
@@ -347,6 +359,21 @@ export function GenerateWorkbench() {
       setAssetState('error');
     }
   }, [apiClient, applyProviders]);
+
+  const handleAuthSubmit = async () => {
+    if (!authToken.trim()) return;
+    setAuthLoading(true);
+    try {
+      await apiClient.login(authToken.trim());
+      setAuthToken('');
+      setAuthRequired(false);
+      await loadWorkspace();
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : '登录失败');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!currentProjectId) {
@@ -640,6 +667,22 @@ export function GenerateWorkbench() {
     }
   };
 
+  const cancelCurrentGeneration = async () => {
+    const generationId = generation?.id ?? pending?.id;
+    if (!generationId) return;
+    pollingRef.current?.cancel();
+    try {
+      const view = await apiClient.cancelGeneration(generationId);
+      if (!mountedRef.current) return;
+      setGeneration(view);
+      setPending((current) => current ? { ...current, status: view.status } : current);
+      setIsGenerating(false);
+      window.localStorage.removeItem(ACTIVE_GENERATION_KEY);
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : '取消任务失败');
+    }
+  };
+
   const randomizePrompt = () => {
     const choices = RANDOM_PROMPTS.filter((item) => item !== prompt);
     setPrompt(choices[Math.floor(Math.random() * choices.length)] ?? DEFAULT_PROMPT);
@@ -691,6 +734,25 @@ export function GenerateWorkbench() {
 
   return (
     <div className="app-shell">
+      {authRequired ? (
+        <div className="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+          <form className="auth-card" onSubmit={(event) => { event.preventDefault(); void handleAuthSubmit(); }}>
+            <h2 id="auth-title">Local access</h2>
+            <p>请输入服务端配置的 APP_AUTH_TOKEN 以继续。</p>
+            <input
+              type="password"
+              value={authToken}
+              onChange={(event) => setAuthToken(event.target.value)}
+              autoFocus
+              placeholder="Access token"
+              aria-label="Access token"
+            />
+            <button type="submit" disabled={authLoading || !authToken.trim()}>
+              {authLoading ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+        </div>
+      ) : null}
       <aside className="left-rail">
         <nav className="primary-nav" aria-label="Primary navigation">
           {NAV_ITEMS.map((item) => (
@@ -902,6 +964,11 @@ export function GenerateWorkbench() {
                   <span>{generation ? new Date(generation.createdAt).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Submitted just now'}</span>
                   <span>{visibleImageCount || visibleCount * visibleModelCount} image{(visibleImageCount || visibleCount * visibleModelCount) === 1 ? '' : 's'}</span>
                   <span>{visibleModelCount} model{visibleModelCount === 1 ? '' : 's'}</span>
+                  {visibleStatus && !TERMINAL_STATUSES.has(visibleStatus) ? (
+                    <button type="button" className="secondary-button" onClick={() => void cancelCurrentGeneration()}>
+                      Cancel
+                    </button>
+                  ) : null}
                 </div>
               </div>
               <ResultsGrid

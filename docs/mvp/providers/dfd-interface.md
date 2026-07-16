@@ -60,7 +60,7 @@ job-engine
 
 SiliconFlow、智谱与 Doubao 的差异只存在于 adapter 内部：分别解析 `images[].url`、`data[].url` 与 Ark `data[].url`；Doubao 额外支持 `image[]` 参考图。三者均只返回厂商临时 URL，不在 providers 内下载或持久化。
 
-### 2.3 Async 路径 — Submit（fal / qwen）
+### 2.3 Async 路径 — Submit（fal / qwen / kling）
 
 ```
 job-engine
@@ -80,38 +80,38 @@ job-engine
 → generation 状态置为 pending
 ```
 
-Qwen 的 DashScope HTTP 请求需要 `X-DashScope-Async: enable`，submit 响应返回 `task_id`；Qwen adapter 将 `/api/v1/tasks/:taskId` 保存为 status/response URL，后续由 `GET /api/generations/:id` 的惰性推进触发一次 poll。
+Qwen 的 DashScope HTTP 请求需要 `X-DashScope-Async: enable`，submit 响应返回 `task_id`；Qwen adapter 将 `/api/v1/tasks/:taskId` 保存为 status/response URL。Kling 使用独立 base URL 与 `/v1/images/generations/:taskId`，submit 返回 `data.task_id`，后续由详情 GET 或后台 worker 的惰性推进触发 poll。
 
-### 2.4 Async 路径 — Poll（fal / qwen，惰性推进）
+### 2.4 Async 路径 — Poll（fal / qwen / kling，惰性推进）
 
 ```
 job-engine（在 GET /api/generations/:id 时触发）
   → 从 generation_jobs 读取 provider_handle
-  → registry.getById("fal" / "qwen")
+    → registry.getById("fal" / "qwen" / "kling")
   → provider.poll(handle)
     → fal / qwen adapter: GET handle.statusUrl
     → 解析状态:
       - IN_QUEUE → PollResult { status: "pending" }
       - IN_PROGRESS → PollResult { status: "running" }
       - COMPLETED → GET handle.responseUrl → 解析 images → PollResult { status: "completed", images }
-      - Qwen CANCELED → PollResult { status: "cancelled" }
+      - Qwen CANCELED / Kling canceled → PollResult { status: "cancelled" }
       - 错误 → PollResult { status: "failed", error }
   → 返回 PollResult 给 job-engine
 → job-engine 根据 status 更新 generation_jobs 状态
 → 若 completed: 将 images[].url 交给 storage 下载转存
 ```
 
-### 2.5 Async 路径 — Cancel（MVP 预留，API 不暴露）
+### 2.5 Async 路径 — Cancel（job-engine API）
 
 ```
 job-engine（后续前端"取消"功能时）
-  → provider.cancel(handle)
-    → fal adapter: PUT handle.cancelUrl
-  → 返回成功/失败
+  → job-engine 先写 cancel_requested_at，停止后续 poll
+  → provider.cancel(handle)（仅 provider 声明时调用；fal 支持）
+  → Kling/Qwen 无远程端点时保留 CANCEL_UNSUPPORTED 诊断
 → job-engine 更新 generation_jobs 状态为 cancelled
 ```
 
-MVP 不实现取消 API 端点，但 fal adapter 实现 cancel 方法，接口契约预留。
+API 路由为 `POST /api/generations/:id/cancel`；取消与 submit/poll 竞争时，CAS/取消标记阻止晚到响应恢复任务。
 
 ### 2.6 失败路径（通用）
 

@@ -129,3 +129,5 @@ export function getReadStream(storagePath: string): ReadableStream<Uint8Array> {
   const nodeStream = fs.createReadStream(absolutePath);
   return Readable.toWeb(nodeStream) as unknown as ReadableStream<Uint8Array>;
 }
+
+export { cleanupStoredImages } from './cleanup';

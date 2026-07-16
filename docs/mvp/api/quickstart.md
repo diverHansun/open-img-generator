@@ -2,7 +2,7 @@
 
 > 前置: 配置 `.env`、执行 `npm install`、`npm run dev`
 > 约束: 见 [constraints.md](./constraints.md)
-> 修订: 2026-07-16 `sessionId` 必填；Project/Session 先创建；列表 GET 全部只读
+> 修订: 2026-07-16 `sessionId` 必填；Project/Session 先创建；列表 GET 全部只读；补充 Kling、auth、cancel、worker
 
 ---
 
@@ -19,6 +19,15 @@ cp .env.example .env
 # ZHIPU_API_KEY=...
 # ARK_API_KEY=...
 # DASHSCOPE_API_KEY=...
+# KLING_API_KEY=...（独立 Kling API，不复用 DashScope）
+```
+
+若设置了 `APP_AUTH_TOKEN`，先建立单用户 cookie（后续 curl 加 `-b cookies.txt -c cookies.txt`）：
+
+```bash
+curl -s -c cookies.txt -X POST http://127.0.0.1:3000/api/auth/session \
+  -H "Content-Type: application/json" \
+  -d '{"token":"'$APP_AUTH_TOKEN'"}' | jq
 ```
 
 启动:
@@ -97,9 +106,9 @@ curl -s -o out.png http://127.0.0.1:3000/api/images/{imageId}
 
 ---
 
-## 4. Async 路径（fal / Qwen）
+## 4. Async 路径（fal / Qwen / Kling）
 
-下面先用 fal 展示轮询流程。Qwen 使用同一套 `POST` → `GET /api/generations/:id` 客户端流程，只需把 target 换成 `{ "provider": "qwen", "model": "qwen-image-plus" }`；服务端会向 DashScope 提交任务并在详情 GET 时惰性 poll。
+下面先用 fal 展示轮询流程。Qwen 使用同一套流程，只需把 target 换成 `{ "provider": "qwen", "model": "qwen-image-plus" }`；Kling 换成 `{ "provider": "kling", "model": "kling-v3" }`，服务端使用独立 Kling API。Kling 图生图可将 `mode` 设为 `image-to-image` 并传一张 `referenceImages`。详情 GET 才是用户手动推进入口；若开启 worker，则由后台扫描 due job。
 
 提交:
 
@@ -133,6 +142,13 @@ while true; do
   fi
   sleep 3
 done
+```
+
+取消仍在运行的 generation（Kling/Qwen 会立即停止本地 poll，并记录 `CANCEL_UNSUPPORTED`）：
+
+```bash
+curl -s -X POST -b cookies.txt \
+  http://127.0.0.1:3000/api/generations/$GEN_ID/cancel | jq
 ```
 
 ---

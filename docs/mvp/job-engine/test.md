@@ -13,13 +13,16 @@
 ### 覆盖
 
 - submitGeneration：单 target 与多 target（事务写 N jobs、逐 target dispatch）
-- 每 target 校验（aspectRatio、sync count=1、negativePrompt）
+- 每 target 校验（aspectRatio、sync count=1、negativePrompt、image-to-image/referenceImages）
 - seed：不支持的 target 省略；支持的 target 传入
 - getGeneration：并行 advance 多个 async job；聚合 status
 - 部分失败隔离（一 job failed 不影响另一 job completed）
 - poll lease：pending/running 均可 claim；并发第二次跳过、过期后可恢复
 - storeImages 幂等与单 job 内部分转存失败
-- NormalizedRequest 显式 pick（无 provider/model/sessionId）
+- cancelGeneration：本地取消标记、provider.cancel 尽力调用、晚到 submit/poll 不得复活 cancelled job
+- `runWorkerOnce`：读取 due jobs、复用 lease、推进完成任务；worker cleanup 使用传入 DbClient
+- admission 与 provider limiter：超限返回 RateLimitError；不同 provider 不互相串行
+- NormalizedRequest 显式 pick（无 provider/model/sessionId，保留 referenceImages）
 
 ### 不覆盖
 

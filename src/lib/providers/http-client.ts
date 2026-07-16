@@ -137,3 +137,32 @@ export async function putJson(
 
   return responseBody;
 }
+
+export async function deleteJson(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs = 15_000,
+): Promise<unknown> {
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+
+  let responseBody: unknown;
+  try {
+    responseBody = await response.json();
+  } catch {
+    responseBody = null;
+  }
+
+  if (!response.ok) {
+    throw new ProviderHttpError(
+      `HTTP ${response.status}: ${response.statusText}`,
+      response.status,
+      responseBody,
+    );
+  }
+
+  return responseBody;
+}

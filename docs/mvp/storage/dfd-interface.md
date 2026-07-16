@@ -75,6 +75,10 @@ MVP **不实现** `getPublicUrl`；图片访问统一走 API 二进制响应。
 
 ---
 
+## 5. 生命周期清理
+
+worker 定期调用 `cleanupStoredImages()`；该调用只删除过期未收藏图片和超过宽限期的孤儿文件，不影响 `GET /api/images/:id` 的读取契约。支持 `dryRun` 供维护检查。
+
 ## 环境配置
 
 | 变量 | 默认值 | 说明 |

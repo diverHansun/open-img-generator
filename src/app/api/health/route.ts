@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { listEnabled } from '../../../lib/providers';
 import { db } from '../../../lib/db';
+import { ensureWorkerStarted } from '../../../lib/job-engine';
 
 export function GET() {
   try {
+    ensureWorkerStarted();
     db.run('SELECT 1');
     return NextResponse.json({
       status: 'ok',

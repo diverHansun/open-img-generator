@@ -22,7 +22,7 @@ src/
     ├── prompt/                   →  docs/mvp/prompt/          （已有 · 基本不动）
     ├── web-client/               →  docs/mvp/web-client/      （文档已补）
     ├── library/                  →  docs/mvp/library/         （已实现：资产域与只读历史）
-    └── user-config/              →  docs/mvp/user-config/     （边界文档 · 后续实现）
+    └── user-config/              →  docs/mvp/user-config/     （AES-256-GCM 用户级凭据）
 ```
 
 | 代码路径 | 文档目录 | 本轮动作 | 一句话职责 |
@@ -30,8 +30,8 @@ src/
 | `src/lib/library/` | `docs/mvp/library/` | **已实现** | Project / Session 归属、History、Favorite、模型启用偏好 |
 | `src/lib/db/` | `docs/mvp/db/` | **已修订** | schema + queries；业务库唯一真相 |
 | `src/lib/job-engine/` | `docs/mvp/job-engine/` | **已修订** | 扇出生成与状态推进；不管 History/Gallery/Project CRUD |
-| `src/lib/providers/` | `docs/mvp/providers/` | **Batch 2 已实现** | fal/ZenMux/SiliconFlow/智谱/Doubao/Qwen 适配；Kling 保持独立后续批次 |
-| `src/lib/user-config/` | `docs/mvp/user-config/` | **边界文档** | 用户目录加密配置；与业务库分离 |
+| `src/lib/providers/` | `docs/mvp/providers/` | **Batch 3 已实现** | fal/ZenMux/SiliconFlow/智谱/Doubao/Qwen + Kling 独立 API 适配 |
+| `src/lib/user-config/` | `docs/mvp/user-config/` | **已实现** | AES-256-GCM+scrypt 用户目录凭据；env 优先，与业务库分离 |
 | `src/lib/web-client/` | `docs/mvp/web-client/` | **已补文档** | 浏览器侧 API/轮询/capabilities 派生 |
 | `src/app/` + `components/` | `docs/mvp/web-ui/` | **已修订** | Project 门禁、Generate/History/Gallery/Models/Providers |
 | `src/app/api/` | `docs/mvp/api/` | **已修订** | 路由清单 + constraints |
@@ -65,7 +65,7 @@ src/
 3. History：`Project → Session → Generation`，可看图。
 4. Gallery：收藏单张 Image，可追溯到 Job。
 5. Models：启用池；Generate：当次勾选。
-6. Providers：本轮 `.env`；后续用户目录加密 SQLite（`user-config`）。
+6. Providers：env 或 user-config 加密文件；key 永不回传 API。
 7. 状态：沿用既有枚举；补齐 UI 可见性。
 8. negativePrompt：全部勾选支持时 Advanced 可选。
 
@@ -97,4 +97,6 @@ src/
 4. ✅ web-client 全资源 API；Generate 工作台接入 Project/Session 门禁、Recent 10、收藏和 negativePrompt
 5. ✅ 同页 view-state 接入 History / Gallery / Models / Providers；user-config 另开
 6. ✅ Provider Batch 1：SiliconFlow + 智谱真实同步 adapter、capabilities、registry 与契约单测；Kling 保持独立 API 的后续批次
-7. ✅ Provider Batch 2：Doubao/Ark 同步 adapter + Qwen/DashScope 异步 adapter、poll、capabilities、registry 与契约单测；Kling 仍独立后续接入
+7. ✅ Provider Batch 2：Doubao/Ark 同步 adapter + Qwen/DashScope 异步 adapter、poll、capabilities、registry 与契约单测
+8. ✅ Provider Batch 3：Kling 独立 `api-singapore/api-beijing` adapter、capabilities、registry 与契约单测
+9. ✅ 后端控制：取消竞态标记、可选 Node worker、provider/generation 限流、APP_AUTH_TOKEN 单用户认证、图片保留期/孤儿清理

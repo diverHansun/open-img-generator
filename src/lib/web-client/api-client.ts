@@ -62,6 +62,13 @@ async function requestJson<T>(
 
 export function createApiClient(fetcher: FetchLike = fetch) {
   return {
+    getAuthSession: () => requestJson<{ authenticated: boolean }>(fetcher, '/api/auth/session'),
+    login: (token: string) =>
+      requestJson<{ authenticated: boolean }>(
+        fetcher,
+        '/api/auth/session',
+        jsonInit('POST', { token }),
+      ),
     getHealth: () => requestJson<HealthView>(fetcher, '/api/health'),
     listProviders: () => requestJson<ProviderInfo[]>(fetcher, '/api/providers'),
     submitGeneration: (payload: SubmitGenerationRequest) =>
@@ -72,6 +79,12 @@ export function createApiClient(fetcher: FetchLike = fetch) {
       ),
     getGeneration: (selfLink: string) =>
       requestJson<GenerationView>(fetcher, selfLink),
+    cancelGeneration: (id: string) =>
+      requestJson<GenerationView>(
+        fetcher,
+        `/api/generations/${encodeURIComponent(id)}/cancel`,
+        jsonInit('POST', {}),
+      ),
     listGenerations: (query: {
       limit?: number;
       cursor?: string;

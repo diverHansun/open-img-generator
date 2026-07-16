@@ -49,6 +49,16 @@ export function validate(
   if (params.negativePrompt != null && typeof params.negativePrompt !== 'string') {
     throw new ValidationError('Negative prompt must be a string');
   }
+  if (
+    params.referenceImages != null &&
+    (!Array.isArray(params.referenceImages) ||
+      params.referenceImages.some((value) => typeof value !== 'string' || value.trim().length === 0))
+  ) {
+    throw new ValidationError('Reference images must be non-empty strings');
+  }
+  if (params.mode === 'image-to-image' && (!params.referenceImages || params.referenceImages.length === 0)) {
+    throw new ValidationError('Image-to-image mode requires at least one reference image');
+  }
   const seenTargets = new Set<string>();
 
   for (const target of params.targets) {

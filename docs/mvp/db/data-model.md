@@ -94,12 +94,14 @@
 | provider_handle | TEXT NULL | JSON 序列化的 JobHandle（async 厂商） |
 | error | TEXT NULL | JSON 序列化的 ProviderError |
 | poll_lease_until | TEXT NULL | 轮询短期租约到期时间；仅用于并发 GET 排他，不表示厂商状态 |
+| next_poll_at | TEXT NULL | worker 的下一次 due 时间；详情 GET 可 force poll |
+| cancel_requested_at | TEXT NULL | 本地取消 CAS 标记；非空后停止 poll，防晚到结果复活 |
 | created_at | TEXT | ISO 8601 |
 | updated_at | TEXT | ISO 8601 |
 
 生命周期: job-engine 创建和更新。provider_handle 在 async submit 时写入；`completed` / `failed` / `cancelled` 后不再更新 handle（可选：completed 后清空 provider_handle 以减小 db 体积，MVP 可保留）。
 
-`updated_at` 更新时机: 每次 `status`、`error`、`provider_handle`、`poll_lease_until` 变更时。
+`updated_at` 更新时机: 每次 `status`、`error`、`provider_handle`、`poll_lease_until`、`next_poll_at`、`cancel_requested_at` 变更时。
 
 扇出: 一个 generation_id 对应 N 行 job（N ≥ 1）。`POST /api/generations` 的 `targets[]` 长度决定创建行数。
 
@@ -214,6 +216,8 @@ adapter 负责 `NormalizedRequest` ↔ 厂商 JSON 的双向翻译；此层结�
 | 输出: async 句柄 | generation_jobs | `provider_handle` | JobHandle JSON，任务进行中需要 |
 | 输出: 错误 | generation_jobs | `error` | ProviderError JSON |
 | 运行时协调: poll 租约 | generation_jobs | `poll_lease_until` | 轮询期间短暂存在；不用于状态展示 |
+| worker 调度 | generation_jobs | `next_poll_at` | pending/running 的下一次后台 poll 时间 |
+| 本地取消 | generation_jobs | `cancel_requested_at` | 取消请求与 poll/submit 竞态的 CAS 标记 |
 
 ### 3.4 设计决策：不持久化生成输入参数（运行时仍接受）
 

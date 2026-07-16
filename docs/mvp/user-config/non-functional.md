@@ -1,7 +1,7 @@
 # user-config 模块 · non-functional
 
 > 前置: architecture.md
-> 适用于**实现里程碑**，非本轮编码门禁。
+> 适用于 2026-07-16 实现；后续若接入 OS keychain 仍需保持同一接口。
 
 ---
 
@@ -9,7 +9,7 @@
 
 - API key at rest 必须加密（或委托 OS 凭证柜）；禁止明文提交 git。
 - 日志与 API 响应禁止打印 key。
-- 文件权限：用户私有目录（如 `~/.config/open-image-generator/`）。
+- 文件权限：目录 0700、凭据文件 0600（如 `~/.config/open-image-generator/credentials.enc.json`）。
 
 ---
 
@@ -22,7 +22,7 @@
 
 ## 3. 性能
 
-- 启动时读一次缓存；非每请求解密封。
+- 启动后首次解析读一次缓存；非每请求解密。
 
 ---
 

@@ -13,15 +13,17 @@ providers 模块由四个子组件组成，依赖方向单向向下：
 ```
 registry ──→ adapter(s) ──→ http-client
     │
-    └──→ types (共享类型，被三者引用)
+    ├──→ capabilities (静态模型能力)
+    ├──→ limiter (job-engine 调用边界)
+    └──→ types (共享类型，被各子组件引用)
 ```
 
 | 子组件 | 职责 |
 |--------|------|
 | **types** | 定义模块内外的共享数据结构：NormalizedRequest、SubmitResult、ProviderCapabilities 等。是整个系统与厂商之间的"通用语言"。 |
 | **registry** | 按 env key 判断启用状态，懒初始化 adapter 实例，对外提供 `listEnabled()` 与 `getById(id)`。是模块唯一对外入口（除 types 导出外）。 |
-| **adapter** | 每家厂商一个文件，实现 ImageProvider 契约：请求翻译、HTTP 调用、响应解析。当前已含 `fal.ts`、`zenmux.ts`、`siliconflow.ts`、`zhipu.ts`、`doubao.ts` 与 `qwen.ts`；Kling 仍按独立批次接入。 |
-| **http-client** | 封装 fetch 调用：超时、公共 headers 合并、基础错误码映射。具体 API key 由 adapter 读取 env 后传入；adapter 不直接裸调 fetch。 |
+| **adapter** | 每家厂商一个文件，实现 ImageProvider 契约：请求翻译、HTTP 调用、响应解析。当前已含 `fal.ts`、`zenmux.ts`、`siliconflow.ts`、`zhipu.ts`、`doubao.ts`、`qwen.ts` 与独立 Kling `kling.ts`。 |
+| **http-client** | 封装 fetch 调用：超时、公共 headers 合并、基础错误码映射。具体 API key 由 adapter 读取 `env > user-config` 后传入；adapter 不直接裸调 fetch。 |
 
 **依赖规则**:
 - registry 依赖 adapter 与 types
@@ -62,7 +64,7 @@ sync 与 async 两种协议形态通过 ImageProvider 接口上的可选方法�
 |------|-----------|
 | Factory Method | registry 已承担实例创建职责，再加 Factory 是重复抽象 |
 | Observer / Event | providers 是无状态调用层，无事件发布需求 |
-| Decorator | 重试/限流明确归属 job-engine，不在 provider 层装饰 |
+| Decorator | 重试/限流策略由 job-engine 触发；`providers/limiter.ts` 仅提供被 job-engine 调用的 per-provider semaphore，不改变 adapter 职责 |
 
 ---
 
@@ -129,9 +131,9 @@ NormalizedRequest 中含 `providerOptions?: Record<string, unknown>`，各 adapt
 
 ### 4.4 Provider 分批接入
 
-当前已完成 Batch 1（SiliconFlow、智谱）与 Batch 2（Doubao/Ark、Qwen/DashScope）。Doubao 是同步响应，Qwen 的 HTTP 接口是“创建任务 + poll”异步流程；两者的 `maxCount` 暂按现有 job-engine 约束分别暴露为 1。
+当前已完成 Batch 1（SiliconFlow、智谱）、Batch 2（Doubao/Ark、Qwen/DashScope）与 Batch 3（Kling 独立 API）。Doubao 是同步响应，Qwen/Kling 是创建任务 + poll 异步流程；Kling 标准图片端点单次最多 1 张参考图、最多 9 张结果，标准协议没有远程取消端点。
 
-Kling 仍只保留 `ProviderId` 与 env 配置预留。后续接入按“独立 adapter + capabilities + registry 登记 + 契约测试”扩展；Kling 使用独立 Kling API，不复用 DashScope 鉴权或 URL。
+Kling adapter 使用 `https://api-singapore.klingai.com`（可由 `KLING_BASE_URL` 覆盖），`POST/GET /v1/images/generations`，Bearer `KLING_API_KEY`；不复用 DashScope 鉴权或 URL。标准端点没有远程 cancel，因此取消由 job-engine 本地标记兜底。
 
 ### 4.5 公开宽高比 vs 厂商 size 枚举
 

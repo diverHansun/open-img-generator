@@ -11,6 +11,7 @@ describe('registry', () => {
     delete process.env.ZHIPU_API_KEY;
     delete process.env.ARK_API_KEY;
     delete process.env.DASHSCOPE_API_KEY;
+    delete process.env.KLING_API_KEY;
   });
 
   afterEach(() => {
@@ -24,6 +25,7 @@ describe('registry', () => {
     expect(getById('zhipu')).toBeUndefined();
     expect(getById('doubao')).toBeUndefined();
     expect(getById('qwen')).toBeUndefined();
+    expect(getById('kling')).toBeUndefined();
   });
 
   it('returns fal provider when FAL_KEY is set', () => {
@@ -71,6 +73,14 @@ describe('registry', () => {
     expect(provider).toBeDefined();
     expect(provider?.id).toBe('qwen');
     expect(provider?.capabilities.has('qwen-image-plus')).toBe(true);
+  });
+
+  it('returns kling provider when KLING_API_KEY is set', () => {
+    process.env.KLING_API_KEY = 'test-key';
+    const provider = getById('kling');
+    expect(provider).toBeDefined();
+    expect(provider?.id).toBe('kling');
+    expect(provider?.capabilities.has('kling-v3')).toBe(true);
   });
 
   it('lists only enabled providers', () => {

@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lte, or } from 'drizzle-orm';
+import { and, eq, inArray, isNull, isNotNull, lte, or } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { generations, generationJobs, images } from '../schema';
 import type { Generation, GenerationJob, Image } from '../schema';
@@ -31,6 +31,8 @@ export type CreateGenerationJobParams = {
   model: string;
   status: GenerationStatus;
   pollLeaseUntil?: string | null;
+  nextPollAt?: string | null;
+  cancelRequestedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -40,6 +42,8 @@ export type UpdateGenerationJobPatch = {
   providerHandle?: string | null;
   error?: string | null;
   pollLeaseUntil?: string | null;
+  nextPollAt?: string | null;
+  cancelRequestedAt?: string | null;
   updatedAt: string;
 };
 
@@ -81,6 +85,8 @@ export function createGenerationWithJobs(
           providerHandle: null,
           error: null,
           pollLeaseUntil: job.pollLeaseUntil ?? null,
+          nextPollAt: job.nextPollAt ?? null,
+          cancelRequestedAt: job.cancelRequestedAt ?? null,
           createdAt: job.createdAt,
           updatedAt: job.updatedAt,
         })),
@@ -142,6 +148,8 @@ export function updateGenerationJob(
       providerHandle: patch.providerHandle,
       error: patch.error,
       pollLeaseUntil: patch.pollLeaseUntil,
+      nextPollAt: patch.nextPollAt,
+      cancelRequestedAt: patch.cancelRequestedAt,
       updatedAt: patch.updatedAt,
     })
     .where(eq(generationJobs.id, id))
@@ -151,6 +159,48 @@ export function updateGenerationJob(
     .from(generationJobs)
     .where(eq(generationJobs.id, id))
     .get()!;
+}
+
+/**
+ * Updates a job unless a cancellation request has already won the race.
+ * Sync providers do not hold a poll lease, so their completion path uses
+ * this marker-guarded write instead of the lease CAS helper.
+ */
+export function updateGenerationJobIfNotCancelled(
+  id: string,
+  patch: UpdateGenerationJobPatch,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set({
+      status: patch.status,
+      providerHandle: patch.providerHandle,
+      error: patch.error,
+      pollLeaseUntil: patch.pollLeaseUntil,
+      nextPollAt: patch.nextPollAt,
+      cancelRequestedAt: patch.cancelRequestedAt,
+      updatedAt: patch.updatedAt,
+    })
+    .where(
+      and(
+        eq(generationJobs.id, id),
+        isNull(generationJobs.cancelRequestedAt),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
+export function getGenerationJob(
+  id: string,
+  client: DbClient = db,
+): GenerationJob | undefined {
+  return client
+    .select()
+    .from(generationJobs)
+    .where(eq(generationJobs.id, id))
+    .get();
 }
 
 /**
@@ -173,12 +223,15 @@ export function updateGenerationJobIfLease(
       providerHandle: patch.providerHandle,
       error: patch.error,
       pollLeaseUntil: patch.pollLeaseUntil,
+      nextPollAt: patch.nextPollAt,
+      cancelRequestedAt: patch.cancelRequestedAt,
       updatedAt: patch.updatedAt,
     })
     .where(
       and(
         eq(generationJobs.id, id),
         eq(generationJobs.pollLeaseUntil, expectedPollLeaseUntil),
+        isNull(generationJobs.cancelRequestedAt),
       ),
     )
     .run();
@@ -190,14 +243,24 @@ export function tryClaimPollLease(
   now: string,
   leaseUntil: string,
   client: DbClient = db,
+  force = false,
 ): boolean {
   const result = client
     .update(generationJobs)
-    .set({ pollLeaseUntil: leaseUntil, updatedAt: now })
+    .set({ pollLeaseUntil: leaseUntil, nextPollAt: null, updatedAt: now })
     .where(
       and(
         eq(generationJobs.id, id),
         inArray(generationJobs.status, ['pending', 'running']),
+        isNull(generationJobs.cancelRequestedAt),
+        ...(force
+          ? []
+          : [
+              or(
+                isNull(generationJobs.nextPollAt),
+                lte(generationJobs.nextPollAt, now),
+              ),
+            ]),
         or(
           isNull(generationJobs.pollLeaseUntil),
           lte(generationJobs.pollLeaseUntil, now),
@@ -206,6 +269,45 @@ export function tryClaimPollLease(
     )
     .run();
   return result.changes > 0;
+}
+
+export function requestGenerationJobCancellation(
+  id: string,
+  requestedAt: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set({ cancelRequestedAt: requestedAt, updatedAt: requestedAt })
+    .where(
+      and(
+        eq(generationJobs.id, id),
+        inArray(generationJobs.status, ['pending', 'running']),
+        isNull(generationJobs.cancelRequestedAt),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
+export function listDueGenerationJobs(
+  now: string,
+  limit = 16,
+  client: DbClient = db,
+): GenerationJob[] {
+  return client
+    .select()
+    .from(generationJobs)
+    .where(
+      and(
+        inArray(generationJobs.status, ['pending', 'running']),
+        isNotNull(generationJobs.providerHandle),
+        isNull(generationJobs.cancelRequestedAt),
+        or(isNull(generationJobs.nextPollAt), lte(generationJobs.nextPollAt, now)),
+      ),
+    )
+    .limit(limit)
+    .all();
 }
 
 export function getGenerationWithJobsAndImages(

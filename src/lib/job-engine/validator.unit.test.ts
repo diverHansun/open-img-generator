@@ -135,6 +135,19 @@ describe('validator', () => {
     expect(() => validate(makeParams({ sessionId: 's1' }), { db })).not.toThrow();
   });
 
+  it('requires reference images for image-to-image mode', () => {
+    process.env.KLING_API_KEY = 'test-kling-key';
+    expect(() => validate(makeParams({
+      targets: [{ provider: 'kling', model: 'kling-v3' }],
+      mode: 'image-to-image',
+    }), { db })).toThrow('Image-to-image mode requires at least one reference image');
+    expect(() => validate(makeParams({
+      targets: [{ provider: 'kling', model: 'kling-v3' }],
+      mode: 'image-to-image',
+      referenceImages: ['data:image/png;base64,ZmFrZQ=='],
+    }), { db })).not.toThrow();
+  });
+
   it('treats explicit null optional values as omitted at the API boundary', () => {
     expect(() =>
       validate(

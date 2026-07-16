@@ -56,7 +56,7 @@ orchestrator 作为唯一对外入口，编排多模块完成一次（可扇出�
 ```
 pending → running → completed
                   → failed
-                  → cancelled (预留)
+                  → cancelled
 ```
 
 - **支撑目标**: Design Goal #2、#4、Duty #7（部分失败隔离）
@@ -65,12 +65,12 @@ pending → running → completed
 
 generation 状态由全部 job **聚合**（`api/constraints.md` §8），不单独跑第二套状态机。
 
-### 2.3 惰性推进（Lazy Polling）
+### 2.3 惰性推进（Lazy Polling）与后台 worker
 
-async job 不在 submit 时阻塞等待；在 `getGeneration()` 时对**每一个**未终结 async job 触发 advance。
+async job 不在 submit 时阻塞等待；在 `getGeneration()` 时对**每一个**未终结 async job 触发 advance。显式开启 `JOB_WORKER_ENABLED` 后，`runWorkerOnce()` 读取 `next_poll_at` 到期 jobs，并复用同一 lease/CAS lifecycle；列表 GET 仍只读。
 
 - **支撑目标**: Design Goal #2
-- **理由**: Next.js 无独立 worker；扇出后 N 个 async job 可在同一次 GET 内并行 advance（Promise.all），互不共用同一 providerHandle
+- **理由**: Next.js 无独立 worker；MVP worker 在同一 Node 进程中由 health/generation API 首次请求 bootstrap。扇出后 N 个 async job 可在同一次 GET 内并行 advance（Promise.all），互不共用同一 providerHandle
 
 ### 2.4 校验与交集分离
 
@@ -85,7 +85,7 @@ validator 只做「每 target 是否接受共享参数」；不计算选中模�
 |------|-----------|
 | Event Sourcing | MVP 状态简单 |
 | Saga / 跨 job 补偿 | 部分失败保留成功 job 即可；不回滚已转存图 |
-| Queue/Worker | 惰性推进足够 |
+| 分布式 Queue/Worker | MVP 只提供单进程可选 worker，未引入外部队列 |
 | Command Bus | 仍仅 2 个对外函数 |
 
 ---
@@ -98,6 +98,8 @@ src/lib/job-engine/
 ├── orchestrator.ts       # 多 target submit / 多 job get 编排
 ├── lifecycle.ts          # 单 job 状态推进 + storeImages + claim 锁
 ├── validator.ts          # targets[] + 每 target capabilities 校验
+├── admission.ts          # generation 全局 admission 限流
+├── worker.ts             # 可选后台 poll + 生命周期清理
 └── types.ts              # SubmitGenerationParams, GenerationView 等
 ```
 
@@ -162,7 +164,15 @@ src/lib/job-engine/
 
 `createGeneration` + **全部** `createGenerationJob` 必须在同一 SQLite transaction 中；dispatch（HTTP）在事务提交之后。
 
-### 4.8 不重试
+### 4.8 取消与竞态
+
+`POST /api/generations/:id/cancel` 先写 `cancel_requested_at`，poll lease CAS 要求该字段为空；submit/poll 的晚到结果不得把 cancelled job 恢复为 pending/completed。provider 无远程取消时，保留本地 cancelled 和 `CANCEL_UNSUPPORTED` 诊断。
+
+### 4.9 并发控制
+
+generation admission 限制同时提交的 generation 数；provider limiter 限制同一 provider 的 submit/poll/cancel 并发，不把不同 provider 串行化。
+
+### 4.10 不重试
 
 单次 submit/poll 失败即该 job failed；用户发起新 generation。
 
@@ -172,4 +182,4 @@ src/lib/job-engine/
 
 - 子组件均可追溯到 goals-duty
 - 扇出、部分失败隔离、锁收紧、校验与 UI 交集分离均有约束
-- 未引入 Non-Duties（取消 API、限流、持久化运行时参数等）
+- 取消、限流和 worker 边界与 goals-duty、api constraints 对齐；仍未持久化 width/count/seed 等运行时参数

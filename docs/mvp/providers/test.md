@@ -12,7 +12,7 @@
 
 - registry 按 env key 启用/禁用 provider 的行为
 - zenmux、SiliconFlow、智谱、Doubao adapter 的请求翻译与响应解析（sync 路径）
-- fal、Qwen adapter 的请求翻译、submit 句柄解析、poll 状态机（async 路径）
+- fal、Qwen、Kling adapter 的请求翻译、submit 句柄解析、poll 状态机（async 路径）
 - http-client 的超时与错误码映射
 - capabilities 静态声明与 model 查询
 - NormalizedRequest 到厂商请求体的字段映射
@@ -35,7 +35,7 @@
 |------|------|------|
 | FAL_KEY 存在 | env 含 FAL_KEY | listEnabled() 包含 fal |
 | FAL_KEY 缺失 | env 无 FAL_KEY | listEnabled() 不包含 fal，不抛错 |
-| Batch 1/2 key 存在 | env 含 FAL_KEY + ZENMUX_API_KEY + SILICONFLOW_API_KEY + ZHIPU_API_KEY + ARK_API_KEY + DASHSCOPE_API_KEY | listEnabled() 按固定顺序包含六个 provider |
+| Batch 1/2/3 key 存在 | env 含全部 provider key | listEnabled() 按固定顺序包含七个 provider |
 | 两个 key 都缺失 | env 无 key | listEnabled() 返回空数组 |
 | getById 未启用 | getById("fal")，无 FAL_KEY | 返回 `undefined` |
 
@@ -85,7 +85,17 @@
 | Qwen poll | PENDING/RUNNING/SUCCEEDED/FAILED/CANCELED | 映射统一 `PollResult` 状态 |
 | Qwen HTTP 鉴权/限流/超时 | mock 401/429/TimeoutError | `AUTH_FAILED`/可重试 `RATE_LIMITED`/`TIMEOUT` |
 
-### 2.6 Capabilities 查询
+### 2.6 Kling 独立 API
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| 正常 submit | `KLING_API_KEY` + model=`kling-v3` | `kind="async"`，请求 `POST /v1/images/generations`，Bearer 鉴权 |
+| 图生图 | 单个 data URL reference | 去掉 `data:*;base64,` 前缀，写入 `image` |
+| poll | submitted/processing/succeed/failed | 映射 pending/running/completed/failed，解析 `data.task_result.images[].url` |
+| 多参考图 | 两个 referenceImages | adapter 返回 failed，不伪造多图协议 |
+| 取消能力 | 标准 Kling handle | `cancelUrl=null`，由 job-engine 本地取消兜底 |
+
+### 2.7 Capabilities 查询
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
@@ -93,7 +103,7 @@
 | 未知模型 | capabilities("nonexistent") | 返回 null |
 | fal 模型 | capabilities("fal-ai/flux/schnell") | protocol="async"，supportsSeed=true |
 
-### 2.7 请求翻译与公开宽高比映射
+### 2.8 请求翻译与公开宽高比映射
 
 | 场景 | 输入 | 预期 |
 |------|------|------|

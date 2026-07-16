@@ -14,6 +14,7 @@ import {
   createProviderError,
 } from '../http-client';
 import { qwenCapabilities } from '../capabilities/qwen';
+import { resolveCredential } from '../../user-config';
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
 const RESERVED_PARAMETER_KEYS = new Set([
@@ -130,7 +131,7 @@ export class QwenProvider implements ImageProvider {
   );
 
   private authHeaders(): Record<string, string> {
-    const key = process.env.DASHSCOPE_API_KEY;
+    const key = resolveCredential('DASHSCOPE_API_KEY');
     return key ? { Authorization: `Bearer ${key}` } : {};
   }
 

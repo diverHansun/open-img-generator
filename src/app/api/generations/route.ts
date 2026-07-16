@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { submitGeneration } from '../../../lib/job-engine';
+import { ensureWorkerStarted, submitGeneration } from '../../../lib/job-engine';
 import { db } from '../../../lib/db';
 import { handleApiError } from '../error-handler';
 import { listGenerations } from '../../../lib/library';
@@ -13,6 +13,7 @@ function parseLimit(value: string | null): number | undefined {
 
 export function GET(request: Request) {
   try {
+    ensureWorkerStarted();
     const query = new URL(request.url).searchParams;
     return NextResponse.json(
       listGenerations(
@@ -32,6 +33,7 @@ export function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    ensureWorkerStarted();
     const body = (await readJsonObject(request)) as Parameters<typeof submitGeneration>[0];
     const result = await submitGeneration(body, { db });
     return NextResponse.json(

@@ -8,6 +8,8 @@ export class AppError extends Error {
 export class ValidationError extends AppError {}
 export class NotFoundError extends AppError {}
 export class ConflictError extends AppError {}
+export class RateLimitError extends AppError {}
+export class AuthenticationError extends AppError {}
 
 export class StorageError extends AppError {
   constructor(

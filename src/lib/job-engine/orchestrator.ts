@@ -4,12 +4,14 @@ import * as prompt from '../prompt';
 import {
   createGenerationWithJobs,
   getGenerationWithJobsAndImages,
+  getGenerationJob,
   touchSession,
+  requestGenerationJobCancellation,
   type DbClient,
 } from '../db';
 import { getById } from '../providers';
 import type { NormalizedRequest, ProviderCapabilities, ImageProvider } from '../providers';
-import { completeSync, advance, updateJobAndGeneration } from './lifecycle';
+import { completeSync, advance, updateJobAndGeneration, syncGenerationStatus } from './lifecycle';
 import { NotFoundError } from '../errors';
 import type { GenerationWithJobsAndImages } from '../db';
 import type {
@@ -19,6 +21,8 @@ import type {
   GenerationStatus,
   JobView,
 } from './types';
+import { acquireGenerationSlot } from './admission';
+import { withProviderLimit } from '../providers/limiter';
 
 export type SubmitResult = {
   generationId: string;
@@ -43,6 +47,7 @@ function buildNormalizedRequest(
     count: params.count ?? undefined,
     negativePrompt: params.negativePrompt ?? undefined,
     seed: capabilities.supportsSeed ? params.seed ?? undefined : undefined,
+    referenceImages: params.referenceImages ?? undefined,
     providerOptions: params.providerOptions ?? undefined,
   };
 }
@@ -57,6 +62,25 @@ async function submitTarget(
   const provider = getById(target.provider);
   const capabilities = provider?.capabilities.get(target.model);
   if (!provider || !capabilities) {
+    const currentJob = getGenerationJob(job.id, client);
+    if (currentJob?.status === 'cancelled' || currentJob?.cancelRequestedAt) {
+      updateJobAndGeneration(
+        job.id,
+        job.generationId,
+        {
+          status: 'cancelled',
+          cancelRequestedAt: currentJob.cancelRequestedAt,
+          error: JSON.stringify({
+            code: 'CANCEL_UNSUPPORTED',
+            message: 'Generation was cancelled before provider submission',
+            retryable: false,
+          }),
+          updatedAt: new Date().toISOString(),
+        },
+        client,
+      );
+      return;
+    }
     updateJobAndGeneration(
       job.id,
       job.generationId,
@@ -77,7 +101,10 @@ async function submitTarget(
   const normalized = buildNormalizedRequest(params, processedPrompt, capabilities);
   let submitResult: Awaited<ReturnType<ImageProvider['submit']>>;
   try {
-    submitResult = await provider.submit(normalized, target.model);
+    submitResult = await withProviderLimit(
+      provider.id,
+      () => provider.submit(normalized, target.model),
+    );
   } catch (err) {
     submitResult = {
       kind: 'failed',
@@ -87,6 +114,39 @@ async function submitTarget(
         retryable: false,
       },
     };
+  }
+
+  // Cancellation may win the race while the provider request is in flight.
+  // Never let a late submit response resurrect a locally-cancelled job.
+  const currentJob = getGenerationJob(job.id, client);
+  if (currentJob?.status === 'cancelled' || currentJob?.cancelRequestedAt) {
+    if (submitResult.kind === 'async' && provider.cancel) {
+      try {
+        await withProviderLimit(provider.id, () => provider.cancel!(submitResult.handle));
+      } catch {
+        // The local cancellation marker remains authoritative.
+      }
+    }
+    if (currentJob.status !== 'cancelled') {
+      updateJobAndGeneration(
+        job.id,
+        job.generationId,
+        {
+          status: 'cancelled',
+          cancelRequestedAt: currentJob.cancelRequestedAt,
+          pollLeaseUntil: null,
+          nextPollAt: null,
+          error: JSON.stringify({
+            code: 'CANCEL_UNSUPPORTED',
+            message: 'Generation was cancelled before provider submission completed',
+            retryable: false,
+          }),
+          updatedAt: new Date().toISOString(),
+        },
+        client,
+      );
+    }
+    return;
   }
 
   switch (submitResult.kind) {
@@ -129,6 +189,8 @@ async function submitTargetSafely(
   try {
     await submitTarget(job, target, params, processedPrompt, client);
   } catch (err) {
+    const currentJob = getGenerationJob(job.id, client);
+    if (currentJob?.status === 'cancelled' || currentJob?.cancelRequestedAt) return;
     updateJobAndGeneration(
       job.id,
       job.generationId,
@@ -151,56 +213,60 @@ export async function submitGeneration(
   ctx: OrchestratorContext,
 ): Promise<SubmitResult> {
   validate(params, { db: ctx.db });
-
-  const processedPrompt = prompt.process(params.prompt);
-  const now = new Date().toISOString();
-  const generationId = randomUUID();
-  const jobs = params.targets.map((target) => ({
-    id: randomUUID(),
-    generationId,
-    provider: target.provider,
-    model: target.model,
-    status: 'pending' as const,
-    createdAt: now,
-    updatedAt: now,
-  }));
-
-  createGenerationWithJobs(
-    {
-      id: generationId,
-      sessionId: params.sessionId,
-      prompt: processedPrompt,
-      status: 'pending',
+  const releaseAdmission = acquireGenerationSlot();
+  try {
+    const processedPrompt = prompt.process(params.prompt);
+    const now = new Date().toISOString();
+    const generationId = randomUUID();
+    const jobs = params.targets.map((target) => ({
+      id: randomUUID(),
+      generationId,
+      provider: target.provider,
+      model: target.model,
+      status: 'pending' as const,
       createdAt: now,
       updatedAt: now,
-    },
-    jobs,
-    ctx.db,
-  );
+    }));
 
-  touchSession(params.sessionId, now, ctx.db);
+    createGenerationWithJobs(
+      {
+        id: generationId,
+        sessionId: params.sessionId,
+        prompt: processedPrompt,
+        status: 'pending',
+        createdAt: now,
+        updatedAt: now,
+      },
+      jobs,
+      ctx.db,
+    );
 
-  await Promise.allSettled(
-    jobs.map((job, index) =>
-      submitTargetSafely(
-        job,
-        params.targets[index]!,
-        params,
-        processedPrompt,
-        ctx.db,
+    touchSession(params.sessionId, now, ctx.db);
+
+    await Promise.allSettled(
+      jobs.map((job, index) =>
+        submitTargetSafely(
+          job,
+          params.targets[index]!,
+          params,
+          processedPrompt,
+          ctx.db,
+        ),
       ),
-    ),
-  );
+    );
 
-  const finalGeneration = getGenerationWithJobsAndImages(generationId, ctx.db);
-  if (!finalGeneration) {
-    throw new Error(`Generation ${generationId} not found after submit`);
+    const finalGeneration = getGenerationWithJobsAndImages(generationId, ctx.db);
+    if (!finalGeneration) {
+      throw new Error(`Generation ${generationId} not found after submit`);
+    }
+
+    return {
+      generationId,
+      status: finalGeneration.status as GenerationStatus,
+    };
+  } finally {
+    releaseAdmission();
   }
-
-  return {
-    generationId,
-    status: finalGeneration.status as GenerationStatus,
-  };
 }
 
 export async function getGeneration(
@@ -216,11 +282,76 @@ export async function getGeneration(
     await Promise.allSettled(
       generation.jobs
         .filter((job) => job.status === 'pending' || job.status === 'running')
-        .map((job) => advance(job, ctx.db)),
+        .map((job) => advance(job, ctx.db, { force: true })),
     );
     generation = getGenerationWithJobsAndImages(id, ctx.db)!;
   }
 
+  return toGenerationView(generation);
+}
+
+export async function cancelGeneration(
+  id: string,
+  ctx: OrchestratorContext,
+): Promise<GenerationView> {
+  let generation = getGenerationWithJobsAndImages(id, ctx.db);
+  if (!generation) throw new NotFoundError(`Generation not found: ${id}`);
+
+  const requestedAt = new Date().toISOString();
+  await Promise.all(
+    generation.jobs
+      .filter((job) => job.status === 'pending' || job.status === 'running')
+      .map(async (job) => {
+        if (!requestGenerationJobCancellation(job.id, requestedAt, ctx.db)) return;
+
+        const provider = getById(job.provider as GenerationTarget['provider']);
+        let cancellation: Awaited<ReturnType<NonNullable<ImageProvider['cancel']>>> | null = null;
+        if (provider?.cancel && job.providerHandle) {
+          try {
+            const handle = JSON.parse(job.providerHandle) as import('../providers').JobHandle;
+            cancellation = await withProviderLimit(
+              provider.id,
+              () => provider.cancel!(handle),
+            );
+          } catch (err) {
+            cancellation = {
+              status: 'failed',
+              error: {
+                code: 'PROVIDER_ERROR',
+                message: err instanceof Error ? err.message : String(err),
+                retryable: false,
+              },
+            };
+          }
+        }
+
+        const warning = cancellation?.status === 'failed'
+          ? cancellation.error
+          : !provider?.cancel
+            ? {
+                code: 'CANCEL_UNSUPPORTED',
+                message: 'Provider has no remote cancel endpoint; local polling stopped',
+                retryable: false,
+              }
+            : null;
+        updateJobAndGeneration(
+          job.id,
+          job.generationId,
+          {
+            status: 'cancelled',
+            error: warning ? JSON.stringify(warning) : null,
+            pollLeaseUntil: null,
+            nextPollAt: null,
+            cancelRequestedAt: requestedAt,
+            updatedAt: new Date().toISOString(),
+          },
+          ctx.db,
+        );
+      }),
+  );
+
+  syncGenerationStatus(id, ctx.db);
+  generation = getGenerationWithJobsAndImages(id, ctx.db)!;
   return toGenerationView(generation);
 }
 

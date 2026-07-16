@@ -51,6 +51,8 @@ function createLatestSchema() {
       provider_handle TEXT,
       error TEXT,
       poll_lease_until TEXT,
+      next_poll_at TEXT,
+      cancel_requested_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -137,6 +139,8 @@ function migrateLegacySchema() {
         provider_handle TEXT,
         error TEXT,
         poll_lease_until TEXT,
+        next_poll_at TEXT,
+        cancel_requested_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -169,15 +173,21 @@ function migrateLegacySchema() {
     const leaseColumn = columnInfo('generation_jobs', 'poll_lease_until')
       ? 'j.poll_lease_until'
       : 'NULL';
+    const nextPollColumn = columnInfo('generation_jobs', 'next_poll_at')
+      ? 'j.next_poll_at'
+      : 'NULL';
+    const cancelRequestedColumn = columnInfo('generation_jobs', 'cancel_requested_at')
+      ? 'j.cancel_requested_at'
+      : 'NULL';
     sqlite.exec(`
       INSERT INTO generations_new
       SELECT g.* FROM generations g
       INNER JOIN sessions_new s ON s.id = g.session_id;
 
       INSERT INTO generation_jobs_new
-        (id, generation_id, provider, model, status, provider_handle, error, poll_lease_until, created_at, updated_at)
+        (id, generation_id, provider, model, status, provider_handle, error, poll_lease_until, next_poll_at, cancel_requested_at, created_at, updated_at)
       SELECT j.id, j.generation_id, j.provider, j.model, j.status,
-             j.provider_handle, j.error, ${leaseColumn}, j.created_at, j.updated_at
+             j.provider_handle, j.error, ${leaseColumn}, ${nextPollColumn}, ${cancelRequestedColumn}, j.created_at, j.updated_at
       FROM generation_jobs j
       INNER JOIN generations_new g ON g.id = j.generation_id;
 
@@ -214,6 +224,12 @@ if (!tableExists('sessions')) {
     generationSessionId?.notnull === 1;
   if (isLatest) {
     createAncillarySchema();
+    if (!columnInfo('generation_jobs', 'next_poll_at')) {
+      sqlite.exec('ALTER TABLE generation_jobs ADD COLUMN next_poll_at TEXT');
+    }
+    if (!columnInfo('generation_jobs', 'cancel_requested_at')) {
+      sqlite.exec('ALTER TABLE generation_jobs ADD COLUMN cancel_requested_at TEXT');
+    }
   } else {
     deletedOrphanGenerations = migrateLegacySchema();
   }

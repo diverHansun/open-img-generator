@@ -11,6 +11,7 @@ import {
   createProviderError,
 } from '../http-client';
 import { siliconflowCapabilities } from '../capabilities/siliconflow';
+import { resolveCredential } from '../../user-config';
 
 const API_URL = 'https://api.siliconflow.cn/v1/images/generations';
 const RESERVED_KEYS = new Set([
@@ -89,7 +90,7 @@ export class SiliconFlowProvider implements ImageProvider {
   );
 
   private authHeaders(): Record<string, string> {
-    const key = process.env.SILICONFLOW_API_KEY;
+    const key = resolveCredential('SILICONFLOW_API_KEY');
     return key ? { Authorization: `Bearer ${key}` } : {};
   }
 

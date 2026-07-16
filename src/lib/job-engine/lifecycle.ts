@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   updateGenerationJob,
+  updateGenerationJobIfNotCancelled,
   updateGenerationJobIfLease,
   updateGeneration,
   createImageIfAbsent,
@@ -8,6 +9,7 @@ import {
   getGenerationWithJobsAndImages,
   aggregateGenerationStatus,
   tryClaimPollLease,
+  getGenerationJob,
   type DbClient,
   type GenerationJob,
 } from '../db';
@@ -16,6 +18,7 @@ import type { JobHandle, PollResult, ProviderImageRef } from '../providers';
 import * as storage from '../storage';
 import { StorageError } from '../errors';
 import type { GenerationStatus } from './types';
+import { withProviderLimit } from '../providers/limiter';
 
 export type StoreImagesResult =
   | { kind: 'ok'; count: number }
@@ -24,6 +27,7 @@ export type StoreImagesResult =
 // Covers the full Fal completion path: status + response + image transfer.
 // A crashed process may delay the next poll by at most this amount.
 export const POLL_LEASE_MS = 300_000;
+export const POLL_RETRY_DELAY_MS = 5_000;
 
 export async function storeImages(
   jobId: string,
@@ -82,6 +86,10 @@ export async function completeSync(
   client: DbClient,
   expectedPollLeaseUntil?: string,
 ): Promise<void> {
+  const currentJob = getGenerationJob(jobId, client);
+  if (!currentJob || currentJob.status === 'cancelled' || currentJob.cancelRequestedAt) {
+    return;
+  }
   const storeResult = await storeImages(jobId, images, client);
   const now = new Date().toISOString();
 
@@ -101,7 +109,7 @@ export async function completeSync(
           };
     const updated = expectedPollLeaseUntil
       ? updateGenerationJobIfLease(jobId, expectedPollLeaseUntil, patch, tx)
-      : (updateGenerationJob(jobId, patch, tx), true);
+      : updateGenerationJobIfNotCancelled(jobId, patch, tx);
     if (!updated) return;
 
     const finalStatus = deriveGenerationStatus(generationId, tx);
@@ -116,12 +124,21 @@ export async function completeSync(
 export async function advance(
   job: GenerationJob,
   client: DbClient,
+  options: { force?: boolean } = {},
 ): Promise<void> {
   const now = new Date();
   const nowIso = now.toISOString();
   const leaseUntil = new Date(now.getTime() + POLL_LEASE_MS).toISOString();
 
-  if (!tryClaimPollLease(job.id, nowIso, leaseUntil, client)) {
+  // A pending job without a provider handle is still in the submit phase.
+  // Refresh once because callers may hold a pre-submit snapshot while the
+  // provider submit has just persisted its async handle.
+  if (!job.providerHandle) {
+    const refreshed = getGenerationJob(job.id, client);
+    if (!refreshed?.providerHandle) return;
+    job = refreshed;
+  }
+  if (!tryClaimPollLease(job.id, nowIso, leaseUntil, client, options.force ?? false)) {
     return;
   }
 
@@ -171,7 +188,10 @@ export async function advance(
 
   let pollResult: PollResult;
   try {
-    pollResult = await provider.poll(handle);
+    pollResult = await withProviderLimit(
+      provider.id,
+      () => provider.poll!(handle),
+    );
   } catch (err) {
     pollResult = {
       status: 'failed',
@@ -218,7 +238,12 @@ async function applyPollResult(
       updateJobAndGeneration(
         job.id,
         job.generationId,
-        { status: 'pending', pollLeaseUntil: null, updatedAt: now },
+        {
+          status: 'pending',
+          pollLeaseUntil: null,
+          nextPollAt: new Date(Date.now() + POLL_RETRY_DELAY_MS).toISOString(),
+          updatedAt: now,
+        },
         client,
         expectedPollLeaseUntil,
       );
@@ -227,7 +252,12 @@ async function applyPollResult(
       updateJobAndGeneration(
         job.id,
         job.generationId,
-        { status: 'running', pollLeaseUntil: null, updatedAt: now },
+        {
+          status: 'running',
+          pollLeaseUntil: null,
+          nextPollAt: new Date(Date.now() + POLL_RETRY_DELAY_MS).toISOString(),
+          updatedAt: now,
+        },
         client,
         expectedPollLeaseUntil,
       );
@@ -275,6 +305,8 @@ export function updateJobAndGeneration(
     error?: string | null;
     providerHandle?: string | null;
     pollLeaseUntil?: string | null;
+    nextPollAt?: string | null;
+    cancelRequestedAt?: string | null;
     updatedAt: string;
   },
   client: DbClient,

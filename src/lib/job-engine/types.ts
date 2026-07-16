@@ -16,6 +16,7 @@ export type SubmitGenerationParams = {
   count?: number | null;
   negativePrompt?: string | null;
   seed?: number | null;
+  referenceImages?: string[] | null;
   providerOptions?: Record<string, unknown> | null;
 };
 

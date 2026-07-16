@@ -6,6 +6,7 @@ import { GET as listGenerations, POST as postGeneration } from '../../src/app/ap
 vi.mock('../../src/lib/job-engine', () => ({
   submitGeneration: vi.fn(),
   getGeneration: vi.fn(),
+  ensureWorkerStarted: vi.fn(),
 }));
 
 vi.mock('../../src/lib/library', () => ({

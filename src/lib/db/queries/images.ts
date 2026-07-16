@@ -1,6 +1,6 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull, lt, notExists } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
-import { images } from '../schema';
+import { favorites, images } from '../schema';
 import type { Image } from '../schema';
 import { NotFoundError } from '../../errors';
 
@@ -78,4 +78,54 @@ export function getImage(id: string, client: DbClient = db): Image {
     throw new NotFoundError(`Image not found: ${id}`);
   }
   return row;
+}
+
+export function listStoragePaths(client: DbClient = db): string[] {
+  return client.select({ storagePath: images.storagePath }).from(images).all().map((row) => row.storagePath);
+}
+
+export function listRetentionCandidates(
+  cutoff: string,
+  client: DbClient = db,
+): Image[] {
+  return client
+    .select({ image: images })
+    .from(images)
+    .leftJoin(favorites, eq(favorites.imageId, images.id))
+    .where(and(lt(images.createdAt, cutoff), isNull(favorites.id)))
+    .all()
+    .map((row) => row.image);
+}
+
+export function countRetainedFavorites(
+  cutoff: string,
+  client: DbClient = db,
+): number {
+  return client
+    .select({ id: images.id })
+    .from(images)
+    .innerJoin(favorites, eq(favorites.imageId, images.id))
+    .where(lt(images.createdAt, cutoff))
+    .all().length;
+}
+
+export function deleteImageIfUnfavorited(
+  id: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .delete(images)
+    .where(
+      and(
+        eq(images.id, id),
+        notExists(
+          client
+            .select({ id: favorites.id })
+            .from(favorites)
+            .where(eq(favorites.imageId, images.id)),
+        ),
+      ),
+    )
+    .run();
+  return result.changes > 0;
 }

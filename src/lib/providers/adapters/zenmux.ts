@@ -7,6 +7,7 @@ import type {
 } from '../types';
 import { postJson, ProviderHttpError, createProviderError } from '../http-client';
 import { zenmuxCapabilities } from '../capabilities/zenmux';
+import { resolveCredential } from '../../user-config';
 
 function resolveSize(req: NormalizedRequest): string {
   if (req.width && req.height) {
@@ -89,7 +90,7 @@ export class ZenmuxProvider implements ImageProvider {
   );
 
   private get apiKey(): string | undefined {
-    return process.env.ZENMUX_API_KEY;
+    return resolveCredential('ZENMUX_API_KEY');
   }
 
   private authHeaders(): Record<string, string> {

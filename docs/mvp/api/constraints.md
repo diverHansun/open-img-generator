@@ -5,6 +5,7 @@
 > 修订说明: 2026-07-15 扇出 targets[]、多 job 聚合、poll lease、公开宽高比
 > 修订说明: 2026-07-16 sessionId 必填；Project/Favorite/ModelPrefs 路由；取消零散 Session
 > 修订说明: 2026-07-16 §14–§16 页面矩阵、DTO、prefs 默认全开、迁移（后端契约锁定）
+> 修订说明: 2026-07-16 Kling 独立 adapter、加密 user-config、取消/worker/限流、可选单用户 auth、图片清理
 
 本文档闭合并行审查中发现的运行时语义缺口。编码时必须遵守。
 
@@ -14,15 +15,15 @@
 
 | 约束 | 说明 |
 |------|------|
-| **localhost-only（MVP 默认）** | 服务应绑定 `127.0.0.1` 或仅在受信网络内访问。MVP **无 auth、无 rate limit**。暴露公网将导致 API key 盗刷与磁盘被恶意填满。 |
+| **localhost-only（MVP 默认）** | 服务应绑定 `127.0.0.1` 或仅在受信网络内访问。设置 `APP_AUTH_TOKEN` 可开启单用户 Bearer/HttpOnly-cookie 认证；生成 admission 与 provider semaphore 默认启用内存限流。暴露公网仍不建议。 |
 | 启动诊断 | 若 `registry.listEnabled()` 返回空数组，启动时打印 `WARNING: no providers enabled`。`GET /api/health` 返回 `enabledProviders: []`。 |
-| API key | 本轮仅存于服务端环境变量，永不通过 API 响应返回。后续用户加密配置见 `user-config`（仍永不回传明文 key）。 |
+| API key | 优先级为 `env > USER_CONFIG_DIR/credentials.enc.json`；user-config 使用 AES-256-GCM + scrypt，永不通过 API 响应返回明文。 |
 
 ---
 
 ## 2. 客户端 poll 契约（含扇出）
 
-async job **不会**在 POST 后自动完成；推进完全依赖客户端轮询 `GET /api/generations/:id`（一次 GET 推进该 generation 下**全部**未终结 async jobs）。
+async job **不会**在 POST 后同步等待完成。用户可见的手动推进只发生在详情 `GET /api/generations/:id`（一次 GET 推进该 generation 下**全部**未终结 async jobs）；History/Session/Generation 列表全部只读。显式开启 `JOB_WORKER_ENABLED=true` 后，后台 worker 会按 `next_poll_at` 推进 due jobs。
 
 | 项 | 建议值 |
 |----|--------|
@@ -63,7 +64,7 @@ loop:
 
 | 机制 | 说明 |
 |------|------|
-| poll lease claim | `UPDATE generation_jobs SET poll_lease_until=?, updated_at=? WHERE id=? AND status IN ('pending','running') AND (poll_lease_until IS NULL OR poll_lease_until<=?)`；影响行数 0 则跳过该 job 的 poll |
+| poll lease claim | `UPDATE generation_jobs SET poll_lease_until=?, next_poll_at=NULL, updated_at=? WHERE id=? AND status IN ('pending','running') AND provider_handle IS NOT NULL AND cancel_requested_at IS NULL AND (next_poll_at IS NULL OR next_poll_at<=?) AND (poll_lease_until IS NULL OR poll_lease_until<=?)`；影响行数 0 则跳过该 job 的 poll |
 | 租约时长 | 300 秒；覆盖 Fal status/response + 最多 4 张图片转存的完整最坏路径。进程崩溃后，下一次 GET 在租约到期后可恢复推进 |
 | 状态与锁 | claim **不修改 status**。`pending` / `running` 始终表示厂商真实进度；结果写回带原 lease 时间戳条件，失去租约的旧 worker 不能覆盖新结果；成功写入后清空 `poll_lease_until` |
 | 转存幂等 | `db.imageExists(jobId, index)` 为 true 则跳过该张 downloadAndStore |
@@ -100,7 +101,7 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
 | projects | 创建；改 title；其下新建 session（可选 touch） |
 | sessions | 创建；updateSession(title)；moveSession；touchSession |
 | generations | 每次聚合 status 变更 |
-| generation_jobs | 每次 status / error / provider_handle / poll_lease_until 变更 |
+| generation_jobs | 每次 status / error / provider_handle / poll_lease_until / next_poll_at / cancel_requested_at 变更 |
 | images | 不更新（不可变） |
 | favorites | 不更新（不可变关系行；取消即删除） |
 | model_preferences | 每次 enabled 变更 |
@@ -154,7 +155,8 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
   "aspectRatio": "1:1",
   "count": 1,
   "seed": null,
-  "negativePrompt": null
+  "negativePrompt": null,
+  "referenceImages": null
 }
 ```
 
@@ -164,6 +166,7 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
 - `width` 与 `height` 必须同时提供，且必须是正整数；两者优先于 `aspectRatio` 交给各 adapter 翻译。
 - 可选字段显式传 `null` 时按未设置处理；客户端也可以直接省略这些字段。
 - `seed`：对不支持的 target 在 NormalizedRequest 中省略，不因此 400。
+- `mode: "image-to-image"` 时必须提供至少一张 `referenceImages`；adapter 再按各厂商协议翻译（Kling 标准端点最多一张）。
 
 ---
 
@@ -186,10 +189,12 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
 | GET | `/api/providers` | 已启用厂商 + capabilities（既有） |
 | GET | `/api/health` | 健康与配置摘要（既有） |
 | GET | `/api/images/:id` | 读图（既有） |
+| POST | `/api/generations/:id/cancel` | 请求取消；先写 `cancel_requested_at`，再调用可用的 `provider.cancel`；Kling/Qwen 无远程端点时返回 `cancelled` 与 `CANCEL_UNSUPPORTED` 警告 |
+| POST/DELETE | `/api/auth/session` | `APP_AUTH_TOKEN` 配置时建立/清除 HttpOnly cookie；未配置时 POST 直接返回 authenticated |
 
 **废弃**: `POST /api/sessions`（无 project）→ **400**，并提示改用 `POST /api/projects/:id/sessions`。
 
-**不做（本轮）**: 写 API key、取消 generation、Session 删除、树形一次性聚合 API、Settings 路由。
+**不做（本轮）**: 通过浏览器 API 明文写 API key、Session 删除、树形一次性聚合 API、Settings 路由。取消、worker、限流、认证和图片清理已实现为后端控制能力；7 条无 session 历史记录删除沿用 library 的删除语义。
 
 权威页面矩阵与 DTO：**§14–§15**。
 
@@ -221,6 +226,7 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
 | 最近 N 次（当前 session） | GET | `/api/generations?sessionId=&limit=10` |
 | 提交生成 | POST | `/api/generations`（`sessionId` 必填） |
 | 轮询推进 | GET | `/api/generations/:id` |
+| 取消任务 | POST | `/api/generations/:id/cancel` |
 | 展图 | GET | `/api/images/:id` |
 | 收藏 | POST/DELETE | `/api/favorites` |
 
@@ -428,6 +434,14 @@ pool = registry.enabledModels
 执行入口：`npm run db:migrate`。脚本可重复执行，并在结束前运行 SQLite foreign-key check。
 
 迁移脚本归属实现任务，不在运行时隐式乱建（测试 helper 可自动建）。
+
+## 17. 运行时控制（2026-07-16）
+
+- `POST /api/generations/:id/cancel` 是幂等的本地取消入口。先写取消标记并停止后续 poll；provider 有 `cancel` 时尽力调用，Kling 标准图片 API 没有远程取消端点，因此保留 `CANCEL_UNSUPPORTED` 诊断而不伪造成功。
+- `MAX_INFLIGHT_GENERATIONS` 限制同时提交的 generation 数；`MAX_INFLIGHT_PER_PROVIDER` 限制同一 provider 的 submit/poll/cancel 并发。触发 admission 限制时 API 返回 429 与 `Retry-After: 5`。
+- `JOB_WORKER_ENABLED=true` 才启动 Node worker；它在 health 或 generation API 首次进入 Node 进程时 bootstrap（不依赖 Next instrumentation 的 Edge bundle）。`WORKER_INTERVAL_MS`、`WORKER_BATCH_SIZE` 控制扫描，`IMAGE_CLEANUP_INTERVAL_MS` 触发清理。关闭 worker 时仍可由详情 GET 手动推进。
+- `IMAGE_RETENTION_DAYS=30`（设为 `0` 禁用）删除过期且未收藏图片；文件缺失会被视为已清理。孤儿文件需超过 `IMAGE_ORPHAN_GRACE_MS` 才删除，收藏永不因保留期被删除。
+- `APP_AUTH_TOKEN` 未配置时保持本地开发兼容；配置后 API middleware 要求 Bearer 或 `/api/auth/session` 建立的 HttpOnly cookie，health 与 session bootstrap 路由公开。
 
 ---
 

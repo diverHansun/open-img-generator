@@ -5,8 +5,11 @@ import { SiliconFlowProvider } from './adapters/siliconflow';
 import { ZhipuProvider } from './adapters/zhipu';
 import { DoubaoProvider } from './adapters/doubao';
 import { QwenProvider } from './adapters/qwen';
+import { KlingProvider } from './adapters/kling';
+import { hasCredential } from '../user-config';
 
 const registry = new Map<ProviderId, ImageProvider>();
+let noProviderWarningShown = false;
 
 type ProviderDefinition = {
   isEnabled: () => boolean;
@@ -24,26 +27,30 @@ const providerOrder: ProviderId[] = [
 ];
 
 const definitions: Partial<Record<ProviderId, ProviderDefinition>> = {
-  fal: { isEnabled: () => !!process.env.FAL_KEY, create: () => new FalProvider() },
+  fal: { isEnabled: () => hasCredential('FAL_KEY'), create: () => new FalProvider() },
   zenmux: {
-    isEnabled: () => !!process.env.ZENMUX_API_KEY,
+    isEnabled: () => hasCredential('ZENMUX_API_KEY'),
     create: () => new ZenmuxProvider(),
   },
   siliconflow: {
-    isEnabled: () => !!process.env.SILICONFLOW_API_KEY,
+    isEnabled: () => hasCredential('SILICONFLOW_API_KEY'),
     create: () => new SiliconFlowProvider(),
   },
   zhipu: {
-    isEnabled: () => !!process.env.ZHIPU_API_KEY,
+    isEnabled: () => hasCredential('ZHIPU_API_KEY'),
     create: () => new ZhipuProvider(),
   },
   doubao: {
-    isEnabled: () => !!process.env.ARK_API_KEY,
+    isEnabled: () => hasCredential('ARK_API_KEY'),
     create: () => new DoubaoProvider(),
   },
   qwen: {
-    isEnabled: () => !!process.env.DASHSCOPE_API_KEY,
+    isEnabled: () => hasCredential('DASHSCOPE_API_KEY'),
     create: () => new QwenProvider(),
+  },
+  kling: {
+    isEnabled: () => hasCredential('KLING_API_KEY'),
+    create: () => new KlingProvider(),
   },
 };
 
@@ -61,7 +68,7 @@ export function getById(id: ProviderId): ImageProvider | undefined {
 }
 
 export function listEnabled(): ProviderInfo[] {
-  return providerOrder
+  const enabled = providerOrder
     .map((id) => {
       const provider = ensureAdapter(id);
       if (!provider) return undefined;
@@ -72,4 +79,9 @@ export function listEnabled(): ProviderInfo[] {
       };
     })
     .filter((info): info is ProviderInfo => info !== undefined);
+  if (enabled.length === 0 && !noProviderWarningShown) {
+    noProviderWarningShown = true;
+    console.warn('WARNING: no providers enabled');
+  }
+  return enabled;
 }

@@ -49,7 +49,7 @@
 type ProviderId = "fal" | "zenmux" | "siliconflow" | "zhipu" | "doubao" | "qwen" | "kling"
 ```
 
-当前已实现 `"fal"`、`"zenmux"`、`"siliconflow"`、`"zhipu"`、`"doubao"` 与 `"qwen"`。`"kling"` 仍为 registry 预留，adapter 未实现前不会被启用。
+当前已实现 `"fal"`、`"zenmux"`、`"siliconflow"`、`"zhipu"`、`"doubao"`、`"qwen"` 与 `"kling"`。Kling 使用独立 Kling API 和 Bearer key，不复用 DashScope。
 
 ### 3.2 ProviderMode
 
@@ -59,7 +59,7 @@ type ProviderId = "fal" | "zenmux" | "siliconflow" | "zhipu" | "doubao" | "qwen"
 type ProviderMode = "text-to-image" | "image-to-image"
 ```
 
-当前已实现的首跑模型均支持 `text-to-image`；Doubao 另外声明了参考图图生图能力。`image-to-image` 在 capabilities 中保留类型位，但当前 API 尚未暴露统一的 `referenceImages` 参数。
+当前已实现的首跑模型均支持 `text-to-image`；Doubao 与 Kling 另外声明了参考图图生图能力。API 通过统一的 `referenceImages` 参数传入参考图，adapter 再按厂商限制翻译。
 
 ### 3.3 NormalizedRequest
 
@@ -75,7 +75,7 @@ type ProviderMode = "text-to-image" | "image-to-image"
 | `count` | 请求生成张数 | 可选，默认 1，受 capabilities.maxCount 约束 |
 | `negativePrompt` | 负向提示词 | 可选，capabilities 声明是否支持 |
 | `seed` | 随机种子 | 可选，capabilities 声明是否支持 |
-| `referenceImages` | 参考图 URL 列表（图生图用） | 可选，MVP 不使用 |
+| `referenceImages` | 参考图 URL/裸 Base64 列表（图生图用） | 可选；`image-to-image` 至少一张 |
 | `providerOptions` | 厂商特技透传（松散键值） | 可选 |
 
 **尺寸解析优先级**: `width`+`height` > `aspectRatio` > capabilities 默认值。adapter 负责翻译为厂商各自的尺寸字段（如 fal 的 `image_size`、zenmux 的 `size`）。
@@ -96,7 +96,7 @@ type SubmitResult =
 | kind | 含义 | 适用厂商 |
 |------|------|----------|
 | `sync` | 当场完成，images 含厂商临时 URL | zenmux、siliconflow、zhipu、doubao |
-| `async` | 任务已提交，需后续 poll | fal、qwen |
+| `async` | 任务已提交，需后续 poll | fal、qwen、kling |
 | `failed` | 单次调用失败（含超时、4xx、5xx） | 全部 |
 
 ### 3.5 JobHandle
@@ -112,6 +112,8 @@ async 厂商的任务句柄，providers 内部结构，job-engine 原样存储�
 | `responseUrl` | 结果获取 URL | submit 响应的 `response_url` | 与 `statusUrl` 相同（成功响应内含结果） |
 | `cancelUrl` | 取消 URL | submit 响应的 `cancel_url` | `null`（当前官方 HTTP 接口未提供取消调用） |
 | `submittedAt` | 提交时间（ISO 8601） | 本地记录 | 本地记录 |
+
+Kling 映射：`externalId=data.task_id`，`statusUrl/responseUrl=/v1/images/generations/:taskId`，`cancelUrl=null`。
 
 job-engine 将 handle 序列化存入 `generation_jobs.provider_handle`（JSON），不在 providers 模块持久化。
 

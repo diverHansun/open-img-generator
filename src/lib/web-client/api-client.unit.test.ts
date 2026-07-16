@@ -66,4 +66,29 @@ describe('web API client', () => {
       undefined,
     );
   });
+
+  it('wires auth bootstrap and generation cancellation without changing list semantics', async () => {
+    const view = {
+      id: 'gen-1',
+      sessionId: 'session-1',
+      prompt: 'A cat',
+      status: 'cancelled',
+      createdAt: '2026-07-16T00:00:00.000Z',
+      updatedAt: '2026-07-16T00:00:00.000Z',
+      jobs: [],
+      images: [],
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authenticated: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(view), { status: 200 }));
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.getAuthSession()).resolves.toEqual({ authenticated: true });
+    await expect(client.cancelGeneration('gen/1')).resolves.toEqual(view);
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/generations/gen%2F1/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+  });
 });

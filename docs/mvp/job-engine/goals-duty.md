@@ -4,6 +4,7 @@
 > 文档顺序: ① goals-duty(本文) → ② architecture → ④ dfd-interface → ⑤ use-case → ⑦ test
 > 修订说明: 2026-07-15 启用扇出（1 generation + N jobs）；原「MVP 不扇出」作废
 > 修订说明: 2026-07-16 `sessionId` **必填**；不负责 Project/History/Gallery（归 library）
+> 修订说明: 2026-07-16 本地取消、next_poll_at worker、provider/generation 限流已实现
 
 ---
 
@@ -14,7 +15,7 @@
    - 衡量标准: API route handler 不超过 20 行逻辑。
 
 2. **统一 sync 与 async 两种生成路径的状态语义**
-   - 无论底层厂商是当场返回还是异步队列，上层看到的 generation / job 状态统一为: `pending` → `running` → `completed` / `failed`（`cancelled` 预留）。
+   - 无论底层厂商是当场返回还是异步队列，上层看到的 generation / job 状态统一为: `pending` → `running` → `completed` / `failed` / `cancelled`。
    - async 厂商的惰性 poll 推进对 API 层透明: `GET /api/generations/:id` 触发推进，调用方无需区分协议。
 
 3. **确保厂商临时 URL 在过期前被转存**
@@ -37,7 +38,7 @@
 ## 2. Duties（职责）
 
 1. **接收扇出生成请求并创建任务记录**: 接收归一化参数（`targets[]`、prompt、**必填 sessionId**、共享运行时参数），经 prompt 模块处理 prompt，在同一事务内写入 db（1 generation + N generation_jobs），再逐 target 调用 provider.submit。
-2. **按 target 校验与请求裁剪**: 每个 `(provider, model)` 必须已启用且存在于 capabilities；校验 mode、count（含 sync `count=1` MVP 限制）、尺寸/公开宽高比、negativePrompt。seed 若有值：仅写入 `supportsSeed===true` 的 target 的 NormalizedRequest，其余 target 省略（不因此整单 400）。
+2. **按 target 校验与请求裁剪**: 每个 `(provider, model)` 必须已启用且存在于 capabilities；校验 mode、count（含 sync `count=1` MVP 限制）、尺寸/公开宽高比、negativePrompt。`image-to-image` 必须带 `referenceImages`。seed 若有值：仅写入 `supportsSeed===true` 的 target 的 NormalizedRequest，其余 target 省略（不因此整单 400）。
 3. **推进所有未终结的 async job**: 在 `getGeneration()` 时，对 generation 下每个 `pending`/`running` 的 async job 调用 lifecycle.advance（含乐观锁），互不阻塞对方终态。
 4. **下载并转存图片**: 当某 job 的 provider 返回 completed（sync 当场或 async poll 完成），调用 storage 下载并写入本地，在 db 创建属于该 job 的 image 记录。
 5. **统一状态查询与聚合**: 对外提供 `getGeneration(id)` 返回 `GenerationView`（含全部 jobs 与 images）；generation.status 由全部 job 状态聚合（见 `api/constraints.md` §8）。
@@ -55,10 +56,10 @@
 5. **不处理 HTTP 路由**: API 层负责解析 HTTP 请求和返回 JSON。job-engine 不感知 Request/Response 对象。
 6. **不计算「前端交集」**: 多模型宽高比交集是 web-ui 的职责。服务端只校验「每个 target 是否支持提交的 aspectRatio」。
 7. **不重试失败的 provider 调用（MVP）**: 单次 submit/poll 失败即标记该 job failed，不做自动重试。
-8. **不做限流/熔断（MVP）**: 并发控制是后续迭代职责。
+8. **不做跨进程限流/熔断**: 当前提供单进程 generation admission 与 per-provider semaphore；多实例共享限流仍不在 MVP 范围。
 9. **不优化 prompt**: prompt 预处理是 prompt 模块的职责。
-10. **不实现取消 API（MVP）**: cancel 逻辑预留（可调 provider.cancel），但 MVP 不暴露取消端点。
-11. **不持久化运行时参数**: width/height/aspectRatio/count/seed/providerOptions 仅运行时使用，不写入 db（与既有约定一致）。
+10. **不负责厂商取消协议**: 取消入口由 orchestrator/API 提供，providers 仅在官方支持时实现 `cancel(handle)`；不支持时 job-engine 采用本地取消标记停止 poll。
+11. **不持久化运行时参数**: width/height/aspectRatio/count/seed/referenceImages/providerOptions 仅运行时使用，不写入 db（与既有约定一致）。
 12. **不渲染 UI、不声明前端控件显隐**: capabilities 驱动的参数面板属于 web-ui。
 13. **不管理 Project / History 列表 / Gallery 收藏 / 模型启用偏好**: 归属 library。
 14. **不创建 Session**: Session 由 library/API 先创建；job-engine 只引用。
@@ -68,5 +69,5 @@
 ## 自检（提交前）
 
 - **一句话存在意义**: job-engine 把「一次 prompt、多个模型」编排为可追踪的流水线，屏蔽 sync/async 差异，确保每张图被持久化。
-- **不该做什么**: 不翻译协议、不直接 HTTP、不定义 schema、不算 UI 交集、不重试、不限流、不管 Project/Gallery。
+- **不该做什么**: 不翻译协议、不直接 HTTP、不定义 schema、不算 UI 交集、不做跨进程调度、不管 Project/Gallery。
 - **职责重叠风险**: 与 providers——编排 vs 单次调用；与 web-ui——校验单 target vs 交集 UX；与 library——写 generation vs 组织资产；与 storage——触发转存 vs 执行写入。无重叠。
