@@ -13,7 +13,6 @@ function parseLimit(value: string | null): number | undefined {
 
 export function GET(request: Request) {
   try {
-    ensureWorkerStarted();
     const query = new URL(request.url).searchParams;
     return NextResponse.json(
       listGenerations(

@@ -70,7 +70,7 @@ generation 状态由全部 job **聚合**（`api/constraints.md` §8），不单
 async job 不在 submit 时阻塞等待；在 `getGeneration()` 时对**每一个**未终结 async job 触发 advance。显式开启 `JOB_WORKER_ENABLED` 后，`runWorkerOnce()` 读取 `next_poll_at` 到期 jobs，并复用同一 lease/CAS lifecycle；列表 GET 仍只读。
 
 - **支撑目标**: Design Goal #2
-- **理由**: Next.js 无独立 worker；MVP worker 在同一 Node 进程中由 health/generation API 首次请求 bootstrap。扇出后 N 个 async job 可在同一次 GET 内并行 advance（Promise.all），互不共用同一 providerHandle
+- **理由**: Next.js 无独立 worker；MVP worker 在同一 Node 进程中由 health 或 generation POST 首次请求 bootstrap，列表读取不会触发启动。扇出后 N 个 async job 可在同一次 GET 内并行 advance（Promise.all），互不共用同一 providerHandle
 
 ### 2.4 校验与交集分离
 

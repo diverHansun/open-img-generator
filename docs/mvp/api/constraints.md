@@ -439,7 +439,7 @@ pool = registry.enabledModels
 
 - `POST /api/generations/:id/cancel` 是幂等的本地取消入口。先写取消标记并停止后续 poll；provider 有 `cancel` 时尽力调用，Kling 标准图片 API 没有远程取消端点，因此保留 `CANCEL_UNSUPPORTED` 诊断而不伪造成功。
 - `MAX_INFLIGHT_GENERATIONS` 限制同时提交的 generation 数；`MAX_INFLIGHT_PER_PROVIDER` 限制同一 provider 的 submit/poll/cancel 并发。触发 admission 限制时 API 返回 429 与 `Retry-After: 5`。
-- `JOB_WORKER_ENABLED=true` 才启动 Node worker；它在 health 或 generation API 首次进入 Node 进程时 bootstrap（不依赖 Next instrumentation 的 Edge bundle）。`WORKER_INTERVAL_MS`、`WORKER_BATCH_SIZE` 控制扫描，`IMAGE_CLEANUP_INTERVAL_MS` 触发清理。关闭 worker 时仍可由详情 GET 手动推进。
+- `JOB_WORKER_ENABLED=true` 才启动 Node worker；它在 health 或 generation **POST** 首次进入 Node 进程时 bootstrap（不依赖 Next instrumentation 的 Edge bundle），generation/session/history 列表 GET 不因读取而启动 worker。`WORKER_INTERVAL_MS`、`WORKER_BATCH_SIZE` 控制扫描，`IMAGE_CLEANUP_INTERVAL_MS` 触发清理。关闭 worker 时仍可由详情 GET 手动推进。
 - `IMAGE_RETENTION_DAYS=30`（设为 `0` 禁用）删除过期且未收藏图片；文件缺失会被视为已清理。孤儿文件需超过 `IMAGE_ORPHAN_GRACE_MS` 才删除，收藏永不因保留期被删除。
 - `APP_AUTH_TOKEN` 未配置时保持本地开发兼容；配置后 API middleware 要求 Bearer 或 `/api/auth/session` 建立的 HttpOnly cookie，health 与 session bootstrap 路由公开。
 
