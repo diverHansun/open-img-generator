@@ -6,6 +6,7 @@ import {
   updateProject,
 } from '../../../../lib/library';
 import { handleApiError } from '../../error-handler';
+import { readJsonObject } from '../../request-body';
 
 export async function GET(
   _request: Request,
@@ -23,7 +24,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const body = (await request.json()) as { title?: unknown };
+    const body = await readJsonObject(request);
     return NextResponse.json(
       updateProject((await params).id, { title: body.title }, db),
     );

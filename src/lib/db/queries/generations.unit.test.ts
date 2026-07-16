@@ -5,6 +5,7 @@ import {
   createGenerationWithJobs,
   updateGeneration,
   updateGenerationJob,
+  updateGenerationJobIfLease,
   getGenerationWithJobsAndImages,
   aggregateGenerationStatus,
   tryClaimPollLease,
@@ -134,6 +135,23 @@ describe('generations queries', () => {
     const job = getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]!;
     expect(job.status).toBe('running');
     expect(job.pollLeaseUntil).toBe('2026-07-12T10:01:11.000Z');
+  });
+
+  it('rejects a stale lease owner from updating a job', () => {
+    const { db } = createTestDb();
+    createGenerationAndJob(makeGenParams(), makeJobParams({ status: 'running' }), db);
+    expect(tryClaimPollLease('job-1', now, '2026-07-12T10:00:35.000Z', db)).toBe(true);
+    expect(
+      updateGenerationJobIfLease(
+        'job-1',
+        '2026-07-12T10:00:00.000Z',
+        { status: 'failed', pollLeaseUntil: null, updatedAt: now },
+        db,
+      ),
+    ).toBe(false);
+    expect(getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]!.status).toBe(
+      'running',
+    );
   });
 
   describe('aggregateGenerationStatus', () => {

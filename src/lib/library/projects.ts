@@ -58,14 +58,23 @@ export function updateProject(
 }
 
 export function deleteProject(id: string, client: DbClient = db): void {
-  getProject(id, client);
-  const childCount = client
-    .select({ count: sql<number>`count(*)` })
-    .from(sessions)
-    .where(eq(sessions.projectId, id))
-    .get()!.count;
-  if (childCount > 0) {
-    throw new ConflictError('Project must be empty before deletion');
+  try {
+    client.transaction((tx) => {
+      getProject(id, tx);
+      const childCount = tx
+        .select({ count: sql<number>`count(*)` })
+        .from(sessions)
+        .where(eq(sessions.projectId, id))
+        .get()!.count;
+      if (childCount > 0) {
+        throw new ConflictError('Project must be empty before deletion');
+      }
+      tx.delete(projects).where(eq(projects.id, id)).run();
+    });
+  } catch (err) {
+    if (err instanceof Error && /foreign key|constraint/i.test(err.message)) {
+      throw new ConflictError('Project must be empty before deletion');
+    }
+    throw err;
   }
-  client.delete(projects).where(eq(projects.id, id)).run();
 }

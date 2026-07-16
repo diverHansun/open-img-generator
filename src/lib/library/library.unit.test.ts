@@ -103,6 +103,15 @@ describe('library domain', () => {
     );
   });
 
+  it('returns 404 semantics for missing history targets', () => {
+    expect(() => listGenerations({ sessionId: 'missing-session' }, testDb.db)).toThrow(
+      NotFoundError,
+    );
+    expect(() => listGenerations({ projectId: 'missing-project' }, testDb.db)).toThrow(
+      NotFoundError,
+    );
+  });
+
   it('favorites an image idempotently and returns its complete lineage', () => {
     seedGeneration(testDb, {
       generationId: 'generation-gallery',

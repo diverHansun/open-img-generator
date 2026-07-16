@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '../../../../../lib/db';
 import { createSession, listSessions } from '../../../../../lib/library';
 import { handleApiError } from '../../../error-handler';
+import { readJsonObject } from '../../../request-body';
 
 export async function GET(
   _request: Request,
@@ -19,7 +20,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const body = (await request.json()) as { title?: unknown };
+    const body = await readJsonObject(request);
     return NextResponse.json(
       createSession({ projectId: (await params).id, title: body.title }, db),
       { status: 201 },

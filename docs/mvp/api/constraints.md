@@ -64,8 +64,8 @@ loop:
 | 机制 | 说明 |
 |------|------|
 | poll lease claim | `UPDATE generation_jobs SET poll_lease_until=?, updated_at=? WHERE id=? AND status IN ('pending','running') AND (poll_lease_until IS NULL OR poll_lease_until<=?)`；影响行数 0 则跳过该 job 的 poll |
-| 租约时长 | 120 秒；覆盖 Fal status/response + 图片转存的完整最坏路径。进程崩溃后，下一次 GET 在租约到期后可恢复推进 |
-| 状态与锁 | claim **不修改 status**。`pending` / `running` 始终表示厂商真实进度，poll 结果写入后清空 `poll_lease_until` |
+| 租约时长 | 300 秒；覆盖 Fal status/response + 最多 4 张图片转存的完整最坏路径。进程崩溃后，下一次 GET 在租约到期后可恢复推进 |
+| 状态与锁 | claim **不修改 status**。`pending` / `running` 始终表示厂商真实进度；结果写回带原 lease 时间戳条件，失去租约的旧 worker 不能覆盖新结果；成功写入后清空 `poll_lease_until` |
 | 转存幂等 | `db.imageExists(jobId, index)` 为 true 则跳过该张 downloadAndStore |
 | 已终态 | job 已 `completed`/`failed`/`cancelled` 时不再 poll；generation 全部 job 终态时 GET 不触发 advance |
 

@@ -82,6 +82,28 @@ describe('POST /api/generations', () => {
     const body = await response.json();
     expect(body.error).toBe('Provider not enabled');
   });
+
+  it('returns 400 when sessionId is missing', async () => {
+    vi.mocked(jobEngine.submitGeneration).mockRejectedValue(
+      new ValidationError('Session is required'),
+    );
+
+    const response = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
+          prompt: 'A cat',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Session is required',
+    });
+  });
 });
 
 describe('GET /api/generations/:id', () => {

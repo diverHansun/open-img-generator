@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
   updateGenerationJob,
+  updateGenerationJobIfLease,
   updateGeneration,
-  createImage,
+  createImageIfAbsent,
   imageExists,
   getGenerationWithJobsAndImages,
   aggregateGenerationStatus,
@@ -22,7 +23,7 @@ export type StoreImagesResult =
 
 // Covers the full Fal completion path: status + response + image transfer.
 // A crashed process may delay the next poll by at most this amount.
-export const POLL_LEASE_MS = 120_000;
+export const POLL_LEASE_MS = 300_000;
 
 export async function storeImages(
   jobId: string,
@@ -47,7 +48,7 @@ export async function storeImages(
       return { kind: 'failed', error: storageError };
     }
 
-    createImage(
+    createImageIfAbsent(
       {
         id: randomUUID(),
         jobId,
@@ -72,33 +73,29 @@ export async function completeSync(
   jobId: string,
   images: ProviderImageRef[],
   client: DbClient,
+  expectedPollLeaseUntil?: string,
 ): Promise<void> {
   const storeResult = await storeImages(jobId, images, client);
   const now = new Date().toISOString();
 
   client.transaction((tx) => {
-    if (storeResult.kind === 'ok') {
-      updateGenerationJob(
-        jobId,
-        { status: 'completed', pollLeaseUntil: null, updatedAt: now },
-        tx,
-      );
-    } else {
-      updateGenerationJob(
-        jobId,
-        {
-          status: 'failed',
-          error: JSON.stringify({
-            code: 'STORAGE_ERROR',
-            message: storeResult.error.message,
-            retryable: false,
-          }),
-          pollLeaseUntil: null,
-          updatedAt: now,
-        },
-        tx,
-      );
-    }
+    const patch =
+      storeResult.kind === 'ok'
+        ? { status: 'completed' as const, pollLeaseUntil: null, updatedAt: now }
+        : {
+            status: 'failed' as const,
+            error: JSON.stringify({
+              code: 'STORAGE_ERROR',
+              message: storeResult.error.message,
+              retryable: false,
+            }),
+            pollLeaseUntil: null,
+            updatedAt: now,
+          };
+    const updated = expectedPollLeaseUntil
+      ? updateGenerationJobIfLease(jobId, expectedPollLeaseUntil, patch, tx)
+      : (updateGenerationJob(jobId, patch, tx), true);
+    if (!updated) return;
 
     const finalStatus = deriveGenerationStatus(generationId, tx);
     updateGeneration(
@@ -139,6 +136,7 @@ export async function advance(
         updatedAt: new Date().toISOString(),
       },
       client,
+      leaseUntil,
     );
     return;
   }
@@ -159,6 +157,7 @@ export async function advance(
         updatedAt: new Date().toISOString(),
       },
       client,
+      leaseUntil,
     );
     return;
   }
@@ -178,7 +177,7 @@ export async function advance(
   }
 
   try {
-    await applyPollResult(job, pollResult, client);
+    await applyPollResult(job, pollResult, client, leaseUntil);
   } catch (err) {
     updateJobAndGeneration(
       job.id,
@@ -194,6 +193,7 @@ export async function advance(
         updatedAt: new Date().toISOString(),
       },
       client,
+      leaseUntil,
     );
   }
 }
@@ -202,6 +202,7 @@ async function applyPollResult(
   job: GenerationJob,
   pollResult: PollResult,
   client: DbClient,
+  expectedPollLeaseUntil: string,
 ): Promise<void> {
   const now = new Date().toISOString();
 
@@ -212,6 +213,7 @@ async function applyPollResult(
         job.generationId,
         { status: 'pending', pollLeaseUntil: null, updatedAt: now },
         client,
+        expectedPollLeaseUntil,
       );
       break;
     case 'running':
@@ -220,10 +222,17 @@ async function applyPollResult(
         job.generationId,
         { status: 'running', pollLeaseUntil: null, updatedAt: now },
         client,
+        expectedPollLeaseUntil,
       );
       break;
     case 'completed':
-      await completeSync(job.generationId, job.id, pollResult.images, client);
+      await completeSync(
+        job.generationId,
+        job.id,
+        pollResult.images,
+        client,
+        expectedPollLeaseUntil,
+      );
       return;
     case 'failed':
       updateJobAndGeneration(
@@ -236,6 +245,7 @@ async function applyPollResult(
           updatedAt: now,
         },
         client,
+        expectedPollLeaseUntil,
       );
       break;
     case 'cancelled':
@@ -244,6 +254,7 @@ async function applyPollResult(
         job.generationId,
         { status: 'cancelled', pollLeaseUntil: null, updatedAt: now },
         client,
+        expectedPollLeaseUntil,
       );
       break;
   }
@@ -260,9 +271,13 @@ export function updateJobAndGeneration(
     updatedAt: string;
   },
   client: DbClient,
+  expectedPollLeaseUntil?: string,
 ): void {
   client.transaction((tx) => {
-    updateGenerationJob(jobId, jobPatch, tx);
+    const updated = expectedPollLeaseUntil
+      ? updateGenerationJobIfLease(jobId, expectedPollLeaseUntil, jobPatch, tx)
+      : (updateGenerationJob(jobId, jobPatch, tx), true);
+    if (!updated) return;
     const status = deriveGenerationStatus(generationId, tx);
     updateGeneration(
       generationId,

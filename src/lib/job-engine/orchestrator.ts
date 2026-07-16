@@ -211,7 +211,7 @@ export async function getGeneration(
   }
 
   if (generation.status === 'pending' || generation.status === 'running') {
-    await Promise.all(
+    await Promise.allSettled(
       generation.jobs
         .filter((job) => job.status === 'pending' || job.status === 'running')
         .map((job) => advance(job, ctx.db)),

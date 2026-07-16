@@ -33,7 +33,7 @@ sequenceDiagram
 | 决策 | 选择 | 理由 | 放弃与代价 |
 |---|---|---|---|
 | 扇出持久化 | 一 generation + 一 target 一 job 的单事务写入 | generation 与完整 target 集不可分割；符合现有 schema | 需新增多 job query helper |
-| 轮询排他 | `pollLeaseUntil`（实施为 120 秒）独立字段 | 保留真实 `pending/running` 状态，覆盖 status/response/图片转存完整路径，崩溃后可恢复 | lease 到期前最多延迟一次 poll；不提供后台自动推进 |
+| 轮询排他 | `pollLeaseUntil`（实施为 300 秒）独立字段 | 保留真实 `pending/running` 状态，覆盖 status/response/图片转存完整路径，崩溃后可恢复 | lease 到期前最多延迟一次 poll；不提供后台自动推进 |
 | 同步 target | 同一 POST 中 `Promise.all` 独立提交 | 一条慢 sync target 不应串行放大其他 target 延迟 | 本地 MVP 无并发背压；将来有真实压力再引入受限 worker |
 | 公共参数 | 服务端逐 target 校验/归一化 | 防止前端能力缓存过期或被绕过 | 所有 target 必须共享可选的 negativePrompt；seed 为按 target 省略 |
 | Fal 比例 | adapter 内部比例→Fal size 映射 | 避免公共 API 透出 `square_hd` 等厂商枚举 | 当前 Fal + ZenMux 的共同公开比仅 `1:1` |
@@ -119,7 +119,7 @@ SQLite 本地开发使用 schema push/迁移流程新增列；已有开发数据
 
 | 风险 | 防护 | 回滚 |
 |---|---|---|
-| 租约过短导致重复 poll | 120 秒覆盖 Fal 双请求与图片转存预算；原子条件写入 | 增加租约常量，不改 status 语义 |
+| 租约过短导致重复 poll | 300 秒覆盖 Fal 双请求与最多 4 张图片转存预算；原子条件写入 | 增加租约常量，不改 status 语义 |
 | Provider 失败掩盖其他结果 | 每 target 独立 catch 与 job error | 单 job 仍可标 failed，聚合保持部分成功 |
 | API 破坏影响本地调用 | contract、quickstart、React client 同步改为 targets | 恢复旧版本仅限开发环境；不引入双契约长期负担 |
 | Fal 比例映射错误 | adapter 请求体 unit tests | 只回退 Fal mapping，不影响数据模型 |

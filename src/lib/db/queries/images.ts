@@ -37,6 +37,28 @@ export function createImage(
   return getImage(params.id, client);
 }
 
+export function createImageIfAbsent(
+  params: CreateImageParams,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .insert(images)
+    .values({
+      id: params.id,
+      generationJobId: params.jobId,
+      index: params.index,
+      storagePath: params.storagePath,
+      contentType: params.contentType,
+      width: params.width,
+      height: params.height,
+      sizeBytes: params.sizeBytes,
+      createdAt: params.createdAt,
+    })
+    .onConflictDoNothing()
+    .run();
+  return result.changes > 0;
+}
+
 export function imageExists(
   jobId: string,
   index: number,

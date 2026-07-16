@@ -42,6 +42,13 @@ describe('db:migrate', () => {
       insertGeneration.run(`legacy-generation-${index}`, `Prompt ${index}`);
     }
     legacy.exec(`
+      INSERT INTO sessions VALUES
+        ('valid-session', 'Legacy session', '2026-07-16T00:00:00.000Z', '2026-07-16T00:00:00.000Z');
+      INSERT INTO generations VALUES
+        ('valid-generation', 'valid-session', 'A preserved prompt', 'completed',
+         '2026-07-16T00:00:00.000Z', '2026-07-16T00:00:00.000Z');
+    `);
+    legacy.exec(`
       INSERT INTO generation_jobs VALUES (
         'legacy-job', 'legacy-generation-1', 'fal', 'fal-ai/flux/schnell',
         'completed', NULL, NULL, '2026-07-16T00:00:00.000Z', '2026-07-16T00:00:00.000Z'
@@ -64,7 +71,7 @@ describe('db:migrate', () => {
       ) as { deletedOrphanGenerations: number; generations: number };
       expect(first).toMatchObject({
         deletedOrphanGenerations: 7,
-        generations: 0,
+        generations: 1,
       });
 
       const second = JSON.parse(
@@ -76,11 +83,17 @@ describe('db:migrate', () => {
       ) as { deletedOrphanGenerations: number; generations: number };
       expect(second).toMatchObject({
         deletedOrphanGenerations: 0,
-        generations: 0,
+        generations: 1,
       });
 
       const migrated = new Database(file);
       expect(migrated.pragma('foreign_key_check')).toEqual([]);
+      expect(
+        migrated.prepare('SELECT id, session_id FROM generations').all(),
+      ).toEqual([{ id: 'valid-generation', session_id: 'valid-session' }]);
+      expect(migrated.prepare('SELECT COUNT(*) AS count FROM images').get()).toEqual({
+        count: 0,
+      });
       const sessionColumns = migrated.pragma('table_info(sessions)') as Array<{
         name: string;
         notnull: number;

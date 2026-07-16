@@ -6,6 +6,7 @@ import {
   updateSession,
 } from '../../../../lib/library';
 import { handleApiError } from '../../error-handler';
+import { readJsonObject } from '../../request-body';
 
 export async function GET(
   request: Request,
@@ -32,7 +33,7 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body = (await request.json()) as { title?: unknown };
+    const body = await readJsonObject(request);
     return NextResponse.json(updateSession(id, { title: body.title }, db));
   } catch (err) {
     return handleApiError(err);

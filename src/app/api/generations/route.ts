@@ -3,6 +3,7 @@ import { submitGeneration } from '../../../lib/job-engine';
 import { db } from '../../../lib/db';
 import { handleApiError } from '../error-handler';
 import { listGenerations } from '../../../lib/library';
+import { readJsonObject } from '../request-body';
 
 function parseLimit(value: string | null): number | undefined {
   if (value === null) return undefined;
@@ -31,7 +32,7 @@ export function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as Parameters<typeof submitGeneration>[0];
+    const body = (await readJsonObject(request)) as Parameters<typeof submitGeneration>[0];
     const result = await submitGeneration(body, { db });
     return NextResponse.json(
       {

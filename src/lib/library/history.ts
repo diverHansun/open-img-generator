@@ -3,12 +3,14 @@ import {
   db,
   fetchGenerationDetails,
   generations,
+  sessionExists,
   sessions,
   type DbClient,
   type Generation,
   type GenerationStatus,
 } from '../db';
-import { ValidationError } from '../errors';
+import { getProject } from './projects';
+import { NotFoundError, ValidationError } from '../errors';
 import type { GenerationSummary, Page } from './types';
 
 type Cursor = { createdAt: string; id: string };
@@ -93,6 +95,12 @@ export function listGenerations(
   }
   const limit = Math.min(input.limit ?? 10, 50);
   const after = decodeCursor(input.cursor);
+
+  if (input.projectId) getProject(input.projectId, client);
+  if (input.sessionId && !sessionExists(input.sessionId, client)) {
+    throw new NotFoundError(`Session not found: ${input.sessionId}`);
+  }
+
   const predicates: SQL[] = [];
   const afterCondition = cursorCondition(after);
   if (afterCondition) predicates.push(afterCondition);

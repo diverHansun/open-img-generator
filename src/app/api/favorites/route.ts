@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { db } from '../../../lib/db';
 import { addFavorite, listFavorites } from '../../../lib/library';
 import { handleApiError } from '../error-handler';
+import { readJsonObject } from '../request-body';
 
 export function GET(request: Request) {
   try {
@@ -21,7 +22,7 @@ export function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { imageId?: unknown };
+    const body = await readJsonObject(request);
     if (typeof body.imageId !== 'string') {
       return NextResponse.json({ error: 'imageId is required' }, { status: 400 });
     }

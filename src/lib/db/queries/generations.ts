@@ -153,6 +153,38 @@ export function updateGenerationJob(
     .get()!;
 }
 
+/**
+ * Updates a job only while the caller still owns its poll lease.
+ *
+ * The lease expiry is also the lease token: every successful claim writes a
+ * fresh ISO timestamp, so an old poll response cannot overwrite a newer
+ * worker's result after the lease has expired.
+ */
+export function updateGenerationJobIfLease(
+  id: string,
+  expectedPollLeaseUntil: string,
+  patch: UpdateGenerationJobPatch,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set({
+      status: patch.status,
+      providerHandle: patch.providerHandle,
+      error: patch.error,
+      pollLeaseUntil: patch.pollLeaseUntil,
+      updatedAt: patch.updatedAt,
+    })
+    .where(
+      and(
+        eq(generationJobs.id, id),
+        eq(generationJobs.pollLeaseUntil, expectedPollLeaseUntil),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
 export function tryClaimPollLease(
   id: string,
   now: string,

@@ -5,6 +5,7 @@ import {
   upsertModelPreference,
 } from '../../../lib/library';
 import { handleApiError } from '../error-handler';
+import { readJsonObject } from '../request-body';
 
 export function GET() {
   return NextResponse.json({ items: listModelPreferences(db) });
@@ -12,11 +13,7 @@ export function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const body = (await request.json()) as {
-      provider?: unknown;
-      model?: unknown;
-      enabled?: unknown;
-    };
+    const body = await readJsonObject(request);
     return NextResponse.json(
       upsertModelPreference(
         {
