@@ -74,10 +74,10 @@ export function buildSubmitGenerationRequest(
   if (request.aspectRatio && !controls.aspectRatios.includes(request.aspectRatio)) {
     throw new Error(`Aspect ratio is not shared by all selected targets: ${request.aspectRatio}`);
   }
-  if (request.count !== undefined && request.count > controls.maxCount) {
+  if (request.count != null && request.count > controls.maxCount) {
     throw new Error(`Count exceeds selected target limit: ${controls.maxCount}`);
   }
-  if (request.count !== undefined && (!Number.isInteger(request.count) || request.count < 1)) {
+  if (request.count != null && (!Number.isInteger(request.count) || request.count < 1)) {
     throw new Error('Count must be a positive integer');
   }
   if (request.negativePrompt && !controls.canSetNegativePrompt) {

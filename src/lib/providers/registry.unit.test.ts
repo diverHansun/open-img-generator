@@ -9,6 +9,8 @@ describe('registry', () => {
     delete process.env.ZENMUX_API_KEY;
     delete process.env.SILICONFLOW_API_KEY;
     delete process.env.ZHIPU_API_KEY;
+    delete process.env.ARK_API_KEY;
+    delete process.env.DASHSCOPE_API_KEY;
   });
 
   afterEach(() => {
@@ -20,6 +22,8 @@ describe('registry', () => {
     expect(getById('zenmux')).toBeUndefined();
     expect(getById('siliconflow')).toBeUndefined();
     expect(getById('zhipu')).toBeUndefined();
+    expect(getById('doubao')).toBeUndefined();
+    expect(getById('qwen')).toBeUndefined();
   });
 
   it('returns fal provider when FAL_KEY is set', () => {
@@ -53,15 +57,35 @@ describe('registry', () => {
     expect(provider?.capabilities.has('glm-image')).toBe(true);
   });
 
+  it('returns doubao provider when ARK_API_KEY is set', () => {
+    process.env.ARK_API_KEY = 'test-key';
+    const provider = getById('doubao');
+    expect(provider).toBeDefined();
+    expect(provider?.id).toBe('doubao');
+    expect(provider?.capabilities.has('doubao-seedream-4-0-250828')).toBe(true);
+  });
+
+  it('returns qwen provider when DASHSCOPE_API_KEY is set', () => {
+    process.env.DASHSCOPE_API_KEY = 'test-key';
+    const provider = getById('qwen');
+    expect(provider).toBeDefined();
+    expect(provider?.id).toBe('qwen');
+    expect(provider?.capabilities.has('qwen-image-plus')).toBe(true);
+  });
+
   it('lists only enabled providers', () => {
     process.env.FAL_KEY = 'test-key';
     process.env.SILICONFLOW_API_KEY = 'test-key';
     process.env.ZHIPU_API_KEY = 'test-key';
+    process.env.ARK_API_KEY = 'test-key';
+    process.env.DASHSCOPE_API_KEY = 'test-key';
     const enabled = listEnabled();
-    expect(enabled).toHaveLength(3);
+    expect(enabled).toHaveLength(5);
     expect(enabled[0].id).toBe('fal');
     expect(enabled[1].id).toBe('siliconflow');
     expect(enabled[2].id).toBe('zhipu');
+    expect(enabled[3].id).toBe('doubao');
+    expect(enabled[4].id).toBe('qwen');
   });
 
   it('returns empty array when no keys configured', () => {

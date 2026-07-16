@@ -37,13 +37,13 @@ function buildNormalizedRequest(
   return {
     prompt: processedPrompt,
     mode: params.mode,
-    width: params.width,
-    height: params.height,
-    aspectRatio: params.aspectRatio,
-    count: params.count,
-    negativePrompt: params.negativePrompt,
-    seed: capabilities.supportsSeed ? params.seed : undefined,
-    providerOptions: params.providerOptions,
+    width: params.width ?? undefined,
+    height: params.height ?? undefined,
+    aspectRatio: params.aspectRatio ?? undefined,
+    count: params.count ?? undefined,
+    negativePrompt: params.negativePrompt ?? undefined,
+    seed: capabilities.supportsSeed ? params.seed ?? undefined : undefined,
+    providerOptions: params.providerOptions ?? undefined,
   };
 }
 

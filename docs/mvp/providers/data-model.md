@@ -49,7 +49,7 @@
 type ProviderId = "fal" | "zenmux" | "siliconflow" | "zhipu" | "doubao" | "qwen" | "kling"
 ```
 
-当前已实现 `"fal"`、`"zenmux"`、`"siliconflow"` 与 `"zhipu"`。`"doubao"`、`"qwen"`、`"kling"` 仍为 registry 预留，adapter 未实现前不会被启用。
+当前已实现 `"fal"`、`"zenmux"`、`"siliconflow"`、`"zhipu"`、`"doubao"` 与 `"qwen"`。`"kling"` 仍为 registry 预留，adapter 未实现前不会被启用。
 
 ### 3.2 ProviderMode
 
@@ -59,7 +59,7 @@ type ProviderId = "fal" | "zenmux" | "siliconflow" | "zhipu" | "doubao" | "qwen"
 type ProviderMode = "text-to-image" | "image-to-image"
 ```
 
-当前四个首跑模型均支持 `text-to-image`。`image-to-image` 在 capabilities 中保留类型位，但当前不暴露 API 参数。
+当前已实现的首跑模型均支持 `text-to-image`；Doubao 另外声明了参考图图生图能力。`image-to-image` 在 capabilities 中保留类型位，但当前 API 尚未暴露统一的 `referenceImages` 参数。
 
 ### 3.3 NormalizedRequest
 
@@ -95,23 +95,23 @@ type SubmitResult =
 
 | kind | 含义 | 适用厂商 |
 |------|------|----------|
-| `sync` | 当场完成，images 含厂商临时 URL | zenmux、siliconflow、zhipu |
-| `async` | 任务已提交，需后续 poll | fal |
+| `sync` | 当场完成，images 含厂商临时 URL | zenmux、siliconflow、zhipu、doubao |
+| `async` | 任务已提交，需后续 poll | fal、qwen |
 | `failed` | 单次调用失败（含超时、4xx、5xx） | 全部 |
 
 ### 3.5 JobHandle
 
 async 厂商的任务句柄，providers 内部结构，job-engine 原样存储并在 poll 时传回。
 
-| 字段 | 含义 | fal 映射 |
-|------|------|----------|
-| `providerId` | 厂商标识 | `"fal"` |
-| `model` | 模型 id | `"fal-ai/flux/schnell"` |
-| `externalId` | 厂商侧任务 id | `request_id` |
-| `statusUrl` | 状态查询 URL | submit 响应的 `status_url` |
-| `responseUrl` | 结果获取 URL | submit 响应的 `response_url` |
-| `cancelUrl` | 取消 URL | submit 响应的 `cancel_url` |
-| `submittedAt` | 提交时间（ISO 8601） | 本地记录 |
+| 字段 | 含义 | fal 映射 | Qwen 映射 |
+|------|------|----------|----------|
+| `providerId` | 厂商标识 | `"fal"` | `"qwen"` |
+| `model` | 模型 id | `"fal-ai/flux/schnell"` | `"qwen-image-plus"` |
+| `externalId` | 厂商侧任务 id | `request_id` | `task_id` |
+| `statusUrl` | 状态查询 URL | submit 响应的 `status_url` | `/api/v1/tasks/:taskId` |
+| `responseUrl` | 结果获取 URL | submit 响应的 `response_url` | 与 `statusUrl` 相同（成功响应内含结果） |
+| `cancelUrl` | 取消 URL | submit 响应的 `cancel_url` | `null`（当前官方 HTTP 接口未提供取消调用） |
+| `submittedAt` | 提交时间（ISO 8601） | 本地记录 | 本地记录 |
 
 job-engine 将 handle 序列化存入 `generation_jobs.provider_handle`（JSON），不在 providers 模块持久化。
 
@@ -290,6 +290,36 @@ type ProviderErrorCode =
 
 智谱 adapter 固定使用 `quality="hd"` 与 `watermark_enabled=true`，`user_id` 从 `ZHIPU_USER_ID` 读取，单用户默认值为 `local-user`。
 
+### doubao / doubao-seedream-4-0-250828
+
+| 字段 | 值 |
+|------|-----|
+| protocol | `sync` |
+| modes | `["text-to-image", "image-to-image"]` |
+| maxCount | 1（当前同步 job-engine 约束） |
+| supportedSizes | `["2K", "4K"]` |
+| supportedAspectRatios | `["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"]` |
+| supportsNegativePrompt | false |
+| supportsSeed | true |
+| defaultSize | `"2K"` |
+
+Doubao adapter 使用独立 Ark API（默认 `https://ark.cn-beijing.volces.com/api/v3`），文生图/图生图统一提交 `images/generations`；`referenceImages` 映射为 `image[]`，当前默认关闭组图并返回 URL。
+
+### qwen / qwen-image-plus
+
+| 字段 | 值 |
+|------|-----|
+| protocol | `async` |
+| modes | `["text-to-image"]` |
+| maxCount | 1（Qwen Image Plus HTTP API 固定 n=1） |
+| supportedSizes | `["1664*928", "1472*1104", "1328*1328", "1104*1472", "928*1664"]` |
+| supportedAspectRatios | `["16:9", "4:3", "1:1", "3:4", "9:16"]` |
+| supportsNegativePrompt | true |
+| supportsSeed | true |
+| defaultSize | `"1664*928"` |
+
+Qwen adapter 使用 DashScope `text2image/image-synthesis` 创建任务，并通过 `GET /tasks/:taskId` 惰性 poll；任务和图片 URL 有效期约 24 小时，job-engine 必须及时转存。
+
 ---
 
 ## 5. Lifecycle & Ownership（生命周期与归属）
@@ -299,7 +329,7 @@ type ProviderErrorCode =
 | ImageProvider 实例 | registry（懒创建） | 进程生命周期 | 进程退出 |
 | NormalizedRequest | job-engine | 单次 submit 调用 | GC |
 | SubmitResult / PollResult | adapter | 单次调用 | 返回给 job-engine 后由 job-engine 决定是否持久化 |
-| JobHandle | fal adapter（submit 时） | 从 submit 到 completed/failed/cancelled | job-engine 在 generation_jobs 中持久化，providers 不持有 |
+| JobHandle | fal / qwen adapter（submit 时） | 从 submit 到 completed/failed/cancelled | job-engine 在 generation_jobs 中持久化，providers 不持有 |
 | ProviderImageRef | adapter（解析响应时） | 厂商 URL 有效期（通常数小时） | URL 过期后不可下载；job-engine 须在过期前转存 |
 | ProviderCapabilities | capabilities 静态文件 | 编译时存在 | 随代码部署更新 |
 | ProviderError | adapter（错误时） | 单次调用 | 返回给 job-engine |
@@ -313,4 +343,4 @@ type ProviderErrorCode =
 - 所有概念均可在 dfd-interface.md 的数据流中找到使用场景
 - ProviderImageRef 明确标注为临时资源，与 db 模块的 Image 实体区分
 - SubmitResult/PollResult 的 kind/status 枚举覆盖 sync + async 两种协议路径
-- 当前 Batch 1 模型的 capabilities 与对应厂商 API 文档一致；同步 provider 的 `maxCount=1` 是现有 job-engine 约束，而非厂商能力上限
+- 当前 Batch 1/2 模型的 capabilities 与对应厂商 API 文档一致；同步 provider 的 `maxCount=1` 是现有 job-engine 约束，而非厂商能力上限

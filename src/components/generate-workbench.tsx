@@ -613,7 +613,7 @@ export function GenerateWorkbench() {
         },
         providers,
       );
-      if (payload.seed !== undefined && (!Number.isInteger(payload.seed) || payload.seed < 0)) {
+      if (payload.seed != null && (!Number.isInteger(payload.seed) || payload.seed < 0)) {
         throw new Error('Seed 必须是大于等于 0 的整数');
       }
 

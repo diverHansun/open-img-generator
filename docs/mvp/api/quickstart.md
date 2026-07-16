@@ -12,9 +12,13 @@
 
 ```bash
 cp .env.example .env
-# 至少配置其一:
+# 至少配置其一（按你要验证的 Provider 选择）:
 # FAL_KEY=...
 # ZENMUX_API_KEY=...
+# SILICONFLOW_API_KEY=...
+# ZHIPU_API_KEY=...
+# ARK_API_KEY=...
+# DASHSCOPE_API_KEY=...
 ```
 
 启动:
@@ -29,7 +33,7 @@ npm run dev
 
 ```bash
 curl -s http://127.0.0.1:3000/api/health | jq
-# 期望: { "status": "ok", "enabledProviders": ["fal"] 或 ["zenmux"] 或两者, "db": "ok" }
+# 期望: { "status": "ok", "enabledProviders": [已配置 key 的 provider id...], "db": "ok" }
 ```
 
 ---
@@ -56,7 +60,7 @@ SESSION=$(curl -s -X POST http://127.0.0.1:3000/api/projects/$PROJECT/sessions \
 
 ---
 
-## 3. Sync 路径（ZenMux / openai/gpt-image-2）
+## 3. Sync 路径（ZenMux 示例；SiliconFlow / 智谱 / Doubao 同契约）
 
 ```bash
 curl -s -X POST http://127.0.0.1:3000/api/generations \
@@ -93,7 +97,9 @@ curl -s -o out.png http://127.0.0.1:3000/api/images/{imageId}
 
 ---
 
-## 4. Async 路径（fal / fal-ai/flux/schnell）
+## 4. Async 路径（fal / Qwen）
+
+下面先用 fal 展示轮询流程。Qwen 使用同一套 `POST` → `GET /api/generations/:id` 客户端流程，只需把 target 换成 `{ "provider": "qwen", "model": "qwen-image-plus" }`；服务端会向 DashScope 提交任务并在详情 GET 时惰性 poll。
 
 提交:
 

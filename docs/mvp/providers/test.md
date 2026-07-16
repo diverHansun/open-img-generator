@@ -11,8 +11,8 @@
 ### 覆盖
 
 - registry 按 env key 启用/禁用 provider 的行为
-- zenmux、SiliconFlow、智谱 adapter 的请求翻译与响应解析（sync 路径）
-- fal adapter 的请求翻译、submit 句柄解析、poll 状态机（async 路径）
+- zenmux、SiliconFlow、智谱、Doubao adapter 的请求翻译与响应解析（sync 路径）
+- fal、Qwen adapter 的请求翻译、submit 句柄解析、poll 状态机（async 路径）
 - http-client 的超时与错误码映射
 - capabilities 静态声明与 model 查询
 - NormalizedRequest 到厂商请求体的字段映射
@@ -35,9 +35,9 @@
 |------|------|------|
 | FAL_KEY 存在 | env 含 FAL_KEY | listEnabled() 包含 fal |
 | FAL_KEY 缺失 | env 无 FAL_KEY | listEnabled() 不包含 fal，不抛错 |
-| Batch 1 key 存在 | env 含 FAL_KEY + ZENMUX_API_KEY + SILICONFLOW_API_KEY + ZHIPU_API_KEY | listEnabled() 按固定顺序包含四个 provider |
+| Batch 1/2 key 存在 | env 含 FAL_KEY + ZENMUX_API_KEY + SILICONFLOW_API_KEY + ZHIPU_API_KEY + ARK_API_KEY + DASHSCOPE_API_KEY | listEnabled() 按固定顺序包含六个 provider |
 | 两个 key 都缺失 | env 无 key | listEnabled() 返回空数组 |
-| getById 未启用 | getById("fal")，无 FAL_KEY | 抛出 ProviderNotEnabledError |
+| getById 未启用 | getById("fal")，无 FAL_KEY | 返回 `undefined` |
 
 ### 2.2 Zenmux Sync 路径
 
@@ -74,7 +74,18 @@
 | 智谱固定参数 | 任意合法请求 | `quality="hd"`、`watermark_enabled=true`、`user_id` 存在 |
 | 两家 401/422/5xx | mock HTTP error | 映射统一 `ProviderError`，超时为可重试 `TIMEOUT` |
 
-### 2.5 Capabilities 查询
+### 2.5 Doubao / Qwen 路径
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| Doubao 正常 submit | model=`doubao-seedream-4-0-250828` | `kind="sync"`，解析 Ark `data[].url` |
+| Doubao 公开比/seed | `aspectRatio="4:3"` + seed | 请求体含 `size="2048x1536"` + `seed` |
+| Doubao 图生图 | `referenceImages` | 请求体含 `image[]` |
+| Qwen 正常 submit | model=`qwen-image-plus` | `kind="async"`，返回 `task_id` 句柄 |
+| Qwen poll | PENDING/RUNNING/SUCCEEDED/FAILED/CANCELED | 映射统一 `PollResult` 状态 |
+| Qwen HTTP 鉴权/限流/超时 | mock 401/429/TimeoutError | `AUTH_FAILED`/可重试 `RATE_LIMITED`/`TIMEOUT` |
+
+### 2.6 Capabilities 查询
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
@@ -82,7 +93,7 @@
 | 未知模型 | capabilities("nonexistent") | 返回 null |
 | fal 模型 | capabilities("fal-ai/flux/schnell") | protocol="async"，supportsSeed=true |
 
-### 2.6 请求翻译与公开宽高比映射
+### 2.7 请求翻译与公开宽高比映射
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
@@ -96,7 +107,7 @@
 | width/height 优先 | width/height 与 aspectRatio 同时存在 | 按优先级用 width/height（或文档约定的等价翻译） |
 | providerOptions 透传 | providerOptions={ "guidance_scale": 7 } | fal 请求体含 guidance_scale（若 adapter 认识） |
 
-### 2.7 Capabilities 公开比
+### 2.8 Capabilities 公开比
 
 | 场景 | 预期 |
 |------|------|
@@ -104,6 +115,8 @@
 | zenmux capabilities | 保持 `1:1`/`3:2`/`2:3` |
 | SiliconFlow capabilities | `1:1`/`3:4`/`1:2`/`9:16`，负向词与 seed 为 true |
 | 智谱 capabilities | 官方七种尺寸/公开比，`quality=hd`，负向词与 seed 为 false |
+| Doubao capabilities | Seedream 4.0 的 2K/4K 与七种公开比，seed 为 true |
+| Qwen capabilities | Qwen Image Plus 五种官方尺寸，负向词与 seed 为 true，protocol=async |
 
 ---
 
@@ -125,7 +138,8 @@
 | adapter 不硬编码 API key | 代码审查 + 测试用 mock env |
 | http-client 正确注入 Authorization | mock fetch 断言 header |
 | fal 使用 `Key $FAL_KEY` 格式 | mock fetch 断言 header 值 |
-| sync providers 使用 Bearer key | mock fetch 断言 ZenMux/SiliconFlow/智谱 header 值 |
+| sync providers 使用 Bearer key | mock fetch 断言 ZenMux/SiliconFlow/智谱/Doubao header 值 |
+| Qwen 使用 Bearer + Async header | mock fetch 断言 `Authorization` 与 `X-DashScope-Async: enable` |
 
 ---
 
@@ -145,7 +159,7 @@
 
 ### 4.3 手工验证（可选，开发阶段）
 
-- 配置真实 FAL_KEY / ZENMUX_API_KEY / SILICONFLOW_API_KEY / ZHIPU_API_KEY
+- 配置真实 FAL_KEY / ZENMUX_API_KEY / SILICONFLOW_API_KEY / ZHIPU_API_KEY / ARK_API_KEY / DASHSCOPE_API_KEY
 - 通过 API 端点发起真实生成，确认 sync/async 两条路径端到端可用
 - 不在 CI 中运行
 
@@ -158,7 +172,9 @@ src/lib/providers/__tests__/
 │   ├── fal.test.ts
 │   ├── zenmux.test.ts
 │   ├── siliconflow.test.ts
-│   └── zhipu.test.ts
+│   ├── zhipu.test.ts
+│   ├── doubao.test.ts
+│   └── qwen.test.ts
 ├── http-client.test.ts
 └── fixtures/
     ├── fal-submit-response.json

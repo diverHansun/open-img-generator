@@ -135,6 +135,23 @@ describe('validator', () => {
     expect(() => validate(makeParams({ sessionId: 's1' }), { db })).not.toThrow();
   });
 
+  it('treats explicit null optional values as omitted at the API boundary', () => {
+    expect(() =>
+      validate(
+        makeParams({
+          width: null,
+          height: null,
+          aspectRatio: null,
+          count: null,
+          negativePrompt: null,
+          seed: null,
+          providerOptions: null,
+        }),
+        { db },
+      ),
+    ).not.toThrow();
+  });
+
   it('accepts width and height together', () => {
     expect(() => validate(makeParams({ width: 960, height: 1280 }), { db })).not.toThrow();
   });

@@ -31,11 +31,11 @@ export function validate(
   if (!Number.isInteger(count) || count < 1) {
     throw new ValidationError('Count must be a positive integer');
   }
-  if (params.seed !== undefined && !Number.isInteger(params.seed)) {
+  if (params.seed != null && !Number.isInteger(params.seed)) {
     throw new ValidationError('Seed must be an integer');
   }
-  const hasWidth = params.width !== undefined;
-  const hasHeight = params.height !== undefined;
+  const hasWidth = params.width != null;
+  const hasHeight = params.height != null;
   if (hasWidth !== hasHeight) {
     throw new ValidationError('Width and height must be provided together');
   }
@@ -46,7 +46,7 @@ export function validate(
   ) {
     throw new ValidationError('Width and height must be positive integers');
   }
-  if (params.negativePrompt !== undefined && typeof params.negativePrompt !== 'string') {
+  if (params.negativePrompt != null && typeof params.negativePrompt !== 'string') {
     throw new ValidationError('Negative prompt must be a string');
   }
   const seenTargets = new Set<string>();

@@ -20,7 +20,7 @@ registry ──→ adapter(s) ──→ http-client
 |--------|------|
 | **types** | 定义模块内外的共享数据结构：NormalizedRequest、SubmitResult、ProviderCapabilities 等。是整个系统与厂商之间的"通用语言"。 |
 | **registry** | 按 env key 判断启用状态，懒初始化 adapter 实例，对外提供 `listEnabled()` 与 `getById(id)`。是模块唯一对外入口（除 types 导出外）。 |
-| **adapter** | 每家厂商一个文件，实现 ImageProvider 契约：请求翻译、HTTP 调用、响应解析。当前 Batch 1 含 `fal.ts`、`zenmux.ts`、`siliconflow.ts` 与 `zhipu.ts`；其余 provider 仍按 key 缺失/adapter 未登记时禁用。 |
+| **adapter** | 每家厂商一个文件，实现 ImageProvider 契约：请求翻译、HTTP 调用、响应解析。当前已含 `fal.ts`、`zenmux.ts`、`siliconflow.ts`、`zhipu.ts`、`doubao.ts` 与 `qwen.ts`；Kling 仍按独立批次接入。 |
 | **http-client** | 封装 fetch 调用：超时、公共 headers 合并、基础错误码映射。具体 API key 由 adapter 读取 env 后传入；adapter 不直接裸调 fetch。 |
 
 **依赖规则**:
@@ -78,12 +78,16 @@ src/lib/providers/
 │   ├── fal.ts               # fal.ai async queue adapter
 │   ├── zenmux.ts            # ZenMux sync OpenAI Images API adapter
 │   ├── siliconflow.ts        # SiliconFlow sync image generations adapter
-│   └── zhipu.ts              # Zhipu GLM-Image sync adapter
+│   ├── zhipu.ts              # Zhipu GLM-Image sync adapter
+│   ├── doubao.ts              # Doubao/Ark Seedream sync adapter
+│   └── qwen.ts                # Qwen Image/DashScope async adapter
 └── capabilities/
     ├── fal.ts               # fal 各 model 的 capabilities 声明
     ├── zenmux.ts            # zenmux 各 model 的 capabilities 声明
     ├── siliconflow.ts        # SiliconFlow 各 model 的 capabilities 声明
-    └── zhipu.ts              # Zhipu 各 model 的 capabilities 声明
+    ├── zhipu.ts              # Zhipu 各 model 的 capabilities 声明
+    ├── doubao.ts              # Doubao 各 model 的 capabilities 声明
+    └── qwen.ts                # Qwen 各 model 的 capabilities 声明
 ```
 
 **稳定对外接口**（其他模块可依赖）:
@@ -125,9 +129,9 @@ NormalizedRequest 中含 `providerOptions?: Record<string, unknown>`，各 adapt
 
 ### 4.4 Provider 分批接入
 
-当前已完成 Batch 1：fal、ZenMux、SiliconFlow、智谱。SiliconFlow 与智谱均走同步生成协议，能力声明的 `maxCount` 暂按 1 对齐现有 job-engine 同步任务约束；SiliconFlow API 原生支持更大的 batch，但本批不扩展 job-engine 计数语义。
+当前已完成 Batch 1（SiliconFlow、智谱）与 Batch 2（Doubao/Ark、Qwen/DashScope）。Doubao 是同步响应，Qwen 的 HTTP 接口是“创建任务 + poll”异步流程；两者的 `maxCount` 暂按现有 job-engine 约束分别暴露为 1。
 
-Doubao、Qwen、Kling 仍只保留 `ProviderId` 与 env 配置预留。后续接入按“独立 adapter + capabilities + registry 登记 + 契约测试”扩展；Kling 使用独立 Kling API，不复用 DashScope 鉴权或 URL。
+Kling 仍只保留 `ProviderId` 与 env 配置预留。后续接入按“独立 adapter + capabilities + registry 登记 + 契约测试”扩展；Kling 使用独立 Kling API，不复用 DashScope 鉴权或 URL。
 
 ### 4.5 公开宽高比 vs 厂商 size 枚举
 

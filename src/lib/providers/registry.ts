@@ -3,6 +3,8 @@ import { FalProvider } from './adapters/fal';
 import { ZenmuxProvider } from './adapters/zenmux';
 import { SiliconFlowProvider } from './adapters/siliconflow';
 import { ZhipuProvider } from './adapters/zhipu';
+import { DoubaoProvider } from './adapters/doubao';
+import { QwenProvider } from './adapters/qwen';
 
 const registry = new Map<ProviderId, ImageProvider>();
 
@@ -34,6 +36,14 @@ const definitions: Partial<Record<ProviderId, ProviderDefinition>> = {
   zhipu: {
     isEnabled: () => !!process.env.ZHIPU_API_KEY,
     create: () => new ZhipuProvider(),
+  },
+  doubao: {
+    isEnabled: () => !!process.env.ARK_API_KEY,
+    create: () => new DoubaoProvider(),
+  },
+  qwen: {
+    isEnabled: () => !!process.env.DASHSCOPE_API_KEY,
+    create: () => new QwenProvider(),
   },
 };
 

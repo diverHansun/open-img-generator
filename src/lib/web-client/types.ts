@@ -51,12 +51,13 @@ export type SubmitGenerationRequest = {
   targets: GenerationTarget[];
   sessionId: string;
   mode?: ProviderMode;
-  width?: number;
-  height?: number;
-  aspectRatio?: string;
-  count?: number;
-  negativePrompt?: string;
-  seed?: number;
+  width?: number | null;
+  height?: number | null;
+  aspectRatio?: string | null;
+  count?: number | null;
+  negativePrompt?: string | null;
+  seed?: number | null;
+  providerOptions?: Record<string, unknown> | null;
 };
 
 export type SubmitGenerationResponse = {

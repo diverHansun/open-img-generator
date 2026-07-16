@@ -30,7 +30,7 @@ src/
 | `src/lib/library/` | `docs/mvp/library/` | **已实现** | Project / Session 归属、History、Favorite、模型启用偏好 |
 | `src/lib/db/` | `docs/mvp/db/` | **已修订** | schema + queries；业务库唯一真相 |
 | `src/lib/job-engine/` | `docs/mvp/job-engine/` | **已修订** | 扇出生成与状态推进；不管 History/Gallery/Project CRUD |
-| `src/lib/providers/` | `docs/mvp/providers/` | **Batch 1 已实现** | fal/ZenMux/SiliconFlow/智谱适配；密钥来源仍 env，本批不含 Kling |
+| `src/lib/providers/` | `docs/mvp/providers/` | **Batch 2 已实现** | fal/ZenMux/SiliconFlow/智谱/Doubao/Qwen 适配；Kling 保持独立后续批次 |
 | `src/lib/user-config/` | `docs/mvp/user-config/` | **边界文档** | 用户目录加密配置；与业务库分离 |
 | `src/lib/web-client/` | `docs/mvp/web-client/` | **已补文档** | 浏览器侧 API/轮询/capabilities 派生 |
 | `src/app/` + `components/` | `docs/mvp/web-ui/` | **已修订** | Project 门禁、Generate/History/Gallery/Models/Providers |
@@ -81,7 +81,7 @@ src/
 | api | constraints §12–§16 + quickstart ✅ | — | — | — | — | — | — |
 | web-client | ✅ | ✅ | — | ✅ | — | — | ✅ |
 | web-ui | ✅ | ✅ | — | ✅ | ✅ | — | ✅ |
-| providers | ✅ | ✅ Batch 1 | ✅ Batch 1 | ✅ Batch 1 | — | — | ✅ Batch 1 |
+| providers | ✅ | ✅ Batch 2 | ✅ Batch 2 | ✅ Batch 2 | — | — | ✅ Batch 2 |
 | user-config | ✅ | ✅ | — | — | — | ✅ | ✅ 意图 |
 | storage / prompt | 不动 | | | | | | |
 
@@ -97,3 +97,4 @@ src/
 4. ✅ web-client 全资源 API；Generate 工作台接入 Project/Session 门禁、Recent 10、收藏和 negativePrompt
 5. ✅ 同页 view-state 接入 History / Gallery / Models / Providers；user-config 另开
 6. ✅ Provider Batch 1：SiliconFlow + 智谱真实同步 adapter、capabilities、registry 与契约单测；Kling 保持独立 API 的后续批次
+7. ✅ Provider Batch 2：Doubao/Ark 同步 adapter + Qwen/DashScope 异步 adapter、poll、capabilities、registry 与契约单测；Kling 仍独立后续接入
