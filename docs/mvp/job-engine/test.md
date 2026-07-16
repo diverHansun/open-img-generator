@@ -1,8 +1,10 @@
 # job-engine 模块 · test
 
 > 模块路径: `src/lib/job-engine/`
-> 前置文档: goals-duty.md, architecture.md, dfd-interface.md
+> 前置文档: goals-duty.md, architecture.md, dfd-interface.md, use-case.md
 > 文档顺序: ⑦ test(本文)
+> 项目级规则: 遵循 `docs/test-blueprint.md`（若有）；本文件只补充扇出相关场景
+> 修订说明: 2026-07-15 增加 targets 扇出 / 聚合 / 锁收紧场景
 
 ---
 
@@ -10,72 +12,79 @@
 
 ### 覆盖
 
-- submitGeneration 完整流程（校验 → prompt → db 事务 → provider → storage → 状态更新）
-- getGeneration 惰性 poll 推进
-- sync（zenmux）与 async（fal）路径
-- touchSession、sessionExists 校验
-- NormalizedRequest 显式 pick（不含 provider/model/sessionId）
-- createImage 完整字段（contentType, sizeBytes, index）
-- 并发 GET 幂等与 imageExists 跳过
-- 部分转存失败 → failed 且保留已成功 images
-- sync provider count > 1 拒绝
+- submitGeneration：单 target 与多 target（事务写 N jobs、逐 target dispatch）
+- 每 target 校验（aspectRatio、sync count=1、negativePrompt）
+- seed：不支持的 target 省略；支持的 target 传入
+- getGeneration：并行 advance 多个 async job；聚合 status
+- 部分失败隔离（一 job failed 不影响另一 job completed）
+- poll lease：pending/running 均可 claim；并发第二次跳过、过期后可恢复
+- storeImages 幂等与单 job 内部分转存失败
+- NormalizedRequest 显式 pick（无 provider/model/sessionId）
 
 ### 不覆盖
 
-- providers 内部请求翻译（归属 providers test）
-- storage 路径 canonicalize 细节（归属 storage test）
-- API 路由 HTTP 映射（API 集成测试）
+- providers 内 aspectRatio→厂商 size 映射表（归属 providers test）
+- web-ui 交集算法（归属 web-ui test）
+- 真实厂商 E2E（手工 / 可选集成）
 
 ---
 
 ## 2. Critical Scenarios（关键场景）
 
-### 2.1 Submit — Sync 路径（zenmux）
+### 2.1 Submit — 单 target（回归）
 
-| 场景 | 前置 | 预期 |
-|------|------|------|
-| 正常文生图 | mock sync images | status=completed，createImage 含 contentType+sizeBytes+index=0 |
-| 有 sessionId | session 存在 | touchSession 被调用；session.updated_at 更新 |
-| session 不存在 | sessionId 无效 | ValidationError，无 generation 记录 |
-| provider 失败 | mock failed | 201 status=failed，storage 未调用 |
-| sync count=2 | zenmux | ValidationError |
+| 场景 | 预期 |
+|------|------|
+| zenmux sync 成功 | 1 job completed；images 含 contentType/sizeBytes/index |
+| fal async 成功 | 1 job pending；providerHandle 非空 |
+| session 不存在 | ValidationError；无 generation |
+| sync count=2 | ValidationError |
 
-### 2.2 Submit — Async 路径（fal）
+### 2.2 Submit — 扇出
 
-| 场景 | 前置 | 预期 |
-|------|------|------|
-| 正常 submit | mock async handle | status=pending，providerHandle 非空 |
-| submit 失败 | mock failed | status=failed |
+| 场景 | 预期 |
+|------|------|
+| targets=[fal, zenmux]，aspectRatio=1:1 | 1 gen + 2 jobs；zenmux 可 completed；fal pending；聚合 pending/running |
+| targets 为空 | ValidationError |
+| targets 重复 (provider,model) | ValidationError |
+| aspectRatio=16:9（zenmux 不支持） | ValidationError；无库记录 |
+| fal submit 失败 + zenmux 成功 | fal job failed；zenmux completed；聚合 completed |
+| 两 target 均失败 | 聚合 failed |
 
-### 2.3 Get — 惰性 Poll
+### 2.3 Seed 裁剪
 
-| 场景 | 前置 | 预期 |
-|------|------|------|
-| pending → completed | mock poll completed | storage 调用，createImage 写入 |
-| poll failed | mock poll failed | job+generation failed |
-| poll cancelled | mock poll cancelled | job+generation cancelled |
-| 已完成不 poll | status=completed | provider.poll 未调用 |
-| 并发 advance | 两次 advance 同时 | 仅一次 poll；imageExists 防重复 createImage |
+| 场景 | 预期 |
+|------|------|
+| seed=42，targets 含 fal+zenmux | 发给 fal 的 NormalizedRequest 含 seed；发给 zenmux 的不含 seed；整单不 400 |
 
-### 2.4 部分转存失败
+### 2.4 Get — 多 job 推进
 
-| 场景 | 前置 | 预期 |
-|------|------|------|
-| 第 2 张 download 失败 | 4 张 refs，第 2 次 storage 抛错 | index 0 的 image 保留；job failed；不再处理 2、3 |
+| 场景 | 预期 |
+|------|------|
+| 两 async pending，mock 均 completed | 两次 storeImages；聚合 completed |
+| 一 job 已 completed，一 job pending | 只 poll pending 那个 |
+| generation 已全部终态 | 不调用 poll |
 
-### 2.5 校验
+### 2.5 乐观锁
 
-| 场景 | 输入 | 预期 |
-|------|------|------|
-| seed 不支持 | seed=1，supportsSeed=false | ValidationError |
-| negativePrompt 不支持 | 有值，supportsNegativePrompt=false | ValidationError |
-| NormalizedRequest 字段 | submit 后 mock 断言 | 不含 provider/model/sessionId |
+| 场景 | 预期 |
+|------|------|
+| 并发两次 advance 同一 pending job | 仅一次 poll；另一次 lease claim 行数 0 跳过 |
+| job 已 running、无 lease | 可继续 poll，且 claim 不把 status 改写为锁状态 |
+| lease 已过期 | 下一次 GET 成功 claim 并恢复 poll |
 
-### 2.6 事务
+### 2.6 转存
+
+| 场景 | 预期 |
+|------|------|
+| 单 job 第 2 张 download 失败 | 该 job failed；index0 保留；其他 job 不变 |
+| imageExists 为 true | 跳过 download |
+
+### 2.7 事务
 
 | 场景 | 验证 |
 |------|------|
-| createGeneration + createGenerationJob | 同一 transaction；中途失败则两者皆无 |
+| createGeneration + N createGenerationJob | 同一 transaction；失败则全部回滚 |
 
 ---
 
@@ -83,20 +92,22 @@
 
 | 验证点 | 方式 |
 |--------|------|
-| storage 返回值写入 createImage | mock 断言 contentType, sizeBytes |
-| provider 收到 processedPrompt | mock 断言 |
-| poll 使用反序列化 JobHandle | mock 断言 externalId |
+| 每 target 收到正确 model + 裁剪后的 NormalizedRequest | mock provider.submit 断言 |
+| 聚合函数与 constraints §8 一致 | 单元表驱动测试 |
+| GET session 嵌套 getGeneration | API/合同测试 |
 
 ---
 
 ## 4. Verification Strategy（验证策略）
 
-- 单元测试: mock 四个外部模块
-- 集成测试: 内存 SQLite + 真实 transaction
-- E2E: curl 见 `docs/mvp/api/quickstart.md`
+- 单元: mock providers/prompt/storage/db
+- 集成: 内存 SQLite + 真实 transaction + mock HTTP
+- 合同: POST/GET JSON 形状含 `targets` / 多 `jobs`
+- 回归: 保留原单模型路径用例（`targets` 长度为 1）
 
 ---
 
 ## 自检（提交前）
 
-- 覆盖 constraints.md 中的并发、部分失败、sync count=1 规则
+- 扇出、部分成功聚合、seed 裁剪、锁收紧均有场景
+- 不测试 UI 交集或 adapter 映射表细节

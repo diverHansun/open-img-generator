@@ -2,6 +2,7 @@
 
 > 前置: 配置 `.env`、执行 `npm install`、`npm run dev`
 > 约束: 见 [constraints.md](./constraints.md)
+> 修订: 2026-07-15 请求体改为 `targets[]`
 
 ---
 
@@ -39,7 +40,7 @@ curl -s http://127.0.0.1:3000/api/health | jq
 curl -s http://127.0.0.1:3000/api/providers | jq
 ```
 
-无 key 时返回 `[]`。
+无 key 时返回 `[]`。检查各 model 的 `supportedAspectRatios`（公开比，非空）。
 
 ---
 
@@ -49,11 +50,11 @@ curl -s http://127.0.0.1:3000/api/providers | jq
 curl -s -X POST http://127.0.0.1:3000/api/generations \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "zenmux",
-    "model": "openai/gpt-image-2",
     "prompt": "A cat wearing a space helmet",
-    "width": 1024,
-    "height": 1024
+    "aspectRatio": "1:1",
+    "targets": [
+      { "provider": "zenmux", "model": "openai/gpt-image-2" }
+    ]
   }' | jq
 ```
 
@@ -87,10 +88,12 @@ curl -s -o out.png http://127.0.0.1:3000/api/images/{imageId}
 curl -s -X POST http://127.0.0.1:3000/api/generations \
   -H "Content-Type: application/json" \
   -d '{
-    "provider": "fal",
-    "model": "fal-ai/flux/schnell",
     "prompt": "A cat wearing a space helmet",
-    "seed": 42
+    "aspectRatio": "1:1",
+    "seed": 42,
+    "targets": [
+      { "provider": "fal", "model": "fal-ai/flux/schnell" }
+    ]
   }' | jq
 ```
 
@@ -104,7 +107,7 @@ while true; do
   RESP=$(curl -s http://127.0.0.1:3000/api/generations/$GEN_ID)
   STATUS=$(echo "$RESP" | jq -r .status)
   echo "status=$STATUS"
-  if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ]; then
+  if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "cancelled" ]; then
     echo "$RESP" | jq
     break
   fi
@@ -114,39 +117,74 @@ done
 
 ---
 
-## 5. 带 Session 的生成
+## 5. 扇出（fal + zenmux）
 
 ```bash
-SESSION=$(curl -s -X POST http://127.0.0.1:3000/api/sessions \
+curl -s -X POST http://127.0.0.1:3000/api/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "A red balloon over a quiet lake",
+    "aspectRatio": "1:1",
+    "count": 1,
+    "targets": [
+      { "provider": "fal", "model": "fal-ai/flux/schnell" },
+      { "provider": "zenmux", "model": "openai/gpt-image-2" }
+    ]
+  }' | jq
+```
+
+随后按 §4 轮询同一 `id`，直到 `status` 终态；`jobs.length` 应为 2。
+
+---
+
+## 6. 带 Project / Session 的生成（必填）
+
+```bash
+PROJECT=$(curl -s -X POST http://127.0.0.1:3000/api/projects \
   -H "Content-Type: application/json" \
   -d '{"title":"demo"}' | jq -r .id)
+
+SESSION=$(curl -s -X POST http://127.0.0.1:3000/api/projects/$PROJECT/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"title":"session-1"}' | jq -r .id)
 
 curl -s -X POST http://127.0.0.1:3000/api/generations \
   -H "Content-Type: application/json" \
   -d "{
-    \"provider\": \"fal\",
-    \"model\": \"fal-ai/flux/schnell\",
     \"prompt\": \"A dog\",
-    \"sessionId\": \"$SESSION\"
+    \"aspectRatio\": \"1:1\",
+    \"sessionId\": \"$SESSION\",
+    \"targets\": [
+      { \"provider\": \"fal\", \"model\": \"fal-ai/flux/schnell\" }
+    ]
   }" | jq
 
 curl -s http://127.0.0.1:3000/api/sessions/$SESSION | jq
 # generations 内 pending 项会被惰性 poll 推进
 ```
 
+缺少 `sessionId` → 400。
 ---
 
-## 6. 常见错误
+## 7. 常见错误
 
 | HTTP | 含义 |
 |------|------|
 | 400 Provider not enabled | 未配置对应 env key |
-| 400 Session not found | sessionId 无效 |
-| 400 Sync provider supports count=1 only | zenmux 请求 count>1 |
-| 201 status=failed | provider 调用失败，GET generation 查看 job.error |
+| 400 Session not found / missing | sessionId 缺失或无效 |
+| 400 Sync provider supports count=1 only | zenmux target 的 count>1 |
+| 400 不支持的 aspectRatio | 某 target 的 capabilities 不含该公开比 |
+| 400 targets 空/重复 | 非法 targets |
+| 201 聚合 status=failed | 全部 job 失败；GET 查看各 job.error |
+| 201/GET 聚合 completed 但某 job failed | 部分成功；见 constraints §8 |
 
 ---
 
-## 7. 编码顺序（参考）
+## 8. 编码顺序（参考）
 
-见 [review.md](../review.md) §7。
+1. providers: fal 公开 `supportedAspectRatios` + 映射表
+2. job-engine: `targets[]` 扇出 + 聚合 + 锁收紧
+3. api/constraints + quickstart 对齐
+4. web-ui workbench
+
+模块文档: `docs/mvp/job-engine/`、`docs/mvp/providers/`、`docs/mvp/web-ui/`。

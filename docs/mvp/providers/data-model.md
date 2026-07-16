@@ -80,6 +80,8 @@ MVP 两个首跑模型均支持 `text-to-image`。`image-to-image` 在 capabilit
 
 **尺寸解析优先级**: `width`+`height` > `aspectRatio` > capabilities 默认值。adapter 负责翻译为厂商各自的尺寸字段（如 fal 的 `image_size`、zenmux 的 `size`）。
 
+**公开宽高比约定**: `aspectRatio` 与 `supportedAspectRatios` 使用同一套公开字符串（如 `"1:1"`、`"16:9"`）。UI 与 job-engine 只认公开比；厂商枚举仅出现在 adapter 映射与 `supportedSizes`。
+
 ### 3.4 SubmitResult
 
 submit 的返回，通过 `kind` 区分 sync/async：
@@ -223,11 +225,33 @@ type ProviderErrorCode =
 | protocol | `async` |
 | modes | `["text-to-image"]` |
 | maxCount | 4 |
-| supportedSizes | `["square_hd", "square", "portrait_4_3", "portrait_16_9", "landscape_4_3", "landscape_16_9"]` |
-| supportedAspectRatios | 通过 image_size 间接支持 |
+| supportedSizes | `["square_hd", "square", "portrait_4_3", "portrait_16_9", "landscape_4_3", "landscape_16_9"]`（厂商枚举，供映射/调试） |
+| supportedAspectRatios | `["1:1", "4:3", "3:4", "16:9", "9:16"]`（**公开比，须非空**） |
 | supportsNegativePrompt | false |
 | supportsSeed | true |
 | defaultSize | `"square_hd"` |
+
+#### fal 公开比 → image_size 映射（adapter 内部）
+
+| aspectRatio | image_size |
+|-------------|------------|
+| `1:1` | `square_hd` |
+| `4:3` | `landscape_4_3` |
+| `3:4` | `portrait_4_3` |
+| `16:9` | `landscape_16_9` |
+| `9:16` | `portrait_16_9` |
+
+未指定 aspectRatio/width/height 时使用 `defaultSize`（`square_hd`）。
+
+#### zenmux 公开比 → size 映射（adapter 内部）
+
+| aspectRatio | size |
+|-------------|------|
+| `1:1` | `1024x1024` |
+| `3:2` | `1536x1024` |
+| `2:3` | `1024x1536` |
+
+**扇出交集提示**: fal ∩ zenmux 的公开比目前主要为 `1:1`。web-ui 多选两模型时宽高比选项取交集；服务端仍按每 target 校验。
 
 ---
 

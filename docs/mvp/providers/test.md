@@ -70,13 +70,26 @@
 | 未知模型 | capabilities("nonexistent") | 返回 null |
 | fal 模型 | capabilities("fal-ai/flux/schnell") | protocol="async"，supportsSeed=true |
 
-### 2.5 请求翻译
+### 2.5 请求翻译与公开宽高比映射
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
-| 默认尺寸 | 无 width/height/aspectRatio | zenmux 使用 "1024x1024"；fal 使用 "square_hd" |
-| aspectRatio 优先 | aspectRatio="16:9"，无 width/height | 翻译为厂商支持的对应尺寸 |
-| providerOptions 透传 | providerOptions={ "guidance_scale": 7 } | fal 请求体含 guidance_scale（fal 认识的字段） |
+| 默认尺寸 | 无 width/height/aspectRatio | zenmux size="1024x1024"；fal image_size="square_hd" |
+| zenmux 公开比 | aspectRatio="1:1" | size="1024x1024" |
+| zenmux 公开比 | aspectRatio="3:2" | size="1536x1024" |
+| zenmux 公开比 | aspectRatio="2:3" | size="1024x1536" |
+| fal 公开比 | aspectRatio="1:1" | image_size="square_hd" |
+| fal 公开比 | aspectRatio="16:9" | image_size="landscape_16_9" |
+| fal 公开比 | aspectRatio="9:16" | image_size="portrait_16_9" |
+| width/height 优先 | width/height 与 aspectRatio 同时存在 | 按优先级用 width/height（或文档约定的等价翻译） |
+| providerOptions 透传 | providerOptions={ "guidance_scale": 7 } | fal 请求体含 guidance_scale（若 adapter 认识） |
+
+### 2.6 Capabilities 公开比
+
+| 场景 | 预期 |
+|------|------|
+| fal capabilities | supportedAspectRatios 非空，含 `1:1` 等公开比（不再为空数组） |
+| zenmux capabilities | 保持 `1:1`/`3:2`/`2:3` |
 
 ---
 

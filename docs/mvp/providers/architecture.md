@@ -123,10 +123,22 @@ NormalizedRequest 中含 `providerOptions?: Record<string, unknown>`，各 adapt
 
 其余 5 家厂商在 registry 中预留 id 但不实现 adapter 文件。接入时按"加一个 adapter 文件 + registry 登记"路径扩展。
 
+### 4.5 公开宽高比 vs 厂商 size 枚举
+
+| 方案 | 代价 | 收益 |
+|------|------|------|
+| **当前: capabilities 暴露公开 `supportedAspectRatios`；adapter 内维护 ratio→vendor size 表** | 每家一张映射表 | web-ui / job-engine 用同一套比字符串；扇出共享 `aspectRatio` 可行 |
+| 放弃: UI 直接展示 fal 的 `square_hd` 等 | 无映射表 | 跨厂商无法共享选项；违反扇出 UX |
+
+**尺寸解析优先级**（不变）: `width`+`height` > `aspectRatio` > `defaultSize`。
+
+**无法映射**: adapter 返回 `SubmitResult.kind="failed"` / `INVALID_REQUEST`，或由 job-engine 在校验阶段用 capabilities 拦截（优先校验拦截）。
+
 ---
 
 ## 自检（提交前）
 
 - 每个子组件能追溯到 goals-duty 中的至少一条 Design Goal 或 Duty
 - 未引入 goals-duty Non-Duties 中的能力（存图、扇出、写库等）
+- 公开宽高比映射归属 adapter，不泄漏到 job-engine
 - 文件布局体现"加一家厂商 = 加一个 adapter 文件"的扩展路径

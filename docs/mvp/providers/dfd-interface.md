@@ -50,7 +50,7 @@ job-engine
   → provider.submit(req, "openai/gpt-image-2")
     → zenmux adapter: NormalizedRequest 翻译为 OpenAI Images API 请求体
       - prompt → prompt
-      - width/height/aspectRatio → size（如 "1024x1024"）
+      - width+height 优先，否则 aspectRatio 经映射表 → size（如 "1:1"→"1024x1024"）
       - count → n
     → http-client: POST https://zenmux.ai/api/v1/images/generations
     → zenmux adapter: 解析响应 data[].url → ProviderImageRef[]
@@ -67,8 +67,8 @@ job-engine
   → provider.submit(req, "fal-ai/flux/schnell")
     → fal adapter: NormalizedRequest 翻译为 fal queue 请求体
       - prompt → prompt
-      - width/height → image_size
-      - seed → seed
+      - width+height 若可推导则用之；否则 aspectRatio 经映射表 → image_size（如 "1:1"→"square_hd"）
+      - seed → seed（若有）
       - count → num_images
     → http-client: POST https://queue.fal.run/fal-ai/flux/schnell
     → fal adapter: 解析响应 request_id / status_url / response_url / cancel_url

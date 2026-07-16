@@ -2,7 +2,8 @@
 
 > 模块路径: `src/lib/job-engine/`
 > 前置文档: goals-duty.md (已确认)
-> 文档顺序: ① goals-duty → ② architecture(本文) → ④ dfd-interface → ⑦ test
+> 文档顺序: ① goals-duty → ② architecture(本文) → ④ dfd-interface → ⑤ use-case → ⑦ test
+> 修订说明: 2026-07-15 扇出编排；独立 poll lease
 
 ---
 
@@ -18,24 +19,24 @@ orchestrator ──→ lifecycle
 
 | 子组件 | 职责 |
 |--------|------|
-| **orchestrator** | 模块对外入口。编排 submit 和 get 的完整流程: 校验 → prompt 处理 → db 写入 → provider 调用 → storage 转存 → 状态更新。 |
-| **lifecycle** | 管理单个 generation_job 的状态推进。封装 sync 路径（submit 即完成）和 async 路径（submit → poll → 完成）的状态机转移；含 `storeImages` 转存与幂等逻辑。 |
-| **validator** | submit 前的参数校验: provider 是否启用、model 是否存在、session 是否存在、请求参数是否在 capabilities 范围内。 |
+| **orchestrator** | 模块对外入口。编排 submit（多 target）与 get（推进全部未终结 job）: 校验 → prompt → db 事务写 1 gen + N jobs → 逐 target provider 调用 → storage 转存 → 状态聚合。 |
+| **lifecycle** | 管理**单个** generation_job 的状态推进。封装 sync（submit 即完成）与 async（submit → poll → 完成）；含 `storeImages` 与幂等；含乐观锁 claim。 |
+| **validator** | submit 前校验: targets 非空且唯一；每个 target 的 provider/model/capabilities；共享参数对该 target 是否合法；session 是否存在。 |
 
 **外部依赖**（job-engine 调用但不拥有）:
 
 | 模块 | 调用内容 |
 |------|----------|
-| providers | registry.getById, provider.submit, provider.poll |
+| providers | registry.getById, provider.submit, provider.poll, capabilities |
 | prompt | prompt.process() |
 | storage | storage.downloadAndStore(url) |
-| db | generation/job/image 的 CRUD 函数 |
+| db | generation / job / image CRUD + transaction |
 
 **依赖规则**:
 - orchestrator 依赖 lifecycle、validator、以及全部外部模块
 - lifecycle 依赖 providers、storage、db
-- validator 依赖 providers（capabilities 查询）与 db（sessionExists）
-- job-engine 不被 providers、storage、db 反向依赖
+- validator 依赖 providers（capabilities）与 db（sessionExists）
+- job-engine 不被 providers、storage、db、web-ui 反向依赖
 
 ---
 
@@ -43,14 +44,14 @@ orchestrator ──→ lifecycle
 
 ### 2.1 Orchestrator 模式
 
-orchestrator 作为唯一对外入口，编排多个模块完成一次生成。
+orchestrator 作为唯一对外入口，编排多模块完成一次（可扇出）生成。
 
-- **支撑目标**: Design Goal #1（API 层只需调两个函数）
-- **理由**: 生成流程跨越 4 个模块（prompt → providers → storage → db），需要统一的编排点
+- **支撑目标**: Design Goal #1、#4
+- **理由**: 扇出后仍只需 `submitGeneration` / `getGeneration` 两个入口，避免 API 层写循环
 
-### 2.2 状态机（lifecycle 内部）
+### 2.2 每 job 独立状态机（lifecycle）
 
-generation_job 的状态按有限状态机推进:
+每个 generation_job 独立推进:
 
 ```
 pending → running → completed
@@ -58,28 +59,34 @@ pending → running → completed
                   → cancelled (预留)
 ```
 
-- **支撑目标**: Design Goal #2（统一 sync/async 状态语义）
-- sync 路径: submit 后直接从 pending 跳到 completed（或 failed），不经过 running
-- async 路径: submit 后 pending → poll 时可能 running → poll completed 后 completed
+- **支撑目标**: Design Goal #2、#4、Duty #7（部分失败隔离）
+- sync: submit 后可直接 pending → completed（或 failed）
+- async: submit 后 pending →（poll）running → completed / failed
 
-generation 状态由 job 聚合（见 `api/constraints.md` §8）。
+generation 状态由全部 job **聚合**（`api/constraints.md` §8），不单独跑第二套状态机。
 
 ### 2.3 惰性推进（Lazy Polling）
 
-async 任务不在 submit 时阻塞等待，而是在 getGeneration() 时触发 poll。
+async job 不在 submit 时阻塞等待；在 `getGeneration()` 时对**每一个**未终结 async job 触发 advance。
 
-- **支撑目标**: Design Goal #2（对 API 层透明）
-- **理由**: Next.js 无独立 worker 进程，惰性推进避免 HTTP 超时，无需额外基础设施
-- **客户端责任**: 必须轮询 GET；见 `api/constraints.md` §2
+- **支撑目标**: Design Goal #2
+- **理由**: Next.js 无独立 worker；扇出后 N 个 async job 可在同一次 GET 内并行 advance（Promise.all），互不共用同一 providerHandle
 
-### 2.4 未使用的模式
+### 2.4 校验与交集分离
+
+validator 只做「每 target 是否接受共享参数」；不计算选中模型的能力交集。
+
+- **支撑目标**: Design Goal #5、Non-Duty #6
+- **理由**: 交集是 UI 可用性规则；服务端保持可组合的单 target 校验，避免双份真理
+
+### 2.5 未使用的模式
 
 | 模式 | 不采用原因 |
 |------|-----------|
-| Event Sourcing | MVP 状态简单，关系型表足够 |
-| Saga | 文件写入与 DB 不做分布式事务；部分失败用明确 failed 语义处理 |
-| Queue/Worker | Next.js 部署模型下引入队列过重；惰性推进满足 MVP |
-| Command Bus | 仅 2 个对外函数（submit/get），不需要命令分发 |
+| Event Sourcing | MVP 状态简单 |
+| Saga / 跨 job 补偿 | 部分失败保留成功 job 即可；不回滚已转存图 |
+| Queue/Worker | 惰性推进足够 |
+| Command Bus | 仍仅 2 个对外函数 |
 
 ---
 
@@ -88,81 +95,80 @@ async 任务不在 submit 时阻塞等待，而是在 getGeneration() 时触发 
 ```
 src/lib/job-engine/
 ├── index.ts              # 对外导出: submitGeneration, getGeneration
-├── orchestrator.ts       # submit/get 流程编排
-├── lifecycle.ts          # 单 job 状态推进（sync + async + storeImages）
-├── validator.ts          # 参数校验
-└── types.ts              # 模块内类型（GenerationView 等对外返回结构）
+├── orchestrator.ts       # 多 target submit / 多 job get 编排
+├── lifecycle.ts          # 单 job 状态推进 + storeImages + claim 锁
+├── validator.ts          # targets[] + 每 target capabilities 校验
+└── types.ts              # SubmitGenerationParams, GenerationView 等
 ```
 
 **稳定对外接口**:
 - `submitGeneration(params): Promise<{ generationId: string; status: GenerationStatus }>`
 - `getGeneration(id): Promise<GenerationView>`
 
-**内部实现**:
-- `orchestrator.ts`、`lifecycle.ts`、`validator.ts`
+**建议内部辅助**（可同文件或拆分，不强制新文件）:
+- `aggregateGenerationStatus(jobs): GenerationStatus`
+- `buildNormalizedRequestForTarget(shared, caps): NormalizedRequest`（按 capabilities 省略 seed 等）
 
 ---
 
 ## 4. Architectural Constraints & Trade-offs（约束与权衡）
 
-### 4.1 惰性推进 vs 后台 Worker
+### 4.1 扇出粒度：1 generation + N jobs（已锁定）
 
 | 方案 | 代价 | 收益 |
 |------|------|------|
-| **当前: GET 时 poll** | 客户端需轮询 GET；poll 逻辑在请求线程内 | 零额外基础设施；实现简单 |
-| 放弃: 后台定时器 | 需要 setInterval 或外部 cron | 客户端可一次 GET 拿到结果；但 Next.js serverless 下定时器不可靠 |
+| **当前: Plan B** | generation 聚合规则变复杂 | 一次 prompt、一次轮询入口；与现有 schema 一致 |
+| 放弃: N 个独立 generation | 客户端要管多个 id | 聚合简单但 UX 差 |
 
-### 4.2 同步路径在 submit 内完成转存
+### 4.2 先全量校验，再落库，再逐 target dispatch
 
-zenmux 等 sync provider 的 submit 当场返回图片，orchestrator 在 submit 函数内同步完成 storage 转存。
-
-| 方案 | 代价 | 收益 |
-|------|------|------|
-| **当前: submit 内转存 + sync count=1** | sync POST 响应时间较长 | 逻辑简单；GET 时状态已是 completed |
-| 放弃: 统一走 async 状态机 | 所有请求都 pending → poll | 增加无意义的中间状态 |
-
-### 4.3 generation_job 表预留扇出，MVP 只写一行
+校验失败 → 400，**不创建**任何 generation/job。落库后某 target submit 失败 → 仅该 job failed，其他继续。
 
 | 方案 | 代价 | 收益 |
 |------|------|------|
-| **当前: 表结构支持 1:N，代码只写 1 行** | schema 略宽 | 后续扇出不改表；符合 Goal #4 |
-| 放弃: MVP 不加 job 表 | schema 更简单 | 加扇出时需改表、改代码 |
+| **当前** | submit 阶段部分失败时 generation 可能短暂「有成功有失败」 | 符合 Duty #7；避免脏数据来自非法请求 |
+| 放弃: 全部 submit 成功才 commit | 需两阶段或临时表 | MVP 过重 |
 
-### 4.4 不重试
+### 4.3 惰性推进 vs 后台 Worker
 
-| 方案 | 代价 | 收益 |
-|------|------|------|
-| **当前: 失败即 failed** | 瞬时网络错误也标记失败 | 实现简单；用户可手动重试（新 generation） |
-| 放弃: 自动重试 3 次 | 更健壮 | MVP 复杂度上升 |
+同前版：GET 时 poll；客户端必须轮询。扇出后一次 GET 推进该 generation 下全部未终结 job。
 
-### 4.5 并发 GET：乐观锁 + 转存幂等
+### 4.4 同步路径在 submit 内完成转存
 
-| 方案 | 代价 | 收益 |
-|------|------|------|
-| **当前: UPDATE ... WHERE status IN (pending,running) + imageExists(jobId,index)** | 实现略复杂 | 防双 tab / 重试导致重复 poll 与重复图片 |
-| 放弃: 无锁 | 简单 | 高概率 duplicate images |
+含 sync target 的扇出请求：POST 线程内依次（或有限并行）完成各 sync job 的转存；async target 仍返回 pending。
+
+| 约束 | 说明 |
+|------|------|
+| sync count | 仍强制该 target `count=1`（MVP） |
+| POST 耗时 | 多 sync target 会拉长 POST；MVP 假定 localhost long-running |
+
+### 4.5 并发 GET：独立 poll lease
+
+`status` 是厂商真实状态，不能承担互斥职责；否则已进入 `running` 的任务会失去后续 poll 机会。
+
+**修订规则**:
+1. `poll_lease_until` 为空或过期时，`pending` / `running` job 均可原子 claim；claim 只写租约与 `updated_at`，不修改 status。
+2. 影响行数 0：另一请求正在租约期内推进，当前请求跳过。进程异常后租约（35 秒）到期，下一次 GET 可恢复。
+3. poll 结果、解析失败、provider 不可用和转存结束都会清空租约；转存仍靠 `imageExists(jobId, index)` 幂等。
 
 详见 `api/constraints.md` §4。
 
-### 4.6 部分转存失败：fail-fast，保留已成功图
+### 4.6 部分转存失败（单 job 内）
 
-| 方案 | 代价 | 收益 |
-|------|------|------|
-| **当前: 任一张 storage 失败 → job/generation failed，已写入 images 保留** | 可能出现「failed 但有部分图」 | 语义明确；不引入 Saga |
-| 放弃: 全有或全无 | 需删除已下载文件 | MVP 复杂度高 |
+与前版相同：单 job 内任一张 download 失败 → 该 job failed；已成功 images 保留；**不**因此失败其他 jobs。generation 聚合见 §8。
 
-详见 `dfd-interface.md` §2.6 与 `api/constraints.md` §5。
+### 4.7 创建事务
 
-### 4.7 generation + job 创建：SQLite 事务
+`createGeneration` + **全部** `createGenerationJob` 必须在同一 SQLite transaction 中；dispatch（HTTP）在事务提交之后。
 
-createGeneration 与 createGenerationJob 必须在同一 transaction 中执行，避免 crash 后孤儿 generation。
+### 4.8 不重试
 
-与「单 job 无 Saga」不矛盾——这是**单库内**原子性，不是跨服务事务。
+单次 submit/poll 失败即该 job failed；用户发起新 generation。
 
 ---
 
 ## 自检（提交前）
 
-- 三个子组件均能追溯到 goals-duty 的 Design Goal 或 Duty
-- 惰性推进、并发幂等、部分失败语义有明确约束
-- 未引入 goals-duty Non-Duties 中的能力
+- 子组件均可追溯到 goals-duty
+- 扇出、部分失败隔离、锁收紧、校验与 UI 交集分离均有约束
+- 未引入 Non-Duties（取消 API、限流、持久化运行时参数等）
