@@ -70,6 +70,7 @@ describe('async generation end-to-end (fal)', () => {
           targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
           prompt: 'A cat',
           seed: 42,
+          sessionId: 'default-session',
         }),
       }),
     );

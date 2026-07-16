@@ -9,7 +9,10 @@ const { tempDir, cleanup: cleanupStorage } = createStorageDir();
 
 const { GET: getHealth } = await import('../../src/app/api/health/route');
 const { GET: getProviders } = await import('../../src/app/api/providers/route');
-const { POST: postSession } = await import('../../src/app/api/sessions/route');
+const { POST: postProject } = await import('../../src/app/api/projects/route');
+const { POST: postSession } = await import(
+  '../../src/app/api/projects/[id]/sessions/route'
+);
 const { GET: getSession } = await import('../../src/app/api/sessions/[id]/route');
 const { POST: postGeneration } = await import('../../src/app/api/generations/route');
 const { GET: getGeneration } = await import(
@@ -46,13 +49,24 @@ describe('quickstart vertical slice', () => {
       'zenmux',
     ]);
 
-    // 3. Create session
+    // 3. Create project and a project-scoped session
+    const projectResponse = await postProject(
+      new Request('http://localhost:3000/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Quickstart' }),
+      }),
+    );
+    expect(projectResponse.status).toBe(201);
+    const project = await projectResponse.json();
+
     const sessionResponse = await postSession(
-      new Request('http://localhost:3000/api/sessions', {
+      new Request(`http://localhost:3000/api/projects/${project.id}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: 'demo' }),
       }),
+      { params: Promise.resolve({ id: project.id }) },
     );
     expect(sessionResponse.status).toBe(201);
     const session = await sessionResponse.json();
@@ -83,6 +97,7 @@ describe('quickstart vertical slice', () => {
           targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
           prompt: 'A cat wearing a space helmet',
           aspectRatio: '1:1',
+          sessionId: session.id,
         }),
       }),
     );
@@ -172,14 +187,19 @@ describe('quickstart vertical slice', () => {
     expect(polledBody.status).toBe('completed');
     expect(statusCalled).toBe(true);
 
-    // 6. GET session returns generations with nested poll already advanced
+    // 6. This listing is read-only; the generation GET above advanced it.
     const sessionDetail = await getSession(
-      new Request(`http://localhost:3000/api/sessions/${session.id}`),
+      new Request(`http://localhost:3000/api/sessions/${session.id}?include=generations`),
       { params: Promise.resolve({ id: session.id }) },
     );
     const sessionDetailBody = await sessionDetail.json();
-    expect(sessionDetailBody.generations).toHaveLength(1);
-    expect(sessionDetailBody.generations[0].status).toBe('completed');
+    expect(sessionDetailBody.generations).toHaveLength(2);
+    expect(sessionDetailBody.generations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: 'completed' }),
+        expect.objectContaining({ status: 'completed' }),
+      ]),
+    );
   });
 
   it('rejects the retired top-level provider/model request shape', async () => {

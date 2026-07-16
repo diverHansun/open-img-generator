@@ -66,6 +66,7 @@ describe('fan-out generation (Fal + ZenMux)', () => {
           aspectRatio: '1:1',
           count: 1,
           seed: 42,
+          sessionId: 'default-session',
         }),
       }),
     );

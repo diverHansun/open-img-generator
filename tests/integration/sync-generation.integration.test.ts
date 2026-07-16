@@ -40,6 +40,7 @@ describe('sync generation end-to-end (zenmux)', () => {
         body: JSON.stringify({
           targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
           prompt: 'A cat',
+          sessionId: 'default-session',
         }),
       }),
     );

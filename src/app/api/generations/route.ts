@@ -2,6 +2,32 @@ import { NextResponse } from 'next/server';
 import { submitGeneration } from '../../../lib/job-engine';
 import { db } from '../../../lib/db';
 import { handleApiError } from '../error-handler';
+import { listGenerations } from '../../../lib/library';
+
+function parseLimit(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : Number.NaN;
+}
+
+export function GET(request: Request) {
+  try {
+    const query = new URL(request.url).searchParams;
+    return NextResponse.json(
+      listGenerations(
+        {
+          limit: parseLimit(query.get('limit')),
+          cursor: query.get('cursor') ?? undefined,
+          sessionId: query.get('sessionId') ?? undefined,
+          projectId: query.get('projectId') ?? undefined,
+        },
+        db,
+      ),
+    );
+  } catch (err) {
+    return handleApiError(err);
+  }
+}
 
 export async function POST(request: Request) {
   try {

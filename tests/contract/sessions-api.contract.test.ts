@@ -1,125 +1,89 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotFoundError } from '../../src/lib/errors';
 import { GET as getSession } from '../../src/app/api/sessions/[id]/route';
 import { POST as postSession } from '../../src/app/api/sessions/route';
 
-vi.mock('../../src/lib/db', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../src/lib/db')>();
+vi.mock('../../src/lib/library', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/lib/library')>();
   return {
     ...original,
-    createSession: vi.fn(),
     getSession: vi.fn(),
+    listGenerations: vi.fn(),
   };
 });
 
-vi.mock('../../src/lib/job-engine', () => ({
-  getGeneration: vi.fn(),
-}));
-
-import * as db from '../../src/lib/db';
-import * as jobEngine from '../../src/lib/job-engine';
+import * as library from '../../src/lib/library';
 
 describe('POST /api/sessions', () => {
-  beforeEach(() => {
-    vi.mocked(db.createSession).mockReset();
-  });
-
-  it('returns 201 with created session', async () => {
-    vi.mocked(db.createSession).mockReturnValue({
-      id: 'session-1',
-      title: 'Demo',
-      createdAt: '2026-07-12T10:00:00.000Z',
-      updatedAt: '2026-07-12T10:00:00.000Z',
+  it('directs callers to the project-scoped creation endpoint', async () => {
+    const response = postSession();
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Create sessions with POST /api/projects/:id/sessions',
     });
-
-    const response = await postSession(
-      new Request('http://localhost:3000/api/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Demo' }),
-      }),
-    );
-
-    expect(response.status).toBe(201);
-    const body = await response.json();
-    expect(body.id).toBe('session-1');
-    expect(body.title).toBe('Demo');
   });
 });
 
 describe('GET /api/sessions/:id', () => {
+  const session = {
+    id: 'session-1',
+    projectId: 'project-1',
+    title: 'Demo',
+    createdAt: '2026-07-12T10:00:00.000Z',
+    updatedAt: '2026-07-12T10:00:00.000Z',
+  };
+
   beforeEach(() => {
-    vi.mocked(db.getSession).mockReset();
-    vi.mocked(jobEngine.getGeneration).mockReset();
+    vi.mocked(library.getSession).mockReset();
+    vi.mocked(library.listGenerations).mockReset();
+    vi.mocked(library.getSession).mockReturnValue(session);
   });
 
-  it('returns session with GenerationView generations and advances pending ones', async () => {
-    vi.mocked(db.getSession).mockReturnValue({
-      id: 'session-1',
-      title: 'Demo',
-      createdAt: '2026-07-12T10:00:00.000Z',
-      updatedAt: '2026-07-12T10:00:00.000Z',
-      generations: [
-        {
-          id: 'gen-1',
-          sessionId: 'session-1',
-          prompt: 'A cat',
-          status: 'pending',
-          createdAt: '2026-07-12T10:00:00.000Z',
-          updatedAt: '2026-07-12T10:00:00.000Z',
-          jobs: [],
-          images: [],
-        },
-      ],
-    });
-    vi.mocked(jobEngine.getGeneration).mockResolvedValue({
-      id: 'gen-1',
-      sessionId: 'session-1',
-      prompt: 'A cat',
-      status: 'completed',
-      createdAt: '2026-07-12T10:00:00.000Z',
-      updatedAt: '2026-07-12T10:00:00.000Z',
-      jobs: [],
-      images: [
-        {
-          id: 'img-1',
-          jobId: 'job-1',
-          index: 0,
-          url: '/api/images/img-1',
-          width: 1024,
-          height: 1024,
-        },
-      ],
-    });
-
+  it('returns metadata only unless generations are requested', async () => {
     const response = await getSession(
       new Request('http://localhost:3000/api/sessions/session-1'),
       { params: Promise.resolve({ id: 'session-1' }) },
     );
-
     expect(response.status).toBe(200);
-    expect(jobEngine.getGeneration).toHaveBeenCalledWith('gen-1', {
-      db: expect.anything(),
-    });
-
-    const body = await response.json();
-    expect(body.id).toBe('session-1');
-    expect(body.updatedAt).toBe('2026-07-12T10:00:00.000Z');
-    expect(body.generations).toHaveLength(1);
-    expect(body.generations[0].images[0].url).toBe('/api/images/img-1');
-    expect(body.generations[0].images[0].storagePath).toBeUndefined();
+    await expect(response.json()).resolves.toEqual(session);
+    expect(library.listGenerations).not.toHaveBeenCalled();
   });
 
-  it('returns 404 for missing session', async () => {
-    vi.mocked(db.getSession).mockImplementation(() => {
-      throw new NotFoundError('Session not found');
+  it('includes stored generations through a read-only listing', async () => {
+    vi.mocked(library.listGenerations).mockReturnValue({
+      items: [{
+        id: 'gen-1', sessionId: 'session-1', prompt: 'A cat', status: 'pending',
+        createdAt: '2026-07-12T10:00:00.000Z', updatedAt: '2026-07-12T10:00:00.000Z',
+        jobs: [{
+          id: 'job-1', provider: 'fal', model: 'fal-ai/flux/schnell',
+          status: 'pending', error: null,
+        }],
+        images: [],
+      }],
+      nextCursor: null,
     });
 
+    const response = await getSession(
+      new Request('http://localhost:3000/api/sessions/session-1?include=generations'),
+      { params: Promise.resolve({ id: 'session-1' }) },
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.generations).toHaveLength(1);
+    expect(body.generations[0].status).toBe('pending');
+    expect(library.listGenerations).toHaveBeenCalledWith(
+      { sessionId: 'session-1', limit: 50 }, expect.anything(),
+    );
+  });
+
+  it('returns 404 for a missing session', async () => {
+    vi.mocked(library.getSession).mockImplementation(() => {
+      throw new NotFoundError('Session not found');
+    });
     const response = await getSession(
       new Request('http://localhost:3000/api/sessions/missing'),
       { params: Promise.resolve({ id: 'missing' }) },
     );
-
     expect(response.status).toBe(404);
   });
 });

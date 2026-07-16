@@ -1,14 +1,45 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ValidationError, NotFoundError } from '../../src/lib/errors';
 import { GET as getGeneration } from '../../src/app/api/generations/[id]/route';
-import { POST as postGeneration } from '../../src/app/api/generations/route';
+import { GET as listGenerations, POST as postGeneration } from '../../src/app/api/generations/route';
 
 vi.mock('../../src/lib/job-engine', () => ({
   submitGeneration: vi.fn(),
   getGeneration: vi.fn(),
 }));
 
+vi.mock('../../src/lib/library', () => ({
+  listGenerations: vi.fn(),
+}));
+
 import * as jobEngine from '../../src/lib/job-engine';
+import * as library from '../../src/lib/library';
+
+describe('GET /api/generations', () => {
+  it('delegates to the read-only list query without advancing jobs', async () => {
+    vi.mocked(library.listGenerations).mockReturnValue({
+      items: [],
+      nextCursor: null,
+    });
+    const response = listGenerations(
+      new Request(
+        'http://localhost:3000/api/generations?sessionId=session-1&limit=10',
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(library.listGenerations).toHaveBeenCalledWith(
+      {
+        sessionId: 'session-1',
+        projectId: undefined,
+        cursor: undefined,
+        limit: 10,
+      },
+      expect.anything(),
+    );
+    expect(jobEngine.getGeneration).not.toHaveBeenCalled();
+  });
+});
 
 describe('POST /api/generations', () => {
   beforeEach(() => {
@@ -25,7 +56,7 @@ describe('POST /api/generations', () => {
       new Request('http://localhost:3000/api/generations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }], prompt: 'A cat' }),
+        body: JSON.stringify({ targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }], prompt: 'A cat', sessionId: 'session-1' }),
       }),
     );
 
@@ -43,7 +74,7 @@ describe('POST /api/generations', () => {
       new Request('http://localhost:3000/api/generations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }], prompt: 'A cat' }),
+        body: JSON.stringify({ targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }], prompt: 'A cat', sessionId: 'session-1' }),
       }),
     );
 
@@ -61,7 +92,7 @@ describe('GET /api/generations/:id', () => {
   it('returns generation view', async () => {
     vi.mocked(jobEngine.getGeneration).mockResolvedValue({
       id: 'gen-1',
-      sessionId: null,
+      sessionId: 'session-1',
       prompt: 'A cat',
       status: 'completed',
       createdAt: '2026-07-12T10:00:00.000Z',
