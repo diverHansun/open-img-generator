@@ -117,6 +117,33 @@ async function submitTarget(
   }
 }
 
+async function submitTargetSafely(
+  job: { id: string; generationId: string },
+  target: GenerationTarget,
+  params: SubmitGenerationParams,
+  processedPrompt: string,
+  client: DbClient,
+): Promise<void> {
+  try {
+    await submitTarget(job, target, params, processedPrompt, client);
+  } catch (err) {
+    updateJobAndGeneration(
+      job.id,
+      job.generationId,
+      {
+        status: 'failed',
+        error: JSON.stringify({
+          code: 'INTERNAL_ERROR',
+          message: err instanceof Error ? err.message : String(err),
+          retryable: false,
+        }),
+        updatedAt: new Date().toISOString(),
+      },
+      client,
+    );
+  }
+}
+
 export async function submitGeneration(
   params: SubmitGenerationParams,
   ctx: OrchestratorContext,
@@ -149,13 +176,17 @@ export async function submitGeneration(
     ctx.db,
   );
 
-  if (params.sessionId) {
-    touchSession(params.sessionId, now, ctx.db);
-  }
+  touchSession(params.sessionId, now, ctx.db);
 
-  await Promise.all(
+  await Promise.allSettled(
     jobs.map((job, index) =>
-      submitTarget(job, params.targets[index]!, params, processedPrompt, ctx.db),
+      submitTargetSafely(
+        job,
+        params.targets[index]!,
+        params,
+        processedPrompt,
+        ctx.db,
+      ),
     ),
   );
 

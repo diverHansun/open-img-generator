@@ -27,6 +27,7 @@ function seedGeneration(db: ReturnType<typeof createTestDb>['db'], handle?: obje
   const { job } = createGenerationAndJob(
     {
       id: 'gen-1',
+      sessionId: 'default-session',
       prompt: 'A cat',
       status: 'pending',
       createdAt: now,

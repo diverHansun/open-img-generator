@@ -20,7 +20,9 @@ export type StoreImagesResult =
   | { kind: 'ok'; count: number }
   | { kind: 'failed'; error: StorageError };
 
-export const POLL_LEASE_MS = 35_000;
+// Covers the full Fal completion path: status + response + image transfer.
+// A crashed process may delay the next poll by at most this amount.
+export const POLL_LEASE_MS = 120_000;
 
 export async function storeImages(
   jobId: string,
@@ -175,7 +177,25 @@ export async function advance(
     };
   }
 
-  await applyPollResult(job, pollResult, client);
+  try {
+    await applyPollResult(job, pollResult, client);
+  } catch (err) {
+    updateJobAndGeneration(
+      job.id,
+      job.generationId,
+      {
+        status: 'failed',
+        error: JSON.stringify({
+          code: 'INTERNAL_ERROR',
+          message: err instanceof Error ? err.message : String(err),
+          retryable: false,
+        }),
+        pollLeaseUntil: null,
+        updatedAt: new Date().toISOString(),
+      },
+      client,
+    );
+  }
 }
 
 async function applyPollResult(

@@ -8,7 +8,7 @@ export type GenerationTarget = {
 export type SubmitGenerationParams = {
   targets: GenerationTarget[];
   prompt: string;
-  sessionId?: string;
+  sessionId: string;
   mode?: ProviderMode;
   aspectRatio?: string;
   count?: number;
@@ -43,7 +43,7 @@ export type ImageView = {
 
 export type GenerationView = {
   id: string;
-  sessionId: string | null;
+  sessionId: string;
   prompt: string;
   status: GenerationStatus;
   createdAt: string;

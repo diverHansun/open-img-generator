@@ -72,6 +72,7 @@ describe('orchestrator', () => {
     return {
       targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
       prompt: 'A cat',
+      sessionId: 'default-session',
       ...overrides,
     };
   }
@@ -282,7 +283,7 @@ describe('orchestrator', () => {
     });
 
     it('touches session when sessionId provided', async () => {
-      createSession({ id: 's1', title: 'Test', createdAt: now, updatedAt: now }, db);
+      createSession({ id: 's1', projectId: 'default-project', title: 'Test', createdAt: now, updatedAt: now }, db);
       vi.mocked(providers.getById).mockReturnValue(
         makeProvider({
           submit: vi.fn().mockResolvedValue({

@@ -22,6 +22,7 @@ describe('validator', () => {
     return {
       targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
       prompt: 'A cat',
+      sessionId: 'default-session',
       ...overrides,
     };
   }
@@ -32,6 +33,20 @@ describe('validator', () => {
 
   it('rejects an empty target list', () => {
     expect(() => validate(makeParams({ targets: [] }), { db })).toThrow('At least one target');
+  });
+
+  it('rejects a request that exceeds the bounded fan-out limit', () => {
+    expect(() =>
+      validate(
+        makeParams({
+          targets: Array.from({ length: 9 }, (_, index) => ({
+            provider: 'fal' as const,
+            model: `model-${index}`,
+          })),
+        }),
+        { db },
+      ),
+    ).toThrow('At most 8 targets');
   });
 
   it('rejects duplicate targets', () => {
@@ -116,7 +131,7 @@ describe('validator', () => {
   });
 
   it('passes when session exists', () => {
-    createSession({ id: 's1', title: 'Test', createdAt: 'now', updatedAt: 'now' }, db);
+    createSession({ id: 's1', projectId: 'default-project', title: 'Test', createdAt: 'now', updatedAt: 'now' }, db);
     expect(() => validate(makeParams({ sessionId: 's1' }), { db })).not.toThrow();
   });
 });

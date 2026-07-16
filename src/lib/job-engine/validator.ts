@@ -7,6 +7,8 @@ export type ValidationContext = {
   db: DbClient;
 };
 
+export const MAX_GENERATION_TARGETS = 8;
+
 export function validate(
   params: SubmitGenerationParams,
   ctx: ValidationContext,
@@ -19,6 +21,11 @@ export function validate(
   }
   if (!Array.isArray(params.targets) || params.targets.length === 0) {
     throw new ValidationError('At least one target is required');
+  }
+  if (params.targets.length > MAX_GENERATION_TARGETS) {
+    throw new ValidationError(
+      `At most ${MAX_GENERATION_TARGETS} targets are allowed`,
+    );
   }
   const count = params.count ?? 1;
   if (!Number.isInteger(count) || count < 1) {
@@ -71,7 +78,10 @@ export function validate(
     }
   }
 
-  if (params.sessionId && !sessionExists(params.sessionId, ctx.db)) {
+  if (typeof params.sessionId !== 'string' || params.sessionId.length === 0) {
+    throw new ValidationError('Session is required');
+  }
+  if (!sessionExists(params.sessionId, ctx.db)) {
     throw new ValidationError('Session not found');
   }
 }
