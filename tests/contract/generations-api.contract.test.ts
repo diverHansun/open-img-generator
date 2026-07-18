@@ -116,6 +116,7 @@ describe('GET /api/generations/:id', () => {
     vi.mocked(jobEngine.getGeneration).mockResolvedValue({
       id: 'gen-1',
       sessionId: 'session-1',
+      projectId: 'project-1',
       prompt: 'A cat',
       status: 'completed',
       createdAt: '2026-07-12T10:00:00.000Z',

@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { eq } from 'drizzle-orm';
 import { validate } from './validator';
 import * as prompt from '../prompt';
 import {
   createGenerationWithJobs,
   getGenerationWithJobsAndImages,
   getGenerationJob,
+  sessions,
   touchSession,
   requestGenerationJobCancellation,
   type DbClient,
@@ -293,7 +295,7 @@ export async function getGeneration(
     generation = getGenerationWithJobsAndImages(id, ctx.db)!;
   }
 
-  return toGenerationView(generation);
+  return toGenerationView(generation, ctx.db);
 }
 
 export async function cancelGeneration(
@@ -358,7 +360,7 @@ export async function cancelGeneration(
 
   syncGenerationStatus(id, ctx.db);
   generation = getGenerationWithJobsAndImages(id, ctx.db)!;
-  return toGenerationView(generation);
+  return toGenerationView(generation, ctx.db);
 }
 
 function parseJobError(error: string | null): JobView['error'] {
@@ -370,10 +372,20 @@ function parseJobError(error: string | null): JobView['error'] {
   }
 }
 
-function toGenerationView(generation: GenerationWithJobsAndImages): GenerationView {
+function toGenerationView(
+  generation: GenerationWithJobsAndImages,
+  client: DbClient,
+): GenerationView {
+  const session = client
+    .select({ projectId: sessions.projectId })
+    .from(sessions)
+    .where(eq(sessions.id, generation.sessionId))
+    .get();
+  if (!session) throw new NotFoundError(`Session not found: ${generation.sessionId}`);
   return {
     id: generation.id,
     sessionId: generation.sessionId,
+    projectId: session.projectId,
     prompt: generation.prompt,
     status: generation.status as GenerationStatus,
     createdAt: generation.createdAt,

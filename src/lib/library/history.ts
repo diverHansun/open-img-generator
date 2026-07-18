@@ -1,8 +1,10 @@
-import { and, desc, eq, lt, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, lt, or, sql, type SQL } from 'drizzle-orm';
 import {
   db,
   fetchGenerationDetails,
+  generationJobs,
   generations,
+  images,
   sessionExists,
   sessions,
   type DbClient,
@@ -11,7 +13,7 @@ import {
 } from '../db';
 import { getProject } from './projects';
 import { NotFoundError, ValidationError } from '../errors';
-import type { GenerationSummary, Page } from './types';
+import type { GenerationSummary, HistoryPage, Page } from './types';
 
 type Cursor = { createdAt: string; id: string };
 
@@ -143,5 +145,102 @@ export function listGenerations(
       hasMore && last
         ? encodeCursor({ createdAt: last.createdAt, id: last.id })
         : null,
+  };
+}
+
+function parseBoundedInteger(
+  value: number | undefined,
+  name: string,
+  fallback: number,
+  maximum: number,
+): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || value < 1 || value > maximum) {
+    throw new ValidationError(`${name} must be an integer between 1 and ${maximum}`);
+  }
+  return value;
+}
+
+/**
+ * Groups read-only generation summaries by session for the History page.
+ * It deliberately stays in the library layer and never calls the job engine,
+ * so none of these reads can advance an async provider job.
+ */
+export function getProjectHistory(
+  input: {
+    projectId: string;
+    page?: number;
+    sessionLimit?: number;
+    generationLimit?: number;
+  },
+  client: DbClient = db,
+): HistoryPage {
+  if (typeof input.projectId !== 'string' || input.projectId.trim().length === 0) {
+    throw new ValidationError('projectId is required');
+  }
+  const page = parseBoundedInteger(input.page, 'page', 1, Number.MAX_SAFE_INTEGER);
+  const sessionLimit = parseBoundedInteger(input.sessionLimit, 'sessionLimit', 5, 5);
+  const generationLimit = parseBoundedInteger(
+    input.generationLimit,
+    'generationLimit',
+    10,
+    10,
+  );
+  getProject(input.projectId, client);
+
+  const groups = client
+    .select({
+      session: sessions,
+      generationCount: sql<number>`count(distinct ${generations.id})`,
+      imageCount: sql<number>`count(${images.id})`,
+      lastGenerationAt: sql<string>`max(${generations.createdAt})`,
+    })
+    .from(sessions)
+    .innerJoin(generations, eq(generations.sessionId, sessions.id))
+    .leftJoin(generationJobs, eq(generationJobs.generationId, generations.id))
+    .leftJoin(images, eq(images.generationJobId, generationJobs.id))
+    .where(eq(sessions.projectId, input.projectId))
+    .groupBy(sessions.id)
+    .orderBy(desc(sql`max(${generations.createdAt})`), desc(sessions.id))
+    .all()
+    .map((group) => ({
+      ...group,
+      generationCount: Number(group.generationCount),
+      imageCount: Number(group.imageCount),
+    }));
+
+  const totalSessions = groups.length;
+  const totalPages = Math.ceil(totalSessions / sessionLimit);
+  const start = (page - 1) * sessionLimit;
+  const pageGroups = groups.slice(start, start + sessionLimit);
+  const totals = groups.reduce(
+    (total, group) => ({
+      generations: total.generations + group.generationCount,
+      images: total.images + group.imageCount,
+    }),
+    { generations: 0, images: 0 },
+  );
+
+  return {
+    projectId: input.projectId,
+    page,
+    pageSize: sessionLimit,
+    totalSessions,
+    totalPages,
+    totals,
+    groups: pageGroups.map((group) => {
+      const generationPage = listGenerations(
+        { sessionId: group.session.id, limit: generationLimit },
+        client,
+      );
+      return {
+        session: group.session,
+        generationCount: group.generationCount,
+        imageCount: group.imageCount,
+        lastGenerationAt: group.lastGenerationAt,
+        items: generationPage.items,
+        nextCursor: generationPage.nextCursor,
+      };
+    }),
   };
 }

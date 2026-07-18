@@ -47,6 +47,7 @@ export type ImageView = {
 export type GenerationView = {
   id: string;
   sessionId: string;
+  projectId: string;
   prompt: string;
   status: GenerationStatus;
   createdAt: string;

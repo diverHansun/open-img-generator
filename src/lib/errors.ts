@@ -10,6 +10,9 @@ export class NotFoundError extends AppError {}
 export class ConflictError extends AppError {}
 export class RateLimitError extends AppError {}
 export class AuthenticationError extends AppError {}
+export class InitialSessionUnavailableError extends AppError {}
+export class ConfigurationUnavailableError extends AppError {}
+export class CredentialManagedByEnvironmentError extends ConflictError {}
 
 export class StorageError extends AppError {
   constructor(

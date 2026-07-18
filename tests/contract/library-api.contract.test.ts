@@ -190,7 +190,13 @@ describe('library API contracts', () => {
 
     expect(response.status).toBe(200);
     expect(library.listFavorites).toHaveBeenCalledWith(
-      { limit: 48, cursor: 'cursor-0' },
+      {
+        limit: 48,
+        cursor: 'cursor-0',
+        projectId: undefined,
+        provider: undefined,
+        sort: undefined,
+      },
       expect.anything(),
     );
     await expect(response.json()).resolves.toEqual({

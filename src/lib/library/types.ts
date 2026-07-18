@@ -1,4 +1,36 @@
 import type { GenerationStatus } from '../db';
+import type { Project, Session } from '../db';
+
+export type ProjectSummary = {
+  project: Project;
+  sessionCount: number;
+  generationCount: number;
+  imageCount: number;
+  lastActivityAt: string;
+  coverImageUrl: string | null;
+};
+
+export type HistoryGroup = {
+  session: Session;
+  generationCount: number;
+  imageCount: number;
+  lastGenerationAt: string;
+  items: GenerationSummary[];
+  nextCursor: string | null;
+};
+
+export type HistoryPage = {
+  projectId: string;
+  page: number;
+  pageSize: number;
+  totalSessions: number;
+  totalPages: number;
+  totals: {
+    generations: number;
+    images: number;
+  };
+  groups: HistoryGroup[];
+};
 
 export type GenerationSummary = {
   id: string;

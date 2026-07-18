@@ -7,7 +7,12 @@ import {
   type DbClient,
   type Session,
 } from '../db';
-import { ConflictError, NotFoundError, ValidationError } from '../errors';
+import {
+  ConflictError,
+  InitialSessionUnavailableError,
+  NotFoundError,
+  ValidationError,
+} from '../errors';
 import { getProject } from './projects';
 
 function normalizeTitle(title: unknown): string | null {
@@ -48,6 +53,51 @@ export function createSession(
     throw err;
   }
   return getSession(id, client);
+}
+
+/**
+ * Reuses the current session for a project or creates exactly one first session.
+ * The transaction keeps this operation atomic for the single-process SQLite MVP;
+ * callers must use this instead of a client-side list-then-create race.
+ */
+export function ensureInitialSession(
+  projectId: string,
+  client: DbClient = db,
+): { session: Session; created: boolean } {
+  const now = new Date().toISOString();
+  const id = randomUUID();
+
+  try {
+    return client.transaction((tx) => {
+      getProject(projectId, tx);
+      const existing = tx
+        .select()
+        .from(sessions)
+        .where(eq(sessions.projectId, projectId))
+        .orderBy(desc(sessions.updatedAt), desc(sessions.id))
+        .get();
+      if (existing) return { session: existing, created: false };
+
+      const created: Session = {
+        id,
+        projectId,
+        title: `session-${id.slice(0, 8)}`,
+        createdAt: now,
+        updatedAt: now,
+      };
+      tx.insert(sessions).values(created).run();
+      tx.update(projects)
+        .set({ updatedAt: now })
+        .where(eq(projects.id, projectId))
+        .run();
+      return { session: created, created: true };
+    });
+  } catch (err) {
+    if (err instanceof NotFoundError || err instanceof ConflictError) throw err;
+    throw new InitialSessionUnavailableError(
+      'Unable to prepare the initial Session. Please retry.',
+    );
+  }
 }
 
 export function listSessions(

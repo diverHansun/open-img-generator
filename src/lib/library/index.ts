@@ -4,3 +4,4 @@ export * from './sessions';
 export * from './history';
 export * from './favorites';
 export * from './model-prefs';
+export * from './summaries';

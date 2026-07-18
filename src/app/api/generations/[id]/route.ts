@@ -12,6 +12,6 @@ export async function GET(
     const view = await getGeneration(id, { db });
     return NextResponse.json(view);
   } catch (err) {
-    return handleApiError(err);
+    return handleApiError(err, { structured: true });
   }
 }

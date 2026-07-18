@@ -11,6 +11,8 @@ import {
   type DbClient,
 } from '../db';
 import { NotFoundError, ValidationError } from '../errors';
+import { getProject } from './projects';
+import { isKnownProviderId } from '../provider-config/catalog';
 import type { GalleryItem, Page } from './types';
 
 type Cursor = { createdAt: string; id: string };
@@ -86,7 +88,13 @@ export function removeFavorite(imageId: string, client: DbClient = db): void {
 }
 
 export function listFavorites(
-  input: { limit?: number; cursor?: string },
+  input: {
+    limit?: number;
+    cursor?: string;
+    projectId?: string;
+    provider?: string;
+    sort?: string;
+  },
   client: DbClient = db,
 ): Page<GalleryItem> {
   if (
@@ -95,17 +103,30 @@ export function listFavorites(
   ) {
     throw new ValidationError('limit must be a positive integer');
   }
+  if (input.sort !== undefined && input.sort !== 'newest') {
+    throw new ValidationError('sort must be newest');
+  }
+  if (input.projectId !== undefined && input.projectId.trim().length === 0) {
+    throw new ValidationError('projectId must not be empty');
+  }
+  if (input.provider !== undefined && !isKnownProviderId(input.provider)) {
+    throw new ValidationError('Unknown provider');
+  }
+  if (input.projectId) getProject(input.projectId, client);
   const limit = Math.min(input.limit ?? 48, 100);
   const cursor = decodeCursor(input.cursor);
-  let condition: SQL | undefined;
+  const conditions: SQL[] = [];
   if (cursor) {
-    condition = or(
+    const cursorCondition = or(
       lt(favorites.createdAt, cursor.createdAt),
       and(eq(favorites.createdAt, cursor.createdAt), lt(favorites.id, cursor.id)),
     );
+    if (cursorCondition) conditions.push(cursorCondition);
   }
+  if (input.projectId) conditions.push(eq(projects.id, input.projectId));
+  if (input.provider) conditions.push(eq(generationJobs.provider, input.provider));
   const rows = favoriteQuery(client)
-    .where(condition)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(favorites.createdAt), desc(favorites.id))
     .limit(limit + 1)
     .all();
