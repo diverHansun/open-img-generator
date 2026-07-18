@@ -342,7 +342,7 @@ DoD：新增接口可被 typed client 消费；没有 UI 直接导入 server mod
 - 复用既有 `auth/session` 行为的 client auth gate；在本阶段不改变 middleware 对页面 URL 的保护范围。
 - 行为测试与最小非视觉 harness（如有必要）只验证 API 接线，不成为生产页面或临时设计系统。
 
-DoD：新 API 有完整 typed client；401、409、400、404、503 能以 code 驱动恢复状态；同一 Generation 至多一个 detail poll 调度器；关闭最后订阅者会停止浏览器轮询。对应 C02、C06–C09、E07–E14。
+DoD：新 API 有完整 typed client；401、409、400、404、503 能以 code 驱动恢复状态；同一 Generation 至多一个 detail poll 调度器；关闭最后订阅者会停止浏览器轮询。对应 C02、C06–C07，以及 C08–C09 的 API/轮询基础；Detail 弹层、可见 Cancel 入口与其页面验收留待 Phase 3。
 
 ### Visual Decision Gate（不写 UI 代码）
 

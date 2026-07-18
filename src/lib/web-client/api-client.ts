@@ -167,21 +167,9 @@ export function createApiClient(fetcher: FetchLike = fetch) {
         jsonInit('PATCH', { title }),
       ),
     deleteProject: (id: string) =>
-      fetcher(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(
-        async (response) => {
-          if (!response.ok) {
-            const payload = (await response.json().catch(() => null)) as {
-              error?: unknown;
-            } | null;
-            throw new ApiClientError(
-              typeof payload?.error === 'string'
-                ? payload.error
-                : response.statusText,
-              response.status,
-            );
-          }
-        },
-      ),
+      requestEmpty(fetcher, `/api/projects/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
     listSessions: (projectId: string) =>
       requestJson<Session[]>(
         fetcher,

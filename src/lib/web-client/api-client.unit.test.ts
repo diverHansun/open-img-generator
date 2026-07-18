@@ -60,6 +60,29 @@ describe('web API client', () => {
     );
   });
 
+  it('preserves structured authentication errors for project deletion', async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'AUTHENTICATION_REQUIRED',
+            message: 'Authentication required',
+            retryable: false,
+          },
+        }),
+        { status: 401, statusText: 'Unauthorized' },
+      ),
+    );
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.deleteProject('project/one')).rejects.toEqual(
+      new ApiClientError('Authentication required', 401, 'AUTHENTICATION_REQUIRED', false),
+    );
+    expect(fetcher).toHaveBeenCalledWith('/api/projects/project%2Fone', {
+      method: 'DELETE',
+    });
+  });
+
   it('encodes project-scoped sessions and read-only history queries', async () => {
     const fetcher = vi
       .fn()

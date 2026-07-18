@@ -1,9 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { createDbClient, type DbClient } from '../../src/lib/db';
+import {
+  ConfigurationUnavailableError,
+} from '../../src/lib/errors';
 import {
   addFavorite,
   createProject,
@@ -11,6 +14,7 @@ import {
   ensureInitialSession,
   getProjectHistory,
   listFavorites,
+  listGenerations,
   listProjectSummaries,
 } from '../../src/lib/library';
 import {
@@ -111,6 +115,96 @@ describe('frontend-overhaul backend data integration', () => {
     expect(explicit.id).not.toBe(first.session.id);
   });
 
+  it('keeps History and generation-list reads from advancing a pending provider job', () => {
+    const project = createProject({ title: 'Read-only history' }, db);
+    const session = createSession({ projectId: project.id, title: 'Pending' }, db);
+    seedGeneration(sqlite, {
+      id: 'generation-pending',
+      sessionId: session.id,
+      provider: 'fal',
+      createdAt: '2099-07-18T10:00:00.000Z',
+      imageId: 'image-pending',
+      generationStatus: 'running',
+      jobStatus: 'running',
+      nextPollAt: '2099-07-18T10:01:00.000Z',
+    });
+    const before = sqlite
+      .prepare('SELECT status, next_poll_at, poll_lease_until FROM generation_jobs WHERE id = ?')
+      .get('job-generation-pending');
+
+    getProjectHistory({ projectId: project.id }, db);
+    listGenerations({ sessionId: session.id }, db);
+
+    expect(
+      sqlite
+        .prepare('SELECT status, next_poll_at, poll_lease_until FROM generation_jobs WHERE id = ?')
+        .get('job-generation-pending'),
+    ).toEqual(before);
+  });
+
+  it('filters Gallery before pagination and returns each matching favorite exactly once', () => {
+    const firstProject = createProject({ title: 'First project' }, db);
+    const secondProject = createProject({ title: 'Second project' }, db);
+    const firstSession = createSession({ projectId: firstProject.id, title: 'First session' }, db);
+    const secondSession = createSession({ projectId: secondProject.id, title: 'Second session' }, db);
+    seedGeneration(sqlite, {
+      id: 'gallery-qwen-older',
+      sessionId: firstSession.id,
+      provider: 'qwen',
+      createdAt: '2099-07-18T09:00:00.000Z',
+      imageId: 'image-gallery-qwen-older',
+    });
+    seedFavorite(sqlite, 'favorite-qwen-older', 'image-gallery-qwen-older', '2099-07-18T09:00:00.000Z');
+    seedGeneration(sqlite, {
+      id: 'gallery-qwen-newer',
+      sessionId: firstSession.id,
+      provider: 'qwen',
+      createdAt: '2099-07-18T10:00:00.000Z',
+      imageId: 'image-gallery-qwen-newer',
+    });
+    seedFavorite(sqlite, 'favorite-qwen-newer', 'image-gallery-qwen-newer', '2099-07-18T10:00:00.000Z');
+    seedGeneration(sqlite, {
+      id: 'gallery-fal-latest',
+      sessionId: firstSession.id,
+      provider: 'fal',
+      createdAt: '2099-07-18T11:00:00.000Z',
+      imageId: 'image-gallery-fal-latest',
+    });
+    seedFavorite(sqlite, 'favorite-fal-latest', 'image-gallery-fal-latest', '2099-07-18T11:00:00.000Z');
+    seedGeneration(sqlite, {
+      id: 'gallery-qwen-other-project',
+      sessionId: secondSession.id,
+      provider: 'qwen',
+      createdAt: '2099-07-18T12:00:00.000Z',
+      imageId: 'image-gallery-qwen-other-project',
+    });
+    seedFavorite(
+      sqlite,
+      'favorite-qwen-other-project',
+      'image-gallery-qwen-other-project',
+      '2099-07-18T12:00:00.000Z',
+    );
+
+    const firstPage = listFavorites(
+      { projectId: firstProject.id, provider: 'qwen', limit: 1, sort: 'newest' },
+      db,
+    );
+    const secondPage = listFavorites(
+      {
+        projectId: firstProject.id,
+        provider: 'qwen',
+        limit: 1,
+        sort: 'newest',
+        cursor: firstPage.nextCursor ?? undefined,
+      },
+      db,
+    );
+
+    expect(firstPage.items.map((item) => item.imageId)).toEqual(['image-gallery-qwen-newer']);
+    expect(secondPage.items.map((item) => item.imageId)).toEqual(['image-gallery-qwen-older']);
+    expect(secondPage.nextCursor).toBeNull();
+  });
+
   it('persists independent credential updates atomically and never returns the secret in summaries', async () => {
     const canary = 'secret-e2e-canary-integration';
 
@@ -127,6 +221,34 @@ describe('frontend-overhaul backend data integration', () => {
     expect(fs.readFileSync(getCredentialsFilePath(), 'utf8')).not.toContain(canary);
     expect(readEncryptedCredentials()).toEqual({ KLING_API_KEY: 'kling-key' });
   });
+
+  it('does not leak or overwrite credentials when encrypted storage is unavailable', async () => {
+    const canary = 'secret-e2e-canary-unavailable';
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const credentialsPath = getCredentialsFilePath();
+    fs.mkdirSync(path.dirname(credentialsPath), { recursive: true });
+    const corruptedEnvelope = `{"ciphertext":"${canary}"}\n`;
+    fs.writeFileSync(credentialsPath, corruptedEnvelope, { mode: 0o600 });
+
+    expect(() => listProviderConfigurations(db)).toThrow(ConfigurationUnavailableError);
+    try {
+      listProviderConfigurations(db);
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigurationUnavailableError);
+      expect(error instanceof Error ? error.message : '').not.toContain(canary);
+    }
+    expect(fs.readFileSync(credentialsPath, 'utf8')).toBe(corruptedEnvelope);
+
+    fs.rmSync(credentialsPath);
+    resetProviderConfigurationState();
+    delete process.env.USER_CONFIG_ENCRYPTION_KEY;
+    await expect(setProviderCredential('fal', canary, db)).rejects.toBeInstanceOf(
+      ConfigurationUnavailableError,
+    );
+    expect(fs.existsSync(credentialsPath)).toBe(false);
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(canary);
+    consoleError.mockRestore();
+  });
 });
 
 function seedGeneration(
@@ -137,6 +259,9 @@ function seedGeneration(
     provider: string;
     createdAt: string;
     imageId: string;
+    generationStatus?: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    jobStatus?: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    nextPollAt?: string | null;
   },
 ) {
   const jobId = `job-${input.id}`;
@@ -144,17 +269,31 @@ function seedGeneration(
     .prepare(
       `INSERT INTO generations
        (id, session_id, prompt, status, created_at, updated_at)
-       VALUES (?, ?, 'Prompt', 'completed', ?, ?)`,
+       VALUES (?, ?, 'Prompt', ?, ?, ?)`,
     )
-    .run(input.id, input.sessionId, input.createdAt, input.createdAt);
+    .run(
+      input.id,
+      input.sessionId,
+      input.generationStatus ?? 'completed',
+      input.createdAt,
+      input.createdAt,
+    );
   sqlite
     .prepare(
       `INSERT INTO generation_jobs
        (id, generation_id, provider, model, status, provider_handle, error,
         poll_lease_until, next_poll_at, cancel_requested_at, created_at, updated_at)
-       VALUES (?, ?, ?, 'model', 'completed', NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+       VALUES (?, ?, ?, 'model', ?, NULL, NULL, NULL, ?, NULL, ?, ?)`,
     )
-    .run(jobId, input.id, input.provider, input.createdAt, input.createdAt);
+    .run(
+      jobId,
+      input.id,
+      input.provider,
+      input.jobStatus ?? 'completed',
+      input.nextPollAt ?? null,
+      input.createdAt,
+      input.createdAt,
+    );
   sqlite
     .prepare(
       `INSERT INTO images
@@ -163,4 +302,15 @@ function seedGeneration(
        VALUES (?, ?, 0, '/tmp/image.png', 'image/png', 512, 512, 1, ?)`,
     )
     .run(input.imageId, jobId, input.createdAt);
+}
+
+function seedFavorite(
+  sqlite: Database.Database,
+  id: string,
+  imageId: string,
+  createdAt: string,
+) {
+  sqlite
+    .prepare('INSERT INTO favorites (id, image_id, created_at) VALUES (?, ?, ?)')
+    .run(id, imageId, createdAt);
 }

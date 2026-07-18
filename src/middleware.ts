@@ -10,7 +10,13 @@ export function middleware(request: NextRequest): NextResponse {
   }
   if (isAuthorizedEdgeRequest(request)) return NextResponse.next();
   return NextResponse.json(
-    { error: 'Authentication required' },
+    {
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'Authentication required',
+        retryable: false,
+      },
+    },
     { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } },
   );
 }

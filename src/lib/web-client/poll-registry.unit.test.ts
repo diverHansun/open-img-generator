@@ -98,4 +98,45 @@ describe('GenerationPollRegistry', () => {
     expect(registry.subscriptionCount('generation-1')).toBe(0);
     expect(timers).toHaveLength(0);
   });
+
+  it('backs off retryable detail failures without creating another scheduler', async () => {
+    const getGenerationById = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiClientError('Temporary failure', 503, 'UNAVAILABLE', true))
+      .mockResolvedValueOnce(pending);
+    const { scheduler, timers } = createScheduler();
+    const registry = new GenerationPollRegistry({ getGenerationById }, scheduler);
+    const onError = vi.fn();
+
+    registry.subscribe('generation-1', { onUpdate: vi.fn(), onError });
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(timers).toEqual([
+      expect.objectContaining({ milliseconds: 2_000, active: true }),
+    ]);
+
+    timers[0]!.callback();
+    await vi.waitFor(() => expect(getGenerationById).toHaveBeenCalledTimes(2));
+    expect(timers).toHaveLength(2);
+    expect(timers[1]).toEqual(expect.objectContaining({ milliseconds: 4_000, active: true }));
+    expect(registry.subscriptionCount('generation-1')).toBe(1);
+  });
+
+  it('aborts an in-flight detail request when its final subscriber leaves', async () => {
+    let signal: AbortSignal | undefined;
+    const getGenerationById = vi.fn(
+      (_id: string, options?: { signal?: AbortSignal }) =>
+        new Promise<GenerationView>(() => {
+          signal = options?.signal;
+        }),
+    );
+    const { scheduler } = createScheduler();
+    const registry = new GenerationPollRegistry({ getGenerationById }, scheduler);
+
+    const unsubscribe = registry.subscribe('generation-1', { onUpdate: vi.fn() });
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    unsubscribe();
+
+    expect(signal?.aborted).toBe(true);
+    expect(registry.subscriptionCount('generation-1')).toBe(0);
+  });
 });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ConfigurationUnavailableError,
   CredentialManagedByEnvironmentError,
   ValidationError,
 } from '../../src/lib/errors';
@@ -164,6 +165,44 @@ describe('frontend-overhaul API contracts', () => {
         retryable: false,
       },
     });
+
+    vi.mocked(providerConfig.removeProviderCredential).mockRejectedValue(
+      new CredentialManagedByEnvironmentError('This credential is managed by the environment and cannot be changed here.'),
+    );
+    const deleteResponse = await deleteProviderCredential(
+      new Request('http://localhost:3000/api/provider-configurations/fal/credential', { method: 'DELETE' }),
+      { params: Promise.resolve({ providerId: 'fal' }) },
+    );
+    expect(deleteResponse.status).toBe(409);
+    await expect(deleteResponse.json()).resolves.toEqual({
+      error: {
+        code: 'CREDENTIAL_MANAGED_BY_ENV',
+        message: 'This credential is managed by the environment and cannot be changed here.',
+        retryable: false,
+      },
+    });
+  });
+
+  it('turns unavailable encrypted storage into a secret-free 503 configuration error', async () => {
+    const canary = 'secret-e2e-canary-corrupted-store';
+    vi.mocked(providerConfig.listProviderConfigurations).mockImplementation(() => {
+      throw new ConfigurationUnavailableError(
+        'Encrypted credential storage is unavailable. Check USER_CONFIG_ENCRYPTION_KEY.',
+      );
+    });
+
+    const response = getProviderConfigurations();
+
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toEqual({
+      error: {
+        code: 'CONFIGURATION_UNAVAILABLE',
+        message: 'Encrypted credential storage is unavailable. Check USER_CONFIG_ENCRYPTION_KEY.',
+        retryable: false,
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain(canary);
   });
 
   it('returns a secret-free summary after PUT and DELETE', async () => {

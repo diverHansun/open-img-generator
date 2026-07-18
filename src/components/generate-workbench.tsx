@@ -296,13 +296,13 @@ export function GenerateWorkbench() {
     });
   }, []);
 
-  const loadWorkspace = useCallback(async () => {
+  const loadWorkspace = useCallback(async (): Promise<boolean> => {
     setProviderState('loading');
     setHealthState('loading');
     setAssetState('loading');
 
     const auth = await resolveAuthGate(apiClient);
-    if (!mountedRef.current) return;
+    if (!mountedRef.current) return false;
     if (auth.state === 'unauthenticated') {
       setAuthRequired(true);
       setProviderState('error');
@@ -310,7 +310,7 @@ export function GenerateWorkbench() {
       setCurrentProjectId('');
       setCurrentSessionId('');
       setSessions([]);
-      return;
+      return false;
     }
     if (auth.state === 'unavailable') {
       setProviderState('error');
@@ -320,7 +320,7 @@ export function GenerateWorkbench() {
       setCurrentProjectId('');
       setCurrentSessionId('');
       setSessions([]);
-      return;
+      return false;
     }
     setAuthRequired(false);
 
@@ -331,7 +331,7 @@ export function GenerateWorkbench() {
       apiClient.listModelPreferences(),
     ]);
 
-    if (!mountedRef.current) return;
+    if (!mountedRef.current) return false;
 
     if ([providerResult, projectResult, preferenceResult].some(
       (result) => result.status === 'rejected' && result.reason?.status === 401,
@@ -342,7 +342,7 @@ export function GenerateWorkbench() {
       setCurrentProjectId('');
       setCurrentSessionId('');
       setSessions([]);
-      return;
+      return false;
     }
 
     if (providerResult.status === 'fulfilled') {
@@ -388,6 +388,7 @@ export function GenerateWorkbench() {
     } else {
       setAssetState('error');
     }
+    return true;
   }, [apiClient, applyProviders]);
 
   const handleAuthSubmit = async () => {
@@ -510,18 +511,17 @@ export function GenerateWorkbench() {
 
   useEffect(() => {
     mountedRef.current = true;
-    void loadWorkspace();
-
     const generationId = new URLSearchParams(window.location.search).get('generation');
     const selfLink = generationId
       ? `/api/generations/${encodeURIComponent(generationId)}`
       : window.localStorage.getItem(ACTIVE_GENERATION_KEY);
-    if (selfLink) {
+    void loadWorkspace().then((authenticated) => {
+      if (!authenticated || !mountedRef.current || !selfLink) return;
       const sequence = ++runSequenceRef.current;
       setIsGenerating(true);
       const resumedGenerationId = generationId ?? selfLink.split('/').at(-1);
       if (resumedGenerationId) beginPolling(resumedGenerationId, sequence);
-    }
+    });
 
     return () => {
       mountedRef.current = false;
@@ -688,6 +688,7 @@ export function GenerateWorkbench() {
   const cancelCurrentGeneration = async () => {
     const generationId = generation?.id ?? pending?.id;
     if (!generationId) return;
+    const sequence = runSequenceRef.current;
     pollingUnsubscribeRef.current?.();
     pollingUnsubscribeRef.current = null;
     try {
@@ -698,6 +699,12 @@ export function GenerateWorkbench() {
       setIsGenerating(false);
       window.localStorage.removeItem(ACTIVE_GENERATION_KEY);
     } catch (error) {
+      if (mountedRef.current && sequence === runSequenceRef.current) {
+        // The backend may still be processing the job when cancellation fails.
+        // Reattach the sole detail-poll subscriber instead of leaving the UI on a
+        // stale pending view.
+        beginPolling(generationId, sequence);
+      }
       setRunError(error instanceof Error ? error.message : '取消任务失败');
     }
   };
