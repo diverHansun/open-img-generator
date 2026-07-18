@@ -41,6 +41,14 @@ export type HealthView = {
   db: 'ok' | 'error';
 };
 
+export type ApiErrorBody = {
+  error: {
+    code: string;
+    message: string;
+    retryable: boolean;
+  };
+};
+
 export type GenerationTarget = {
   provider: ProviderId;
   model: string;
@@ -87,6 +95,7 @@ export type ImageView = {
 export type GenerationView = {
   id: string;
   sessionId: string;
+  projectId: string;
   prompt: string;
   status: GenerationStatus;
   createdAt: string;
@@ -102,6 +111,15 @@ export type Project = {
   updatedAt: string;
 };
 
+export type ProjectSummary = {
+  project: Project;
+  sessionCount: number;
+  generationCount: number;
+  imageCount: number;
+  lastActivityAt: string;
+  coverImageUrl: string | null;
+};
+
 export type Session = {
   id: string;
   projectId: string;
@@ -110,7 +128,10 @@ export type Session = {
   updatedAt: string;
 };
 
-export type GenerationSummary = Omit<GenerationView, 'jobs' | 'images'> & {
+export type GenerationSummary = Omit<
+  GenerationView,
+  'projectId' | 'jobs' | 'images'
+> & {
   jobs: Array<{
     id: string;
     provider: ProviderId;
@@ -124,6 +145,28 @@ export type GenerationSummary = Omit<GenerationView, 'jobs' | 'images'> & {
 export type Page<T> = {
   items: T[];
   nextCursor: string | null;
+};
+
+export type HistoryGroup = {
+  session: Session;
+  generationCount: number;
+  imageCount: number;
+  lastGenerationAt: string;
+  items: GenerationSummary[];
+  nextCursor: string | null;
+};
+
+export type HistoryPage = {
+  projectId: string;
+  page: number;
+  pageSize: number;
+  totalSessions: number;
+  totalPages: number;
+  totals: {
+    generations: number;
+    images: number;
+  };
+  groups: HistoryGroup[];
 };
 
 export type GalleryItem = {
@@ -148,4 +191,19 @@ export type ModelPreference = {
   model: string;
   enabled: boolean;
   updatedAt: string;
+};
+
+export type CredentialSource = 'env' | 'user-config' | 'none';
+
+export type ProviderConfiguration = {
+  providerId: ProviderId;
+  displayName: string;
+  credentialName: string;
+  configured: boolean;
+  source: CredentialSource;
+  models: ProviderCapabilities[];
+  enabledModelCount: number;
+  availableModelCount: number;
+  editable: boolean;
+  keyApplyUrl: string;
 };

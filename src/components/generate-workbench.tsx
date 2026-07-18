@@ -6,7 +6,10 @@ import {
   buildSubmitGenerationRequest,
   createApiClient,
   deriveGenerationControls,
-  GenerationPollingController,
+  ApiClientError,
+  GenerationPollRegistry,
+  loadWorkspaceSession,
+  resolveAuthGate,
   type GenerationStatus,
   type GenerationTarget,
   type GenerationSummary,
@@ -236,7 +239,8 @@ function EmptyRecentState() {
 
 export function GenerateWorkbench() {
   const apiClient = useMemo(() => createApiClient(), []);
-  const pollingRef = useRef<GenerationPollingController | null>(null);
+  const pollRegistry = useMemo(() => new GenerationPollRegistry(apiClient), [apiClient]);
+  const pollingUnsubscribeRef = useRef<(() => void) | null>(null);
   const runSequenceRef = useRef(0);
   const mountedRef = useRef(true);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
@@ -297,6 +301,29 @@ export function GenerateWorkbench() {
     setHealthState('loading');
     setAssetState('loading');
 
+    const auth = await resolveAuthGate(apiClient);
+    if (!mountedRef.current) return;
+    if (auth.state === 'unauthenticated') {
+      setAuthRequired(true);
+      setProviderState('error');
+      setAssetState('error');
+      setCurrentProjectId('');
+      setCurrentSessionId('');
+      setSessions([]);
+      return;
+    }
+    if (auth.state === 'unavailable') {
+      setProviderState('error');
+      setHealthState('error');
+      setAssetState('error');
+      setRunError(auth.error.message);
+      setCurrentProjectId('');
+      setCurrentSessionId('');
+      setSessions([]);
+      return;
+    }
+    setAuthRequired(false);
+
     const [providerResult, healthResult, projectResult, preferenceResult] = await Promise.allSettled([
       apiClient.listProviders(),
       apiClient.getHealth(),
@@ -312,6 +339,9 @@ export function GenerateWorkbench() {
       setAuthRequired(true);
       setProviderState('error');
       setAssetState('error');
+      setCurrentProjectId('');
+      setCurrentSessionId('');
+      setSessions([]);
       return;
     }
 
@@ -383,14 +413,14 @@ export function GenerateWorkbench() {
     }
     let cancelled = false;
     setAssetState('loading');
-    void apiClient.listSessions(currentProjectId).then((items) => {
+    void loadWorkspaceSession(apiClient, currentProjectId).then((result) => {
       if (cancelled || !mountedRef.current) return;
-      setSessions(items);
+      setSessions(result.sessions);
       const storageKey = `${ACTIVE_SESSION_PREFIX}${currentProjectId}`;
       const saved = window.localStorage.getItem(storageKey);
-      const selected = items.some((session) => session.id === saved)
+      const selected = result.sessions.some((session) => session.id === saved)
         ? saved!
-        : items[0]?.id ?? '';
+        : result.session.id;
       setCurrentSessionId(selected);
       if (selected) window.localStorage.setItem(storageKey, selected);
       setAssetState('ready');
@@ -441,33 +471,42 @@ export function GenerateWorkbench() {
     void loadFavoriteIds();
   }, [loadFavoriteIds]);
 
-  const beginPolling = useCallback(async (selfLink: string, sequence: number) => {
-    const controller = new GenerationPollingController(apiClient);
-    pollingRef.current = controller;
-
-    try {
-      const finalView = await controller.start(selfLink, {
-        onUpdate: (view) => {
-          if (!mountedRef.current || sequence !== runSequenceRef.current) return;
-          setGeneration(view);
-          if (TERMINAL_STATUSES.has(view.status)) {
-            window.localStorage.removeItem(ACTIVE_GENERATION_KEY);
-          }
-        },
-      });
-      if (finalView && TERMINAL_STATUSES.has(finalView.status)) {
-        window.localStorage.removeItem(ACTIVE_GENERATION_KEY);
-      }
-    } catch (error) {
-      if (mountedRef.current && sequence === runSequenceRef.current) {
+  const beginPolling = useCallback((generationId: string, sequence: number) => {
+    pollingUnsubscribeRef.current?.();
+    pollingUnsubscribeRef.current = pollRegistry.subscribe(generationId, {
+      onUpdate: (view) => {
+        if (!mountedRef.current || sequence !== runSequenceRef.current) return;
+        setGeneration(view);
+        setPending((current) => current ?? {
+          id: view.id,
+          status: view.status,
+          links: { self: `/api/generations/${encodeURIComponent(view.id)}` },
+          prompt: view.prompt,
+          targets: view.jobs.map((job) => ({ provider: job.provider, model: job.model })),
+          count: Math.max(
+            1,
+            ...view.jobs.map((job) =>
+              view.images.filter((image) => image.jobId === job.id).length,
+            ),
+          ),
+          aspectRatio: '1:1',
+        });
+        if (TERMINAL_STATUSES.has(view.status)) {
+          window.localStorage.removeItem(ACTIVE_GENERATION_KEY);
+          pollingUnsubscribeRef.current = null;
+          setIsGenerating(false);
+        }
+      },
+      onError: (error) => {
+        if (!mountedRef.current || sequence !== runSequenceRef.current) return;
         setRunError(error instanceof Error ? error.message : '任务状态更新失败');
-      }
-    } finally {
-      if (mountedRef.current && sequence === runSequenceRef.current) {
-        setIsGenerating(false);
-      }
-    }
-  }, [apiClient]);
+        if (!(error instanceof ApiClientError) || !error.retryable) {
+          pollingUnsubscribeRef.current = null;
+          setIsGenerating(false);
+        }
+      },
+    });
+  }, [pollRegistry]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -480,36 +519,14 @@ export function GenerateWorkbench() {
     if (selfLink) {
       const sequence = ++runSequenceRef.current;
       setIsGenerating(true);
-      void apiClient.getGeneration(selfLink).then((view) => {
-        if (!mountedRef.current || sequence !== runSequenceRef.current) return;
-        setGeneration(view);
-        setPending({
-          id: view.id,
-          status: view.status,
-          links: { self: selfLink },
-          prompt: view.prompt,
-          targets: view.jobs.map((job) => ({ provider: job.provider, model: job.model })),
-          count: Math.max(1, ...view.jobs.map((job) => view.images.filter((image) => image.jobId === job.id).length)),
-          aspectRatio: '1:1',
-        });
-        if (TERMINAL_STATUSES.has(view.status)) {
-          window.localStorage.removeItem(ACTIVE_GENERATION_KEY);
-          setIsGenerating(false);
-          return;
-        }
-        void beginPolling(selfLink, sequence);
-      }).catch((error) => {
-        window.localStorage.removeItem(ACTIVE_GENERATION_KEY);
-        if (mountedRef.current && sequence === runSequenceRef.current) {
-          setRunError(error instanceof Error ? error.message : '无法恢复任务');
-          setIsGenerating(false);
-        }
-      });
+      const resumedGenerationId = generationId ?? selfLink.split('/').at(-1);
+      if (resumedGenerationId) beginPolling(resumedGenerationId, sequence);
     }
 
     return () => {
       mountedRef.current = false;
-      pollingRef.current?.cancel();
+      pollingUnsubscribeRef.current?.();
+      pollingUnsubscribeRef.current = null;
     };
   }, [apiClient, beginPolling, loadWorkspace]);
 
@@ -621,7 +638,8 @@ export function GenerateWorkbench() {
 
     setRunError(null);
     const sequence = ++runSequenceRef.current;
-    pollingRef.current?.cancel();
+    pollingUnsubscribeRef.current?.();
+    pollingUnsubscribeRef.current = null;
     setIsGenerating(true);
 
     try {
@@ -658,7 +676,7 @@ export function GenerateWorkbench() {
       setPending(nextPending);
       window.localStorage.setItem(ACTIVE_GENERATION_KEY, response.links.self);
       window.history.replaceState(null, '', `/?generation=${encodeURIComponent(response.id)}`);
-      await beginPolling(response.links.self, sequence);
+      beginPolling(response.id, sequence);
     } catch (error) {
       if (mountedRef.current && sequence === runSequenceRef.current) {
         setRunError(error instanceof Error ? error.message : '任务提交失败');
@@ -670,7 +688,8 @@ export function GenerateWorkbench() {
   const cancelCurrentGeneration = async () => {
     const generationId = generation?.id ?? pending?.id;
     if (!generationId) return;
-    pollingRef.current?.cancel();
+    pollingUnsubscribeRef.current?.();
+    pollingUnsubscribeRef.current = null;
     try {
       const view = await apiClient.cancelGeneration(generationId);
       if (!mountedRef.current) return;

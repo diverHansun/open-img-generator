@@ -35,6 +35,31 @@ describe('web API client', () => {
     );
   });
 
+  it('uses code and retryability from structured API errors without breaking legacy errors', async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'CREDENTIAL_MANAGED_BY_ENV',
+            message: 'This credential is environment-owned.',
+            retryable: false,
+          },
+        }),
+        { status: 409, statusText: 'Conflict' },
+      ),
+    );
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.saveProviderCredential('fal', 'draft-secret')).rejects.toEqual(
+      new ApiClientError(
+        'This credential is environment-owned.',
+        409,
+        'CREDENTIAL_MANAGED_BY_ENV',
+        false,
+      ),
+    );
+  });
+
   it('encodes project-scoped sessions and read-only history queries', async () => {
     const fetcher = vi
       .fn()
@@ -71,6 +96,7 @@ describe('web API client', () => {
     const view = {
       id: 'gen-1',
       sessionId: 'session-1',
+      projectId: 'project-1',
       prompt: 'A cat',
       status: 'cancelled',
       createdAt: '2026-07-16T00:00:00.000Z',
@@ -90,5 +116,49 @@ describe('web API client', () => {
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
     });
+  });
+
+  it('encodes the new workspace, History, Gallery and Provider contract methods', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'session-1' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ groups: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [], nextCursor: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await client.listProjectSummaries();
+    await client.ensureInitialSession('project/one');
+    await client.getProjectHistory('project/one', {
+      page: 2,
+      sessionLimit: 5,
+      generationLimit: 10,
+    });
+    await client.listFavorites({
+      projectId: 'project one',
+      provider: 'qwen',
+      cursor: 'next cursor',
+      sort: 'newest',
+    });
+    await client.listProviderConfigurations();
+
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/project-summaries', undefined);
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      '/api/projects/project%2Fone/sessions/initial',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      3,
+      '/api/projects/project%2Fone/history?page=2&sessionLimit=5&generationLimit=10',
+      undefined,
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      4,
+      '/api/favorites?projectId=project+one&provider=qwen&cursor=next+cursor&sort=newest',
+      undefined,
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(5, '/api/provider-configurations', undefined);
   });
 });
