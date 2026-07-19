@@ -16,4 +16,4 @@ provider-config unit + route contract allowlist；临时 user-config integration
 
 ## Acceptance
 
-满足 E01–E04；七家固定目录可用；状态文案不夸大真实能力。
+满足 E01–E04、F11；七家固定 flat directory 可用；状态文案不夸大真实能力；无 Provider 卡、常驻 accent 装饰或 emoji 外链图标。

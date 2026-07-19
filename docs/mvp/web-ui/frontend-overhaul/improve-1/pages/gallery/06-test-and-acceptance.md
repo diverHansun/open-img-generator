@@ -10,6 +10,7 @@
 - unfavorite 成功、失败 rollback；图片 URL 404 fallback。
 - 无手动 Refresh；进入页面与标签页重新可见时自动重取并保留 filters。
 - 预览弹层单张 + 关闭，无左右切换；任何时刻只开一个弹层。
+- 图片墙保留多种原始比例与细 gutter；视觉参差但 DOM/键盘顺序可理解，图片加载不明显跳动。
 
 ## Strategy
 
@@ -17,4 +18,4 @@
 
 ## Acceptance
 
-满足 B06–B08、D05–D11；默认全局而非当前 Workspace；无 Search/Download/Favorites only 虚假控件。
+满足 B06–B08、D05–D11、F11；默认全局而非当前 Workspace；图片优先、无常驻标签/厚卡/永久渐变 overlay；无 Search/Download/Favorites only 虚假控件。

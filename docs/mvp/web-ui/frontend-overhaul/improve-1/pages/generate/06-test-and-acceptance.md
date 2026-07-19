@@ -16,6 +16,7 @@
 - Generate 不在后台轮询历史 generation；详情弹层打开时才允许其独立持有对应 poll。
 - 结果图点击打开 ImagePreviewDialog（单张 + 关闭）；不因结果图打开 Detail 弹层。
 - Session 可内联重命名（PATCH）；自动创建名为 `session-` + id 前 8 位。
+- 桌面侧栏 248px、主区自适应、inspector 320–360px；非桌面 inspector 正确收纳。
 
 ## Integration Points
 
@@ -23,4 +24,4 @@ typed client unit；generation POST contract；多 Provider fanout integration �
 
 ## Acceptance
 
-满足 C02–C07、C09–C11；无重复参数区/Workspace 卡/Recent 列表；键盘可完成 Session、model、Prompt、Generate 全流程。
+满足 C02–C07、C09–C11、F11；无重复参数区/Workspace 卡/Recent 列表；Generate 与 Cancel 不同时出现；键盘可完成 Session、model、Prompt、Generate 全流程。

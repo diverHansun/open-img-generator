@@ -1,6 +1,6 @@
 # 0. 讨论记录与已确认要点
 
-> 讨论定稿日期：2026-07-17；文档逐页收敛：2026-07-18<br>
+> 讨论定稿日期：2026-07-17；契约逐页收敛：2026-07-18；视觉排版收敛：2026-07-19<br>
 > 本文只冻结已经确认的结论；问题证据见 `01`，实施方案见 `02`。
 
 ## 0.1 背景与动机
@@ -40,7 +40,7 @@
 | 密钥存储 | 本批使用现有加密 user-config；未来可以迁移到数据库，但浏览器 DTO 不依赖存储介质 |
 | 列表刷新 | 不提供手动 Refresh 按钮；进入页面与标签页重新可见时自动重取；不做定时轮询 |
 | Settings | 职责未定义前从导航移除，不保留 disabled 占位 |
-| 视觉 | 延续暖白、陶土色、编辑工作室气质；减少卡片、圆角和阴影的滥用 |
+| 视觉 | 清爽、克制、高级的亮色工具界面；颜色角色必须清晰，不以陶土色为主色，不使用蓝紫渐变式“AI 配色”；减少卡片、圆角和阴影的滥用 |
 
 ## 0.3 已确认：Provider 与凭证映射
 
@@ -144,3 +144,30 @@ UI 文案使用 Workspace，代码和 HTTP DTO 继续使用 Project/`projectId`�
 4. **UI Implementation**：在视觉确认后才落地 App Router 页面、Tailwind/shadcn、CSS Modules 和完整 i18n。
 
 这不是减少功能范围：Home、Generate、History、Gallery、Models、Providers 与 Provider Detail 的产品行为仍以本文件和页面目录为准；仅把表现层从行为契约中拆出，以避免临时 UI 的返工。
+
+截至第三轮视觉讨论开始前，步骤 1–2 已在 `mvp` 分批落地；§0.11 完成步骤 3 的文档闸门，下一步可以进入 UI Implementation。
+
+## 0.11 第三轮视觉排版确认（2026-07-19）
+
+用户提供的五张 ASCII 排版图已逐项核对。以下结论替代此前“暖白 + 陶土色”为固定视觉方向的描述：
+
+| 议题 | 已确认结论 |
+|---|---|
+| 参考方法 | 借鉴 Claude 的人文温度、Cursor 的工具密度、Linear 的扁平目录纪律、Replicate 的图片优先与 Runway 的弱化界面 chrome；不复制品牌样式 |
+| 色彩 | 不把陶土色设为主色；禁用大面积蓝紫渐变、霓虹发光和多色“AI 感”装饰；颜色应少而明确，accent、success、warning、danger 各司其职 |
+| 色值冻结 | 本轮不冻结最终 hex/OKLCH；文档冻结语义 token、对比度、用色数量和禁用项，具体色相在首个视觉实现提交中用真实页面校准 |
+| 表面 | 页面以 canvas、surface 与 1px hairline 建层级；常规页面不依赖阴影；Dialog/Popover 最多一级轻阴影 |
+| 主动作 | 一屏最多一个实心 accent 主动作；生成中原 Generate 原位变为 danger-outline Cancel，不并排新增第二主按钮 |
+| 圆角 | 采用圆角矩形而非 pill：chip 约 6px，按钮/输入约 8px，卡片/弹层约 12px，图片预览/Workspace 卡约 16px |
+| 字体密度 | sans-serif 为主，ID/credential/session 使用等宽字体；Home 独享 display 标题；Workspace 页面标题更克制；控件高 40px、目录行 48–52px |
+| 图标 | 不使用 emoji 作为 UI；只使用少量、统一线宽的语义图标，纯图标按钮必须有 accessible label |
+| Home | 56–64px 窄品牌顶栏；中央单一选择/创建 surface；Recent 3–4 列；空态不渲染空 Recent 区 |
+| Workspace 壳 | 桌面 248px 完整侧栏；只有 Generate 可出现 320–360px inspector；其余页面使用完整主区 |
+| Generate | Session 紧凑横条；Prompt 单一 surface；结果内嵌；模型与参数在 inspector；不重复参数区 |
+| History | 扁平、可折叠 Session 组；分隔线 + 行，不套卡；5 Session/页、组内 10 条 + 加载更多；整行进入 Detail |
+| Gallery | 纯图片、细 gutter、参差错落的 masonry-like 排布；无常驻标签；hover/focus 只显示少量信息，预览弹层承载完整元数据 |
+| Models / Providers | Linear 式扁平目录；Models 主行只保留名称/ID、必要能力摘要和 Switch；Providers 只显示真实配置来源与数量，不显示虚假健康状态 |
+| Provider Detail | env 来源只读且无输入；user-config 使用 password + eye + Save；Save 是页面唯一实心 accent 动作 |
+| CSS 分层 | `globals.css` 只留 tokens/reset/Tailwind 入口；shadcn primitives 放 `components/ui`；壳、页面与弹层分别用 CSS Modules，按页面迁移后删除旧全局规则 |
+
+这些约束已经足以开始 UI 实施，但不是像素稿。实现模型可以在不违反信息层级、语义色、密度和禁用项的前提下调整具体 hue、留白、字重与图片节奏。

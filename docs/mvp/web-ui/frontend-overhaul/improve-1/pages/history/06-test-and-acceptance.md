@@ -18,4 +18,4 @@
 
 ## Acceptance
 
-满足 B02–B05、D01–D04、D10–D11；严格 5 Session/页、10 Generation/批；不出现空 Session、duration 或伪进度。
+满足 B02–B05、D01–D04、D10–D11、F11；严格 5 Session/页、10 Generation/批；使用 flat rows + hairline，不出现 Session 卡、空 Session、duration 或伪进度。

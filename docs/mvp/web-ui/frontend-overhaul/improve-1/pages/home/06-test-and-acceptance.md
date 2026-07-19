@@ -11,6 +11,7 @@
 - 创建成功仅创建 Project，并进入正确 Generate URL；Home 不抢先创建 Session。
 - 空 title 不发请求；失败保留输入；重复点击只发一次。
 - cover 404 不破坏卡片 link。
+- 0 Workspace 时不渲染空 Recent 区；多 Workspace 时桌面 3–4 列、小屏逐级收为 2/1 列。
 
 ## Integration Points
 
@@ -18,4 +19,4 @@
 
 ## Acceptance
 
-满足根级 A01、B01、C01；1440/390px 可用；键盘可选择最近 Workspace 和提交创建表单。
+满足根级 A01、B01、C01、F11；1440/390px 可用；键盘可选择最近 Workspace 和提交创建表单；只有 Create 是实心 accent，页面无渐变、emoji 或第二主动作。

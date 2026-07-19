@@ -20,8 +20,8 @@ UI primitives 基于 **shadcn/ui**（Tailwind CSS + Radix UI）源码复制落�
 
 | 组件 | 核心契约 |
 |---|---|
-| `Button` | `primary/secondary/ghost/danger`，loading 不改变宽度，原生 button/link 语义 |
-| `IconButton` | 必须有 accessible label；tooltip 不能替代 label |
+| `Button` | `primary/secondary/ghost/danger`，默认 40px 高、8px 左右圆角矩形，不做全 pill；loading 不改变宽度，原生 button/link 语义 |
+| `IconButton` | 使用统一线性图标集，必须有 accessible label；tooltip 不能替代 label；禁止 emoji 代替图标 |
 | `Input` / `TextField` | label、description、error 关联；不隐藏浏览器 autocomplete 语义 |
 | `PasswordField` | 基于 Input 组合眼睛按钮；只控制当前 draft 显隐；不接收 saved value/masked secret |
 | `Select` | 原生 select 优先；复杂场景用 shadcn Select（Radix） |
@@ -35,6 +35,8 @@ UI primitives 基于 **shadcn/ui**（Tailwind CSS + Radix UI）源码复制落�
 | `Pagination` | 页码、Previous/Next、当前页 `aria-current`（自定义组合） |
 | `LoadMoreButton` | loading/end/error 状态；不兼作无限滚动 |
 | `Thumbnail` | 固定占位、alt 规则、失败 fallback |
+
+同一可视区域最多一个 `primary` 实心按钮。`danger` 默认使用 outline；只有明确不可逆且需最高警示的动作才允许实心 danger。图标首选 `lucide-react`，页面不得自行混入 emoji、不同线宽 SVG 或品牌装饰图标。
 
 ## 4. 共享弹层与领域展示组件
 

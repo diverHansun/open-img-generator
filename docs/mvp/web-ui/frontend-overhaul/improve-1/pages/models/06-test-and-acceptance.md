@@ -16,4 +16,4 @@ join/filter pure unit；model-preference contract；浏览器键盘/移动 stack
 
 ## Acceptance
 
-满足 E12；页面有真实 Switch，无静态 Enabled pill；无卡片堆叠和虚假能力。
+满足 E12、F11；页面有真实 Switch；主行字段保持最小集，无静态 Enabled pill、卡片堆叠、价格/健康等无关状态或虚假能力。

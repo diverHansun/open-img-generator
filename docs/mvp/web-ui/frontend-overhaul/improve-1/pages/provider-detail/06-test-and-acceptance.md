@@ -17,4 +17,4 @@ provider-config unit；route contract allowlist；临时目录/真实加密 inte
 
 ## Acceptance
 
-满足 E05–E11、F03；未来存储替换不会要求 UI DTO 暴露文件或数据库字段。
+满足 E05–E11、F03、F11；Save 是 user-config 表单唯一实心 accent；env 来源无输入；未来存储替换不会要求 UI DTO 暴露文件或数据库字段。

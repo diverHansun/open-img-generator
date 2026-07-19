@@ -50,9 +50,15 @@
 ## 7. 图片与 Gallery
 
 - 图片加载保留尺寸/比例，避免布局跳动。
-- hover overlay 同样可由 focus/tap 打开；Gallery 图片无常驻信息标签，hover/focus 只浮现 model、收藏时间与 ♡；完整来源信息由预览弹层信息卡承载。
+- hover overlay 同样可由 focus/tap 打开；Gallery 图片无常驻信息标签，hover/focus 只浮现 model、收藏时间与统一 Favorite 图标；完整来源信息由预览弹层信息卡承载。
 - CSS columns 若导致 DOM/视觉阅读顺序不一致，优先规则 grid；审美不能优先于可达顺序。
 - 图片预览弹层需要 alt、关闭按钮/ESC/遮罩点击的键盘语义；本批不做上一/下一张切换与复杂 lightbox。
+
+## 7.1 图标与非文字内容
+
+- UI 不使用 emoji 充当导航、状态、收藏、显示密码或主动作图标。
+- 采用统一线性图标集并保持相近 stroke/尺寸；装饰图标使用空替代文本，交互图标必须有可访问名称。
+- 状态图标不能替代文字；Provider mark 无官方本地资产时使用一致的中性几何占位，不从远端临时抓 logo。
 
 ## 8. 可恢复错误
 

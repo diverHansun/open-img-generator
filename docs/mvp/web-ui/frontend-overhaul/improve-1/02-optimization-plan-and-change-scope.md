@@ -64,7 +64,7 @@ App Router 和专用读模型均为可逐页迁移的可逆选择。Provider 配
 |---|---|---|---|
 | 1 | Backend Contract | service、query、route、DTO、contract/integration test | 路由页面、最终样式 |
 | 2 | Frontend API Wiring | `web-client`、请求状态/hook、auth gate、poll registry、client unit | Tailwind/shadcn、页面布局、视觉 CSS |
-| 3 | Visual Decision Gate | 使用真实数据复核页面文档、冻结视觉稿 | 代码式 UI 实现 |
+| 3 | Visual Decision Gate | 使用真实数据复核页面文档，冻结层级、密度、表面和禁用项；具体 accent hue 不做像素级冻结 | 代码式 UI 实现 |
 | 4 | UI Implementation | 路由壳、页面组件、i18n、Tailwind/shadcn、CSS Modules、人工视觉 QA | — |
 
 ## 2.3 目标目录与职责
@@ -317,6 +317,8 @@ Models 通过 Provider configuration/capabilities + Model Preferences 组成全�
 
 ## 2.7 分阶段实施
 
+状态说明：Phase 1（Backend Contract）与 Phase 2（Frontend API Wiring）已在 `mvp` 完成；Visual Decision Gate 已由第三轮 ASCII 排版讨论通过。以下 Phase 3–6 是下一阶段 UI 实施顺序。
+
 ### Phase 1：Backend Contract 与数据读模型
 
 目标：在不改页面结构或视觉 CSS 的前提下，补齐行为所需的 server-side query/service/route/DTO，并用 contract/integration 测试封住只读、并发、安全和错误语义。
@@ -344,9 +346,9 @@ DoD：新增接口可被 typed client 消费；没有 UI 直接导入 server mod
 
 DoD：新 API 有完整 typed client；401、409、400、404、503 能以 code 驱动恢复状态；同一 Generation 至多一个 detail poll 调度器；关闭最后订阅者会停止浏览器轮询。对应 C02、C06–C07，以及 C08–C09 的 API/轮询基础；Detail 弹层、可见 Cancel 入口与其页面验收留待 Phase 3。
 
-### Visual Decision Gate（不写 UI 代码）
+### Visual Decision Gate（文档已完成，不写 UI 代码）
 
-使用 Phase 1–2 的真实数据与错误状态，逐页确认最终信息密度、布局、移动端收纳、空/错状态与中英文扩张。确认后才初始化 Tailwind/shadcn、i18n 及页面 CSS；若页面文档需要修改，在此闸门完成而不是在视觉代码中边写边决定。
+使用 Phase 1–2 的真实数据与错误状态，逐页确认信息密度、布局、移动端收纳、空/错状态与中英文扩张。本闸门现已通过第三轮排版讨论完成：结构、尺寸区间、按钮/表面规则与视觉禁区已写入 `03`、`shared/01` 和各页面 `01`。具体 accent hue、灰阶冷暖与细节节奏刻意留给首个视觉实现提交校准，不构成实施阻塞。
 
 ### Phase 3：Home、Generate 与 Detail 弹层纵切（视觉确认后）
 
@@ -362,6 +364,14 @@ DoD：新 API 有完整 typed client；401、409、400、404、503 能以 code �
 - Session 自动创建与改名（复用已有 `PATCH /api/sessions/:id`）。
 
 DoD：选择/创建 Workspace → 自动获得首个 Session → 多模型提交 → 结果区内嵌进度/变身 Cancel → Detail 弹层轮询/取消/收藏 → 结果图单图预览完整可走；仅结果区与弹层订阅 detail poll。对应 A01–A07、C01–C11。
+
+视觉基础按以下顺序落地，避免新旧 CSS 长期并存：
+
+1. 在 `globals.css` 建立语义 tokens、reset 与 Tailwind 入口，先不复制旧页面规则。
+2. 以 shadcn 默认 primitives 为可访问性基线，映射本项目 tokens；Button/Input 使用圆角矩形，不做全 pill 化。
+3. 先完成 HomeShell、WorkspaceShell 和 Home/Generate 页面 CSS Modules，验证 248px 侧栏、320–360px inspector 与中英文排版。
+4. 再按 History/Gallery → Models/Providers/Provider Detail 的纵切顺序迁移页面布局。
+5. 每迁移一页即删除该页旧全局选择器；最终 `globals.css` 不保留页面私有 grid、卡片阴影体系、重复参数区或旧三栏壳规则。
 
 ### Phase 4：History 与 Gallery 纵切（视觉确认后）
 
