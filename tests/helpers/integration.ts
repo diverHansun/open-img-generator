@@ -2,98 +2,40 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { initializeTestSchema } from './db-schema';
 
 export function createIntegrationDb() {
-  const tempFile = path.join(os.tmpdir(), `ai-image-test-${Date.now()}.db`);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-image-db-int-'));
+  const tempFile = path.join(tempDir, 'app.sqlite');
+  const originalDatabaseUrl = process.env.DATABASE_URL;
   process.env.DATABASE_URL = `file:${tempFile}`;
 
   const sqlite = new Database(tempFile);
   sqlite.pragma('foreign_keys = ON');
-  sqlite.exec(`
-    CREATE TABLE projects (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE sessions (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id),
-      title TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE generations (
-      id TEXT PRIMARY KEY,
-      session_id TEXT NOT NULL REFERENCES sessions(id),
-      prompt TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE generation_jobs (
-      id TEXT PRIMARY KEY,
-      generation_id TEXT NOT NULL REFERENCES generations(id),
-      provider TEXT NOT NULL,
-      model TEXT NOT NULL,
-      status TEXT NOT NULL,
-      provider_handle TEXT,
-      error TEXT,
-      poll_lease_until TEXT,
-      next_poll_at TEXT,
-      cancel_requested_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-    CREATE TABLE images (
-      id TEXT PRIMARY KEY,
-      generation_job_id TEXT NOT NULL REFERENCES generation_jobs(id),
-      "index" INTEGER NOT NULL,
-      storage_path TEXT NOT NULL,
-      content_type TEXT NOT NULL,
-      width INTEGER,
-      height INTEGER,
-      size_bytes INTEGER,
-      created_at TEXT NOT NULL
-    );
-    CREATE UNIQUE INDEX unique_job_index ON images(generation_job_id, "index");
-    CREATE TABLE favorites (
-      id TEXT PRIMARY KEY,
-      image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
-      created_at TEXT NOT NULL
-    );
-    CREATE UNIQUE INDEX favorites_image_unique ON favorites(image_id);
-    CREATE TABLE model_preferences (
-      provider TEXT NOT NULL,
-      model TEXT NOT NULL,
-      enabled INTEGER NOT NULL,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY(provider, model)
-    );
-    INSERT INTO projects VALUES ('default-project', 'Test Project', 'now', 'now');
-    INSERT INTO sessions VALUES ('default-session', 'default-project', 'Test Session', 'now', 'now');
-  `);
+  initializeTestSchema(sqlite);
   sqlite.close();
 
   return {
     tempFile,
+    tempDir,
     cleanup: () => {
-      try {
-        fs.unlinkSync(tempFile);
-      } catch {
-        // ignore
-      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = originalDatabaseUrl;
     },
   };
 }
 
 export function createStorageDir() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-int-'));
+  const originalStorageDir = process.env.LOCAL_STORAGE_DIR;
   process.env.LOCAL_STORAGE_DIR = tempDir;
   return {
     tempDir,
     cleanup: () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
+      if (originalStorageDir === undefined) delete process.env.LOCAL_STORAGE_DIR;
+      else process.env.LOCAL_STORAGE_DIR = originalStorageDir;
     },
   };
 }

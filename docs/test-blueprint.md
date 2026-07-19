@@ -1,299 +1,212 @@
 # 项目测试规则
 
 > 适用范围：AI Image Generator MVP
-> 关联文档：docs/mvp/review.md、docs/mvp/api/constraints.md、docs/mvp/api/quickstart.md
-> 最后确认：2026-07-12
+> 最后确认：2026-07-18
+> 目标：让测试准确表达风险边界；快速测试保持快，跨组件测试保持真实，外部厂商与浏览器自动化不抢占 MVP 开发节奏。
 
 ---
 
-## 一、测试分类
+## 1. 测试分层
 
-采用 4 类测试，文件后缀统一为：
+项目使用五类测试。每个测试文件只属于其中一类，并使用对应后缀。
 
-| 类型 | 后缀 | 回答的质量问题 |
-|------|------|----------------|
-| unit | `.unit.test.ts` | 单个函数/类/模块的局部逻辑正确吗？ |
-| contract | `.contract.test.ts` | 消费者可见的接口/DTO/输出格式稳定吗？ |
-| integration | `.integration.test.ts` | 多个真实组件协作时行为正确吗？ |
-| smoke | `.smoke.test.ts` | 环境、构建、启动、迁移可用吗？ |
+| 类型 | 后缀 | 回答的问题 | 当前状态 |
+| --- | --- | --- | --- |
+| Unit | `.unit.test.ts` | 单个模块的局部逻辑是否正确？ | 已实施 |
+| Contract | `.contract.test.ts` | HTTP API 的输入、输出和错误形态是否稳定？ | 已实施 |
+| Integration | `.integration.test.ts` | 路由、任务引擎、数据库、存储协作时是否正确？ | 已实施，逐步迁移到 MSW |
+| Backend E2E | `.e2e.test.ts` | 真实 Next HTTP 服务的关键路径是否可用？ | 后续按需实施 |
+| Smoke | `.smoke.test.ts` | 构建、迁移、启动等部署前提是否可用？ | 已实施 |
 
-### 1.1 unit
+浏览器 E2E 不属于当前自动化范围。重要界面通过人工验收；当交互稳定且收益足够时，再单独评估是否引入浏览器脚本。
 
-- 不访问真实网络、外部 API、外部进程
-- 直接依赖使用 mock、stub 或 typed fake
-- 执行速度应很快（通常 < 10ms / 用例）
-- 失败时能精确定位到具体逻辑错误
+### 1.1 Unit
 
-### 1.2 contract
+- 测试与源码同目录（co-located）。
+- 不访问真实网络、外部 API、外部进程或真实生产目录。
+- 允许使用 typed fake、stub，或**内存 SQLite**验证单个 query/repository 的局部逻辑；这种情况仍属于 component unit，而不是 integration。
+- Provider adapter 的请求拼装、响应解析可使用 typed `fetch` stub，避免将每一个纯适配器测试升级为网络集成测试。
+- 应聚焦可定位的行为，整体目标小于 30 秒。
 
-- 验证 API 路由的输入/输出结构、HTTP 状态码、错误形态
-- 接口之下的业务层用 fake job-engine / fake providers 替换
-- 保留 route handler 本身真实执行
+### 1.2 Contract
 
-### 1.3 integration
+- 直接执行 route handler，验证状态码、JSON DTO、校验错误与消费者可见的语义。
+- 可以用 fake job engine/provider 替换路由下方不属于本次契约的依赖；route handler 和请求构造保持真实。
+- 重点覆盖生成提交、Generation detail 轮询边界、只读 list、Projects/Sessions、Favorites、Models、Providers、Health 等公开 API。
 
-- 至少两个真实组件协作
-- 使用真实 Drizzle + 临时 SQLite 文件、真实 storage 临时目录
-- 只 mock 不可控外部依赖：fal.ai HTTP API、ZenMux HTTP API
-- 文件名或目录应清楚说明集成了哪些模块
+### 1.3 Integration
 
-### 1.4 smoke
+- 至少两个真实组件协作，典型组合为 route + job engine + Drizzle/SQLite + local storage。
+- 数据库使用 `createIntegrationDb()` 创建的临时 SQLite 文件；存储使用 `createStorageDir()` 创建的临时目录。
+- 一切厂商 HTTP（fal、ZenMux、DashScope、Kling 等）使用 **MSW** 拦截。新的或被修改的 integration 测试不得再直接覆盖 `global.fetch`。
+- 不调用真实 vendor API、不读取用户的真实 key、不依赖网络可用性。
+- 现有直接 `fetch` mock 的 integration 测试不做纯整理式大迁移；改到该文件时一并迁移为 MSW。
 
-- 验证构建、启动、健康检查、数据库迁移
-- 不深入验证业务逻辑
+### 1.4 Backend E2E（后续）
+
+- 通过真实的 Next 服务 HTTP 入口访问应用，不直接 import route handler。
+- 厂商侧使用独立的本地 fake provider HTTP server，验证应用的 HTTP client、超时、重试/错误映射和完整运行时配置。
+- 不访问真实 vendor API；不会因为缺少 `.env` key 而跳过核心 E2E。
+- 当前只保留目录和 `test:e2e:backend` 命令约定，尚不添加空洞或“永远绿”的用例。
+
+### 1.5 Smoke
+
+- 验证 build、迁移、database push、健康检查等可部署前提。
+- 不承担状态机和业务分支的深度验证。
 
 ---
 
-## 二、目录与命名规范
+## 2. 目录与命名
 
-### 2.1 混合策略
-
-- **单模块局部测试**：与被测源码同目录（co-located）
-- **跨模块集成测试**：`tests/integration/<domain>/`
-- **契约测试**：`tests/contract/<domain>/`
-- **冒烟测试**：`tests/smoke/`
-
-### 2.2 目录结构示例
-
-```
-src/lib/
-  db/
-    schema.ts
-    queries/
-      sessions.ts
-      sessions.unit.test.ts
-  prompt/
-    process.ts
-    process.unit.test.ts
-  providers/
-    adapters/
-      fal.ts
-      fal.unit.test.ts
-    registry.ts
-    registry.unit.test.ts
-  storage/
-    index.ts
-    storage.unit.test.ts
-    storage.integration.test.ts
-  job-engine/
-    validator.ts
-    validator.unit.test.ts
-    lifecycle.ts
-    lifecycle.unit.test.ts
-    orchestrator.ts
-    orchestrator.integration.test.ts
+```text
+src/
+  ...
+  feature.unit.test.ts                 # 单模块测试，紧邻源码
 
 tests/
-  contract/
-    generations-api.contract.test.ts
-  integration/
-    submit-generation.integration.test.ts
-    get-generation-poll.integration.test.ts
-    session-generations.integration.test.ts
-  smoke/
-    health.smoke.test.ts
-    build.smoke.test.ts
+  contract/                            # HTTP contract
+  integration/                         # 逐步按 domain 分目录
+  e2e/
+    backend/                           # 后续真实 Next HTTP E2E
+  smoke/                               # build / migration / health
+  helpers/                             # 临时 DB、storage、schema 等测试基础设施
+  msw/                                 # MSW server、lifecycle、handlers
+  factories.ts                         # 跨测试领域对象工厂
 ```
 
-### 2.3 文件命名
+命名格式为 `<subject>.<type>.test.ts`，例如：
 
-```
-<subject>.<type>.test.ts
-```
-
-示例：
-- `process.unit.test.ts`
-- `fal.unit.test.ts`
+- `lifecycle.unit.test.ts`
 - `generations-api.contract.test.ts`
-- `submit-generation.integration.test.ts`
+- `sync-generation.integration.test.ts`
+- `generation-flow.e2e.test.ts`
+- `build.smoke.test.ts`
 
-### 2.4 测试用例命名
+不为目录整洁进行批量移动。模块被实际改动时，再将与其相关的 integration/contract 测试迁到最贴近的 domain 目录。
 
-描述**行为**而非实现细节：
+测试名称描述用户可见或领域行为，而不是私有函数名，例如：
 
-- ✅ "returns completed when sync provider submits and stores images"
-- ✅ "skips poll when another request is already advancing via optimistic lock"
-- ❌ `testHandleRequest` / `test1` / `case3`
-
-### 2.5 维护规则
-
-- 模块移动时同步移动 co-located 测试
-- 集中测试如果实际只验证单模块纯逻辑，应下沉到源码旁
-- co-located 测试如果开始串联多个模块，应上移到 `tests/`
+- `returns completed when a sync provider stores its image`
+- `does not advance polling from a session generation list`
+- `returns conflict when a second request owns the poll lease`
 
 ---
 
-## 三、测试编写规范
+## 3. 依赖替换与数据隔离
 
-### 3.1 Mock / Fake 边界
+| 测试类型 | 替换对象 | 必须真实执行的对象 |
+| --- | --- | --- |
+| Unit | 直接依赖；adapter 可 stub fetch | 被测模块 |
+| Contract | 路由下游的非契约依赖可 fake | route handler、request/response DTO |
+| Integration | 所有厂商 HTTP（MSW） | DB、storage、被组合的领域组件 |
+| Backend E2E | vendor 改为 local fake HTTP server | Next server、HTTP client、DB/storage 配置 |
+| Smoke | 尽量不替换 | build/migration/startup 前提 |
 
-| 测试类型 | 替换范围 | 真实部分 |
-|----------|----------|----------|
-| unit | 被测对象的直接依赖 | 被测函数/类/模块自身 |
-| contract | 接口之下的业务层 | route handler + 请求构造 |
-| integration | fal/zenmux HTTP（MSW fake） | db、storage、被集成的真实组件 |
-| smoke | 尽量不替换 | 真实启动/构建环境 |
+### 3.1 数据库与文件系统
 
-### 3.2 外部 HTTP 替换
+- Unit 的内存 SQLite 仅用于单模块查询/仓储边界；不能借此跨越路由、任务引擎和 storage。
+- Integration 及后续 Backend E2E 使用临时 SQLite 文件。每个测试文件创建自己的文件和初始 Project/Session 数据。
+- `DATABASE_URL` 与 `LOCAL_STORAGE_DIR` 必须在 cleanup 时还原；临时文件/目录必须删除。
+- 测试 schema 只维护在 `tests/helpers/db-schema.ts`，避免 unit 与 integration 的 raw SQL 逐步漂移。
 
-- 统一使用 **MSW** 拦截 fal.ai / ZenMux HTTP 请求
-- 禁止 unit/integration 测试调用真实厂商 API
-- 需要真实外部服务的测试必须通过环境变量显式启用，并在无凭据时自动 skip
+### 3.2 HTTP 与凭据
 
-### 3.3 数据库
+- Integration 测试调用 `registerMswLifecycle()`，并通过 `server.use(...)` 声明每个测试所需的 vendor 响应。
+- 未声明的外部请求应失败，避免测试在未察觉的情况下访问网络。
+- CI 和默认本地测试均不使用真实厂商 key。未来如需 live check，必须是显式 opt-in、无凭据自动 skip 的独立命令，且不计入核心质量门禁。
 
-- unit 测试使用 typed fake 或内存 SQLite
-- integration 测试使用 **临时 SQLite 文件**（真实 better-sqlite3 + Drizzle），每个测试独立文件或独立 schema
+### 3.3 Factory
 
-### 3.4 文件系统
-
-- integration 中 storage 使用 `fs.mkdtempSync` 创建的临时目录
-- 测试结束后清理临时目录
-
-### 3.5 工厂函数
-
-统一放在 `tests/factories.ts`，为以下领域对象提供工厂：
+跨领域默认数据集中维护在 `tests/factories.ts`。当前包括：
 
 ```ts
-makeSubmitGenerationParams(overrides = {})
-makeNormalizedRequest(overrides = {})
-makeProviderImageRef(overrides = {})
-makeJobHandle(overrides = {})
-makeProviderCapabilities(overrides = {})
+makeNormalizedRequest(overrides)
+makeProviderImageRef(overrides)
+makeJobHandle(overrides)
+makeProviderCapabilities(overrides)
 ```
 
-规则：
-- 默认值接近真实结构，但值可简化
-- 每个测试自包含，不依赖其他测试运行后的状态
-- 不使用真实生产数据
-
-### 3.6 断言规范
-
-- 使用 Vitest 内置 `expect`
-- 断言**输出和副作用**，不验证内部私有方法调用
-- 优先具体断言，避免 `toBeTruthy()` 等模糊断言
-- 错误测试断言 `{ code, message, retryable }` 结构
-
-### 3.7 异步与轮询
-
-- 轮询测试使用受控 fake timer 或固定小 sleep
-- 覆盖 `pending → running → completed` 与 `pending → failed` 状态迁移
-- 覆盖并发 GET 的乐观锁行为
-
-### 3.8 TDD 要求
-
-- **核心逻辑强制 TDD**：validator、lifecycle.storeImages、状态机聚合、provider adapter 请求/响应解析
-- 纯路由转发/API 层可后补 contract 测试
-- 文档、类型调整不要求 TDD
-
-### 3.9 禁止事项
-
-- unit 测试调用真实外部服务
-- 为方便测试给生产类增加 test-only 方法
-- mock 被测对象自己的方法
-- 使用无类型约束的万能 mock 掩盖接口错误
-- 跨模块测试堆在一个文件里不按 domain 拆分
-- 只断言"没抛错"却不验证实际状态或输出
+需要新增重复构造数据时，优先扩展 factory；一次性、贴近单个测试语义的数据可留在测试文件。工厂默认值应接近真实 DTO，但不得使用生产数据。
 
 ---
 
-## 四、CI 执行策略
+## 4. 编写规则
 
-### 4.1 package.json 脚本
+### 4.1 断言
+
+- 使用 Vitest `expect`，断言输出、数据库状态、存储副作用和可见错误结构。
+- 不以“没有抛错”、`toBeTruthy()` 或被测对象内部方法是否被调用作为主要断言。
+- 错误路径至少断言 `code`、`message`、`retryable` 中对消费者承诺的字段。
+
+### 4.2 状态与并发
+
+对 Generation/job 的测试覆盖真实状态边界：
+
+- `pending → running → completed`；
+- `pending/running → failed`；
+- cancel request 与最终状态；
+- `GET /api/generations/:id` 是唯一允许推进 poll 的入口；Session/History 列表只读；
+- 并发 GET 的 optimistic poll lease 只有一个赢家。
+
+### 4.3 TDD 强度
+
+以下变更要求先写失败测试，或与实现同一小步提交测试：
+
+- job 状态机、fanout、poll lease、worker/cancel；
+- API contract、权限/用户配置加密、输入校验；
+- provider adapter 的请求转换、状态解析、失败映射；
+- 图片存储、删除、生命周期清理。
+
+纯 route forwarding、样式、文档、无业务语义的类型重命名无需机械执行 TDD，但改动后仍要运行相关测试。
+
+### 4.4 禁止事项
+
+- 默认测试调用真实厂商服务或泄漏 API key；
+- 为方便测试给生产代码加入 test-only API；
+- mock 被测对象自身；
+- 用无类型万能 mock 掩盖 provider contract 错误；
+- 共享可变 DB/storage 状态而不清理；
+- 把跨模块测试伪装成 unit，或把纯逻辑堆进 integration。
+
+---
+
+## 5. 命令与质量门禁
 
 ```json
 {
-  "scripts": {
-    "test": "vitest run",
-    "test:unit": "vitest run **/*.unit.test.ts",
-    "test:contract": "vitest run **/*.contract.test.ts",
-    "test:integration": "vitest run **/*.integration.test.ts",
-    "test:smoke": "vitest run **/*.smoke.test.ts",
-    "preflight": "npm run typecheck && npm run test:unit && npm run test:contract"
-  }
+  "test": "vitest run",
+  "test:unit": "vitest run .unit.test.ts",
+  "test:contract": "vitest run .contract.test.ts",
+  "test:integration": "vitest run .integration.test.ts",
+  "test:e2e:backend": "vitest run .e2e.test.ts --passWithNoTests",
+  "test:smoke": "vitest run .smoke.test.ts",
+  "test:fast": "npm run test:unit && npm run test:contract",
+  "preflight": "npm run typecheck && npm run test:fast",
+  "test:verify": "npm run typecheck && npm run test:fast && npm run test:integration",
+  "test:release": "npm run test:verify && npm run test:e2e:backend && npm run test:smoke"
 }
 ```
 
-### 4.2 阶段递进
+CI 平台尚未配置；先将以下命令作为团队规则：
 
-| 阶段 | 执行范围 | 失败后果 |
-|------|----------|----------|
-| 本地开发 | `npm run test:unit` 或相关测试 | 修复后继续 |
-| 提交前 | `npm run preflight`（typecheck + unit + contract） | 阻断提交 |
-| PR 检查 | preflight + integration | 阻断合入 |
-| 合并前 | unit + contract + integration + build | 阻断合并 |
-| 发布前 | 全部 + smoke | 阻断发布 |
+| 时机 | 命令 | 预期 |
+| --- | --- | --- |
+| 本地改动 | 相关测试文件或 `test:unit` | 修改前后快速反馈 |
+| 提交前 | `npm run preflight` | typecheck + unit + contract 必须通过 |
+| PR | `npm run test:verify` | 加上 integration，阻断合入 |
+| 合并到主线 | `npm run test:verify && npm run build` | 验证可构建 |
+| 发布前 | `npm run test:release` | 加 smoke 与未来 backend E2E |
 
-### 4.3 速度预算
-
-| 类型 | 单文件目标 | 全 suite 目标 |
-|------|------------|---------------|
-| unit | 秒级 | < 30s |
-| contract | 秒级 | < 60s |
-| integration | 十秒级 | < 5min |
-| smoke | 视环境 | 视环境 |
-
-### 4.4 失败处理原则
-
-- unit/contract 失败 → 必须修复
-- integration 失败 → 优先判断是分类错误、mock 边界错误还是实现问题
-- smoke 失败 → 排查环境或基础设施
-- flaky 测试 → 隔离到 quarantine，一周内修复或删除
+目标时长：unit < 30s、contract < 60s、integration < 3min、backend E2E（启用后）< 5min、smoke < 5min。发现 flaky 测试后先隔离，再在一周内修复或删除；不得长期容忍随机失败。
 
 ---
 
-## 五、与 MVP 编码顺序的配合
+## 6. 新测试自检清单
 
-按 review.md §5 顺序编码时，**每个模块完成后即补充对应测试**：
-
-1. db → schema + queries + `*.unit.test.ts`
-2. prompt → `process.ts` + `process.unit.test.ts`
-3. storage → downloadAndStore + getReadStream + unit/integration
-4. providers → types + registry + fal/zenmux adapters + unit
-5. job-engine → validator + lifecycle + orchestrator + unit/integration
-6. API routes → route handlers + contract tests
-7. 垂直切片 → 按 quickstart.md 两条路径跑 integration/smoke
-
----
-
-## 六、附录
-
-### 6.1 测试数据工厂模板
-
-```ts
-// tests/factories.ts
-export function makeSubmitGenerationParams(overrides: Partial<SubmitGenerationParams> = {}): SubmitGenerationParams {
-  return {
-    provider: 'fal',
-    model: 'fal-ai/flux/schnell',
-    prompt: 'A cat wearing a space helmet',
-    mode: 'text-to-image',
-    count: 1,
-    ...overrides,
-  };
-}
-```
-
-### 6.2 MSW 启用示例
-
-```ts
-// tests/msw/server.ts
-import { setupServer } from 'msw/node';
-import { http, HttpResponse } from 'msw';
-
-export const server = setupServer(
-  http.post('https://queue.fal.run/*', () => {
-    return HttpResponse.json({ request_id: 'req-1', status_url: '...', response_url: '...' });
-  }),
-);
-```
-
----
-
-## 自检
-
-- [ ] 所有新增测试文件遵循 `<subject>.<type>.test.ts` 命名
-- [ ] unit 不访问真实网络/数据库/文件系统
-- [ ] integration 使用临时 SQLite 文件与临时 storage 目录
-- [ ] 外部厂商 API 统一用 MSW 替换
-- [ ] 核心逻辑变更遵循 TDD 流程
+- [ ] 后缀、目录和分层是否匹配实际风险？
+- [ ] 是否只在应该真实执行的边界使用 DB/storage/HTTP？
+- [ ] Integration 是否使用 MSW，且无真实厂商请求？
+- [ ] 临时 env、文件、目录是否恢复和清理？
+- [ ] 断言是否覆盖结果和副作用，而非内部实现？
+- [ ] 核心状态/契约/安全变更是否先有测试？
+- [ ] 是否运行了与变更相称的命令？
