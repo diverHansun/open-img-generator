@@ -16,7 +16,7 @@ Route 是页面/Workspace 身份真相，HTTP API 是业务状态真相，页面
 | 页面 | URL 状态 | 内存状态 |
 |---|---|---|
 | Home | 无 | create form |
-| Generate | 可选 `session`（若实施采用 query） | prompt、targets、params、当次提交的结果区状态 |
+| Generate | 可选 `session`；Stage 打开时可选 `generation` | prompt、targets、params、Compose/Stage、currentGenerationId 与最后快照 |
 | History | `page` | 折叠状态、各组已加载 items/cursor |
 | Gallery | `workspace`、`provider`（`sort` 固定 newest） | 已加载 items/cursor、预览弹层 |
 | Models | 可选 `q`、`provider`；首批也可仅内存 | 展开行、saving map |
@@ -46,11 +46,11 @@ Generation Detail 为弹层无 URL 状态；打开中即持有 poll，关闭即�
 后端铁律不变：只有 `GET /api/generations/:id` 推进 poll，列表接口永不调用。前端有两个订阅入口，任一订阅卸载即停止接收更新：
 
 ```text
-Generate 结果区（当次提交）
-  submit 成功 → 展示当次 generation
+Generate Stage（唯一 current task）
+  submit 成功 / 点击 Compose current-task 入口 → Stage 可见
   → GET detail → terminal? stop
   → non-terminal? schedule next GET
-  → 离开 Generate / 发起新提交? 停止旧 controller
+  → 返回 Compose / 离开 Generate / 发起新提交? 停止旧 controller
 
 GenerationDetailDialog（History 行 / Gallery 预览进入）
   open → GET detail
@@ -59,7 +59,7 @@ GenerationDetailDialog（History 行 / Gallery 预览进入）
   → close / 不可重试错误? stop
 ```
 
-浏览器 `GenerationPollRegistry` 按 `generationId` 维护唯一调度器与订阅计数：两个入口可同时跟踪不同 generation；若因 Gallery/Generate 重叠订阅同一 generation，则共享一次 detail GET 调度，最后一个订阅者卸载才清理 timer/fetch。它是短生命周期调度器，不缓存跨页业务数据，也不取代页面状态。History、Gallery、recent lists只显示存储快照。后台 worker 可独立推进，这不改变前端规则。不得通过预取意外触发推进：列表渲染不预取详情 GET，弹层内容只在用户显式打开后加载。
+浏览器 `GenerationPollRegistry` 按 `generationId` 维护唯一调度器与订阅计数：两个入口可同时跟踪不同 generation；若因 Gallery/Generate 重叠订阅同一 generation，则共享一次 detail GET 调度，最后一个订阅者卸载才清理 timer/fetch。它是短生命周期调度器，不缓存跨页业务数据，也不取代页面状态。Generate Compose 的 `CurrentTaskEntry` 只保存最后快照并可重新打开 Stage，不能作为隐藏订阅者；History、Gallery、recent lists只显示存储快照。后台 worker 可独立推进，这不改变前端规则。不得通过预取意外触发推进：列表渲染不预取详情 GET，弹层内容只在用户显式打开后加载。
 
 ## 7. 缓存和刷新
 
@@ -87,4 +87,4 @@ web-client 的错误统一为 `{ code, message, retryable }`，但页面不依�
 
 ## 10. 验收
 
-刷新深链可恢复；返回/前进同步过滤；旧响应不覆盖新筛选；列表无详情 poll（仅结果区/Detail 弹层持有）；无手动 Refresh 按钮与定时轮询；secret 不进入 URL/localStorage/cache；写操作失败后 UI 回到服务端确认状态；`locale` 切换即时生效并持久化。
+刷新深链可恢复；返回/前进同步过滤；旧响应不覆盖新筛选/新 current task；列表与 Compose 无详情 poll（仅可见 Stage/Detail 弹层持有）；无手动 Refresh 按钮与定时轮询；secret 不进入 URL/localStorage/cache；写操作失败后 UI 回到服务端确认状态；`locale` 切换即时生效并持久化。

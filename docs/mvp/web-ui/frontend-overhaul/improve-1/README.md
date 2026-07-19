@@ -17,7 +17,7 @@
 
 1. `/` 成为 Workspace 选择与创建首页，启动开发服务后首先进入该页面。
 2. 进入 Workspace 后不再在每个页面重复 Project/Session 选择卡片；侧边栏以 `← Workspaces` 返回首页。
-3. Generate、History、Gallery、Models、Providers、Provider Detail 有独立路由和页面边界；Generation Detail 以共享卡片弹层呈现（无独立路由），与 Generate 结果区共同构成仅有的两个 poll 持有方。
+3. Generate、History、Gallery、Models、Providers、Provider Detail 有独立路由和页面边界；Generate 以同路由 Compose/Stage 管理唯一当前任务，Generation Detail 以共享卡片弹层呈现（无独立路由），与可见的 Generate Stage 共同构成仅有的两个 poll 持有方。
 4. History 按当前 Workspace 下"每页 5 个非空 Session、每个 Session 首批 10 条 Generation、组内继续加载"组织；列表保持只读。
 5. Gallery 保持全局收藏；图片无常驻标签，来源信息在预览弹层右侧信息卡展示。
 6. Models 使用真实语义的启用开关；Providers 展示固定 Provider 目录并允许进入详情配置密钥，catalog 含各家官方申请 key 链接。
@@ -40,7 +40,8 @@
 | Gallery | 全局收藏；无常驻标签；第一批过滤范围受控（顶部筛选条） |
 | Providers | 固定展示七家 Provider；不提供 Add provider；不伪造 Connected 或 Last checked；catalog 含官方申请 key 链接 |
 | Provider 密钥 | `.env` 来源只读；用户配置写入现有加密 user-config；未来数据库存储不改变前端契约 |
-| Generation 详情 | 共享卡片弹层（无独立路由）；从 History 行 / Gallery 预览进入；与 Generate 结果区互为仅有的 poll 持有方 |
+| Generate | Compose/Stage 互斥；Stage 隐藏 Inspector、只展示当前 Generation；返回 Compose 暂停详情 poll，点击“当前任务”恢复 |
+| Generation 详情 | 共享卡片弹层（无独立路由）；从 History 行 / Gallery 预览进入；与可见 Generate Stage 互为仅有的 poll 持有方 |
 | Settings | 未定义前从导航移除，不保留 disabled 占位 |
 | 参考图 | 只作为布局、信息密度和视觉语言的输入，不是最终稿或逐像素实现目标 |
 | 视觉自由度 | 固定层级、密度、表面与禁用项；具体 accent hue、灰阶冷暖和细节比例由首个视觉实现提交用真实页面校准 |
@@ -59,7 +60,9 @@ UI 统一使用 **Workspace**；现有数据库、library 与 HTTP API 继续使
 | Providers | `/workspace/:projectId/providers` | 当前 Workspace 导航壳 | 固定 Provider 目录与凭证配置摘要 |
 | Provider Detail | `/workspace/:projectId/providers/:providerId` | 当前 Workspace 导航壳 | 单 Provider 配置与能力摘要 |
 
-Generation Detail 不是路由页面，而是共享弹层组件（见 `shared/07-generation-detail-dialog.md`）：从 History 行与 Gallery 预览弹层进入，打开期间持有该 Generation 的详情 poll，关闭即停止。Generate 的结果区是另一个 poll 持有方（仅针对当次提交）。
+Generate 的可选 `?generation=:id` 只表示该路由当前打开 Stage；省略时为 Compose。它不是新的页面，也不把 active generation 写入 localStorage。
+
+Generation Detail 不是路由页面，而是共享弹层组件（见 `shared/07-generation-detail-dialog.md`）：从 History 行与 Gallery 预览弹层进入，打开期间持有该 Generation 的详情 poll，关闭即停止。Generate 的 `Stage` 是另一个 poll 持有方（仅针对唯一 current task，Compose 不持有隐藏 poll）。
 
 `projectId` 对 Gallery、Models、Providers 表示“当前导航上下文”，不把这些全局数据错误过滤成项目级数据。这样可以保留一致侧边栏、明确返回路径和可刷新的深链接，而不依赖一个巨型组件内的 `activeView` 状态。
 
@@ -71,7 +74,7 @@ Generation Detail 不是路由页面，而是共享弹层组件（见 `shared/07
 - Home、Generate、History、Gallery、Models、Providers、Provider Detail 的目标设计文档，以及 Generation Detail 共享弹层设计。
 - shadcn/ui + Tailwind CSS 的引入与 primitives 落地；页面布局 CSS Modules；tokens 统一出口。
 - 多语言（默认中文 / 可切英文）的轻量方案与全量文案 key 化。
-- Generate 中重复参数控件、Provider 状态卡片和 Workspace 卡片的重新归位；提交后结果与进度内嵌于结果区。
+- Generate 中重复参数控件、Provider 状态卡片和 Workspace 卡片的重新归位；Compose/Stage 分离，Stage 图片优先且只含当前 Generation Job 明细。
 - History 的 Session 分页与组内 Generation cursor 契约设计；行内批次缩略图。
 - Gallery 的顶部筛选条、Newest 排序、继续加载与图片预览弹层（右侧信息卡）设计。
 - Models 的客户端搜索、Provider 筛选、能力展开和启用 Switch。
@@ -171,7 +174,7 @@ README.md
 3. 小眼睛只在本地切换当前新输入的 `password/text`，保存成功后立即清空输入。
 4. 用户配置通过受认证的 same-origin API 写入现有加密 user-config；日志、错误、响应和测试快照不得包含密钥。
 5. 后续迁移到数据库时，UI 与公开 DTO 不依赖具体存储介质；本批不预先设计多用户密钥表。
-6. History、Gallery 和 Generation 列表继续只读；只有两个 UI 单元可调用 `GET /api/generations/:id` 推进异步任务：Generate 结果区（当次提交）与 Generation Detail 弹层（打开期间）。
+6. History、Gallery 和 Generation 列表继续只读；只有两个 UI 单元可调用 `GET /api/generations/:id` 推进异步任务：可见的 Generate Stage（唯一 current task）与 Generation Detail 弹层（打开期间）。Compose 的“当前任务”入口不轮询。
 
 ## 8. 与既有文档的关系
 

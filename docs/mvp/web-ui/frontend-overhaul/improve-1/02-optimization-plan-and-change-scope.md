@@ -11,7 +11,7 @@
 Browser routes
 ├── /                                      HomeShell（顶部品牌条）→ Workspace Home
 └── /workspace/[projectId]                 WorkspaceShell
-    ├── /generate                          Generate（结果区 = poll 持有方之一）
+    ├── /generate                          Generate（可见 Stage = poll 持有方之一）
     ├── /history                           History (read-only)
     ├── /gallery                           Gallery (global data)
     ├── /models                            Models (global preference)
@@ -50,7 +50,9 @@ Browser routes
 | `.env` 覆盖 | source=`env` 时只读 | 保持现有 env > user-config | UI 覆盖 env | 用户需编辑 env 并重启 |
 | 样式组织 | Tailwind（组件内）+ CSS Modules（页面布局）+ 全局 tokens | 缩小影响面又保留统一语言 | 单一 globals、运行时 UI 库 | 初期需整理现有选择器 |
 | Generation Detail | 共享弹层（无路由） | 浏览历史/收藏不打断上下文；本地工具无需详情深链 | 独立路由页 | 刷新后弹层不恢复，需从列表重开 |
-| Generation poll | Generate 结果区（当次提交）+ Detail 弹层（打开期间）两个持有方 | 与后端"仅详情 GET 推进"语义一致，且支持页内进度 | History 自动刷新每条详情 | 列表状态可能在下次自动刷新前略旧 |
+| Generate 局部模式 | 同一路由互斥 Compose/Stage；Stage 隐藏 Inspector | 编辑与当前任务不再争夺主区，且不增加全局页面 | Prompt 下内嵌结果、独立 Generation 路由 | 需要明确返回/恢复与短生命周期状态 |
+| Generate current task | 只保存最近一次成功提交；新 POST 成功后原子替换旧 id/快照/订阅 | 与“聚焦当前任务”一致，不复制 History；提交失败仍可回到旧任务 | Session Recent/多任务切换器 | 被替换任务需从 History 找回 |
+| Generation poll | 可见 Generate Stage（唯一 current task）+ Detail 弹层（打开期间）两个持有方 | 与后端“仅详情 GET 推进”语义一致；Compose 返回后不隐藏轮询 | History 自动刷新每条详情、Compose 后台 poll | 列表/Compose 快照可能在下次显式打开前略旧 |
 | 列表刷新 | 进入页面 + 标签页重新可见时自动重取 | KISS，去除手动 Refresh | 手动按钮、定时轮询 | 极端情况下需手动 F5 |
 | 成功反馈 | toast（sonner）仅用于结果不显而易见的成功操作；错误就地展示 | 明确反馈且不泛滥 | 全局 toast 一切、完全无提示 | 需约束使用边界 |
 
@@ -127,7 +129,7 @@ src/lib/
 | 界面语言 | localStorage `locale` + React context | 切换动作 | URL 语言段、服务端语言协商 |
 | 模型启用偏好 | `/api/model-preferences` | Models 行级 saving/error | 多页面复制不同默认算法 |
 | 当次选中模型 | Generate 页面内存 | targets | 写回全局 preference |
-| 当前 generation 进度 | Detail DTO | 结果区/弹层的 poll controller、可见状态 | History/Gallery 调详情 GET |
+| 当前 generation 进度 | Detail DTO | Stage/弹层的 poll controller；Compose 只留 id/最后快照入口 | History/Gallery 调详情 GET、Compose 隐藏 poll |
 | History page | URL search param `page` | 折叠状态、各组已加载 items | 全局 store |
 | Gallery filter/cursor | URL search params + API response | 已加载 items、预览弹层状态 | 客户端过滤当前页伪装全库 |
 | Provider credential draft | Provider Detail 内存 | 当前输入、可见开关 | localStorage、query、日志 |
@@ -214,7 +216,9 @@ type GenerationView = {
 
 `GET /api/generations/:id` 仍是唯一可推进 poll 的读取。Detail 弹层从 History/Gallery 打开时，调用方已处于某个 Workspace 壳内；DTO 携带 `projectId` 使弹层能正确展示来源并在需要时校验归属（尤其 Gallery 为全局收藏，图片可能属于其他 Workspace）。弹层不做路由级 404，资源不存在时显示内联"记录不存在或已删除"状态。
 
-同一 `generationId` 的多个可见入口不得各自轮询。浏览器侧新增按 generationId 的 transient poll registry：它只协调一个 detail GET 调度器和多个订阅者，最后一个订阅者卸载才停止；不存业务数据、不替代页面状态、也不引入 Redux/Zustand。结果区与 Detail 弹层仍是仅有的**订阅入口**。
+同一 `generationId` 的多个可见入口不得各自轮询。浏览器侧新增按 generationId 的 transient poll registry：它只协调一个 detail GET 调度器和多个订阅者，最后一个订阅者卸载才停止；不存业务数据、不替代页面状态、也不引入 Redux/Zustand。可见 Stage 与 Detail 弹层仍是仅有的**订阅入口**；Compose 的 current-task 入口只持有最后快照。
+
+Stage 的详细 Job 行不需要扩展后端：现有 `jobs[].provider/model/status/error` 与 `images[].jobId` 可推导每个 Job 的实际图片数。由于 count/尺寸/seed 等运行时参数不持久化，Job 内部时间戳、取消请求和 Provider handle 也未公开，本批不得展示精确 `returned/expected`、百分比、队列位置、耗时或取消请求中的领域状态。若后续需要，单独设计持久化与 DTO；本轮不为视觉稿增加字段。
 
 ### 2.5.4 Gallery 过滤
 
@@ -303,7 +307,9 @@ layout 只渲染不含业务数据的结构；客户端在 auth gate 成功后�
 
 ### 2.6.3 Generate 与 Generation Detail 弹层
 
-Generate 加载 Sessions（无 Session 时自动创建首个并选中）、Provider capabilities、Model Preferences；提交后不跳转，在 composer 下方结果区内嵌展示当次 generation 的各 Provider 进度与图片，结果区持有该 generation 的详情 poll；生成中 Generate 按钮直接变身 Cancel（调已有 cancel route）。
+Generate 加载 Sessions（无 Session 时自动创建首个并选中）、Provider capabilities、Model Preferences。Compose 将页名与 Session 压在同一工具行，只渲染单层 Prompt surface 与 Inspector。新 POST 成功时原子替换上一次 current-task 前端状态并在同路由进入 `GenerationStage`；失败则保留旧 current-task 入口。可选 `?generation=:id` 表达当前打开的 Stage。Stage 隐藏 Inspector，以实际返回图片为主要内容，下方只提供当前 Generation 的 Job 摘要/折叠明细与非终态 Cancel。
+
+Stage 可见时才订阅 generation detail；返回 Compose 即解除订阅但不取消后台任务。Compose 只保留紧凑、整行可点击的 current-task 入口，点击后重进 Stage、立即读取最新详情并在非终态恢复 poll。新提交替换旧 current task；旧 Generation 不在 Generate 列表化，只能从 History 找回。
 
 GenerationDetailDialog 从 History 行与 Gallery 预览弹层打开：挂载时调用详情 GET，非终态启动受控轮询；终态、关闭弹层或不可重试错误时停止。进行中的任务在弹层内也提供 Cancel。任何时刻只开一个弹层：从预览弹层进入 Detail 时先关预览。
 
@@ -363,13 +369,13 @@ DoD：新 API 有完整 typed client；401、409、400、404、503 能以 code �
 - `GenerationView.projectId` 和必要 API/测试调整。
 - Session 自动创建与改名（复用已有 `PATCH /api/sessions/:id`）。
 
-DoD：选择/创建 Workspace → 自动获得首个 Session → 多模型提交 → 结果区内嵌进度/变身 Cancel → Detail 弹层轮询/取消/收藏 → 结果图单图预览完整可走；仅结果区与弹层订阅 detail poll。对应 A01–A07、C01–C11。
+DoD：选择/创建 Workspace → 自动获得首个 Session → Compose 多模型提交 → Stage 隐藏 Inspector并显示当前图片/Job 明细/Cancel → 返回 Compose 暂停 poll → 点击 current task 恢复 Stage/poll → 新 POST 成功替换旧 current task、失败保留旧入口 → Detail 弹层轮询/取消/收藏 → 结果图单图预览完整可走；仅可见 Stage 与弹层订阅 detail poll。对应 A01–A07、C01–C13。
 
 视觉基础按以下顺序落地，避免新旧 CSS 长期并存：
 
 1. 在 `globals.css` 建立语义 tokens、reset 与 Tailwind 入口，先不复制旧页面规则。
 2. 以 shadcn 默认 primitives 为可访问性基线，映射本项目 tokens；Button/Input 使用圆角矩形，不做全 pill 化。
-3. 先完成 HomeShell、WorkspaceShell 和 Home/Generate 页面 CSS Modules，验证 248px 侧栏、320–360px inspector 与中英文排版。
+3. 先完成 HomeShell、WorkspaceShell 和 Home/Generate 页面 CSS Modules，分别验证 Compose 的 248px 侧栏 + 320–360px inspector，以及 Stage 隐藏 inspector 后的全宽图片画布与中英文排版。
 4. 再按 History/Gallery → Models/Providers/Provider Detail 的纵切顺序迁移页面布局。
 5. 每迁移一页即删除该页旧全局选择器；最终 `globals.css` 不保留页面私有 grid、卡片阴影体系、重复参数区或旧三栏壳规则。
 
@@ -442,6 +448,8 @@ DoD：无 `activeView` 页面导航；无重复 Workspace 卡；未引用死 CSS
 
 旧系统只有 `/`，没有可兼容的子页面 URL。发布时 `/` 直接变为 Home。可选择暂时接受 `?view=` 并 redirect 到新路由，但不是必须；不得长期维护两套路由状态。
 
+Generate 的 `?generation=:id` 只是同一路由 Stage 的可恢复视图状态：存在且归属当前 Project 时打开 Stage，省略时显示 Compose；返回编辑移除该 query，点击 current task 重新加入。它不创建 `/generations/:id` 页面，也不进入 localStorage。非法、已删除或跨 Project id 在 Stage 内给出明确错误与返回编辑动作。
+
 ### 2.9.3 分阶段回滚
 
 - Phase 1 的纯读 endpoint 与 Phase 2 client 接线可按 route/module 单独回滚；不会迁移现有业务 schema。
@@ -459,7 +467,7 @@ DoD：无 `activeView` 页面导航；无重复 Workspace 卡；未引用死 CSS
 | 并发保存 key 丢其他 Provider | 进程内串行 merge-write + 原子 rename | 多进程并发不在本地 MVP 范围；文档明确 |
 | secret 泄漏到响应/日志 | allowlist DTO、专用错误、测试用 canary secret 全局扫描 | 浏览器扩展/本机权限不由应用防护 |
 | env/user-config 状态误导 | source 明确，env editable=false，无 Connected | 实际 provider 可用性仍需一次真实生成验证 |
-| 页面离开后轮询泄漏 | 结果区/弹层各自持有 + cleanup/abort | 后台 worker 可继续推进，这是预期行为 |
+| Compose/页面离开后轮询泄漏 | Stage/弹层各自持有 + back/unmount cleanup/abort；CurrentTaskEntry 不订阅 | 后台 worker 可继续推进，这是预期行为 |
 | 弹层状态与列表不一致 | 弹层写操作（收藏/取消）成功后回调列表局部更新 | 跨弹层并发操作同一条目靠服务端最终状态校正 |
 | 空输入误清除 key | 空值保存即 DELETE 的语义在输入框旁以辅助文案说明 | 用户手动清空后误点保存仍可能删 key，靠 toast 反馈可发现 |
 | 申请 key 链接失效 | URL 作为 catalog 静态数据，实施时逐家人工核实 | 厂商后续改版需代码更新 |
@@ -482,5 +490,5 @@ DoD：无 `activeView` 页面导航；无重复 Workspace 卡；未引用死 CSS
 4. Gallery 批量下载、相册、标签编辑。
 5. Model 自定义注册、批量开关、价格信息。
 6. 明暗主题切换、品牌配置、URL 级多语言路由和独立设计系统包。
-7. WebSocket/SSE 实时状态；现阶段保留结果区/弹层 polling 与后台 worker。
+7. WebSocket/SSE 实时状态；现阶段保留可见 Stage/弹层 polling 与后台 worker。
 8. 图片预览弹层的左右切换与复杂 lightbox。

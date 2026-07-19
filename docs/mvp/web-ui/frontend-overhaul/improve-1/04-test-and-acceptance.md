@@ -50,13 +50,15 @@
 | C02 | 无 Session 的 Workspace | integration/人工 | 自动创建首个 Session（name = `session-` + id 前 8 位）并选中；期间 Generate 暂不可用且状态可读 |
 | C03 | 创建/选择/改名 Session | contract/人工 | 仅影响当前 Workspace；改名复用 `PATCH /api/sessions/:id`；刷新可恢复有效建议值 |
 | C04 | 多模型提交 | integration/人工 | request 带 sessionId/targets；后端 fanout 未被 UI 串行化 |
-| C05 | 提交后 | 人工 | 不跳转路由；结果区内嵌展示各 Provider 进度；Generate 按钮变身 Cancel |
-| C06 | 非终态轮询 | unit/integration | 结果区（当次提交）与 Detail 弹层（打开期间）是仅有订阅入口；同一 generationId 只有一个 detail GET 调度器；终态停止；错误退避遵循既有 polling 规则 |
-| C07 | 离开 Generate / 关闭弹层 | unit/人工 | 浏览器 timer/fetch 清理；后台任务不被隐式 cancel |
+| C05 | 提交后 | unit/人工 | 同一路由从 Compose 进入 Stage；Stage 隐藏 Inspector，只展示当前 Generation 图片/Job 明细与非终态 Cancel |
+| C06 | 非终态轮询 | unit/integration | 可见 Stage（唯一 current task）与 Detail 弹层（打开期间）是仅有订阅入口；同一 generationId 只有一个 detail GET 调度器；终态停止；错误退避遵循既有 polling 规则 |
+| C07 | 返回 Compose / 离开 Generate / 关闭弹层 | unit/人工 | 浏览器 timer/fetch 清理；后台任务不被隐式 cancel；Compose current-task 入口不持有隐藏轮询 |
 | C08 | Detail 弹层打开不存在的 generation | contract/人工 | 弹层内联“记录不存在或已删除”状态，不泄漏其他 Workspace 内容 |
-| C09 | Cancel | contract/integration/人工 | Generate 结果区与 Detail 弹层两处入口均使用既有 cancel endpoint；同一时刻每个 Generation 只呈现一个可见取消入口；状态可见且幂等语义不退化 |
-| C10 | Favorite | contract/人工 | 结果区/弹层图片可收藏/取消，Gallery 能读取 |
+| C09 | Cancel | contract/integration/人工 | Generate Stage 与 Detail 弹层两处入口均使用既有 cancel endpoint；Compose 无 Cancel；同一时刻每个 Generation 只呈现一个可见取消入口；状态可见且幂等语义不退化 |
+| C10 | Favorite | contract/人工 | Stage/弹层图片可收藏/取消，Gallery 能读取 |
 | C11 | 图片预览 | 人工 | 点击图片打开预览弹层（单图 + 信息卡）；从预览进 Detail 先关预览；任何时刻只开一个弹层 |
+| C12 | 当前任务恢复与替换 | unit/人工 | 合法 `?generation=` 刷新恢复 Stage；返回 Compose 后点击 current-task 入口恢复 Stage/poll；新 POST 成功后原子替换旧 id/快照/订阅，失败保留旧入口，只展示一个当前 Generation；非法/跨 Project id 可返回编辑 |
+| C13 | Job 明细字段白名单 | contract/人工 | 只展示当前 jobs 的 Provider/model/五态、实际图片数、安全错误；无 Session 历史、expected total、duration、queue 或虚假百分比 |
 
 ### D. History 与 Gallery（视觉确认后的 Phase 4）
 
@@ -130,7 +132,7 @@
 | API ↔ library/db | route、Drizzle、临时 SQLite | 无 | 分页、过滤、404、只读 |
 | API ↔ provider-config ↔ user-config | route、service、真实临时文件加密 | 环境使用测试值 | env 优先、并发、无 secret |
 | UI client ↔ API | typed client + fake fetch/contract handler | Provider 外部 HTTP | query 编码、错误、DTO |
-| Generate 结果区 / Detail 弹层 ↔ job-engine | 真实编排 + fake adapter/MSW | 厂商 HTTP | 两个明确 poll 持有方、终态/关闭停止 |
+| Generate Stage / Detail 弹层 ↔ job-engine | 真实编排 + fake adapter/MSW | 厂商 HTTP | 两个明确 poll 持有方、Compose/back/终态/关闭停止 |
 | Provider adapter | 既有 adapter tests | MSW | 本批不重复验证各厂商协议 |
 
 任何 unit/integration 不调用真实 fal/ZenMux/其他厂商。真实 key 验证仍是显式 opt-in 手工检查，不作为 CI 发布门。
@@ -139,8 +141,8 @@
 
 每个页面至少检查：正常、空、loading、error、长文本、键盘、窄屏。重点组合：
 
-- 1440×900：桌面完整侧栏；Generate inspector；结果区与列表宽列。
-- 1024×768：压缩侧栏/内容；Inspector 收纳；History 列不遮挡主动作。
+- 1440×900：桌面完整侧栏；Generate Compose inspector；Stage 隐藏 inspector 后图片使用完整主宽。
+- 1024×768：压缩侧栏/内容；Compose Inspector 收纳；Stage/History 不遮挡主动作。
 - 390×844：顶部壳/抽屉；触控目标；Gallery 两列/一列；密钥输入不溢出。
 - 键盘：从返回入口到主内容、列表行、展开、Switch、密钥小眼睛、保存、预览/详情弹层均可达；焦点可见。
 - `prefers-reduced-motion`：无强制位移动画。

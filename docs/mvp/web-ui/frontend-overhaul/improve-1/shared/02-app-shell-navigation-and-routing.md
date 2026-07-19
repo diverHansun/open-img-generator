@@ -31,7 +31,7 @@
 | `/workspace/:projectId/providers` | Providers | Providers |
 | `/workspace/:projectId/providers/:providerId` | Providers | Provider Detail |
 
-Generation Detail 不是路由，而是共享弹层（见 `07-generation-detail-dialog.md`），从 History 行与 Gallery 预览弹层打开；打开期间对应父菜单保持 active。
+Generation Detail 不是路由，而是共享弹层（见 `07-generation-detail-dialog.md`），从 History 行与 Gallery 预览弹层打开；打开期间对应父菜单保持 active。Generate 可使用 `?generation=:id` 表示同一页面内正在打开的 Stage，它不新增导航项或独立页面，active 仍为 Generate。
 
 Workspace 根 `/workspace/:projectId` 应 redirect 到 `/generate`，避免出现无职责页面。
 
@@ -43,7 +43,7 @@ Workspace layout 以 route `projectId` 调用 Project 查询。加载成功后�
 
 - 使用 Next `Link`，保留浏览器 back/forward 和打开新标签能力。
 - active 状态由 pathname 派生，不保存到 React state/localStorage。
-- 列表打开 Detail 弹层后对应父菜单仍 active。
+- 列表打开 Detail 弹层后对应父菜单仍 active；Generate 在 Compose/Stage 间切换时 active 不变。
 - 切页时关闭移动抽屉、取消当前页面可取消请求；不得隐式取消 generation。
 - 导航图标配文本；窄屏收起文本时必须有 `aria-label`/tooltip。
 
@@ -60,12 +60,12 @@ WorkspaceShell
     └── Page-specific content
 ```
 
-Generate 可在 Main 内再分 `minmax(0,1fr) + inspector`；其他页面始终使用完整 Main 宽度。
+Generate Compose 可在 Main 内再分 `minmax(0,1fr) + inspector`；Generate Stage 隐藏 inspector 并使用完整 Main 宽度；其他页面始终使用完整 Main 宽度。
 
 ## 6. 响应式
 
-- `>=1180px`：完整侧栏；Generate 双列。
-- `920–1179px`：侧栏可压至 216px；Generate inspector 变为页内折叠 panel。
+- `>=1180px`：完整侧栏；Generate Compose 双列，Stage 单列图片画布。
+- `920–1179px`：侧栏可压至 216px；Generate Compose inspector 变为页内折叠 panel，Stage 保持无 inspector。
 - `<920px`：Workspace 侧栏变顶部栏 + modal drawer；主内容全宽。
 - `<620px`：PageHeader actions 换行或进入 overflow；不得横向裁掉主操作。
 

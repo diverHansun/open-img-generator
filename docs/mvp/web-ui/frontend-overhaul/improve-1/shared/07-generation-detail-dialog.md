@@ -2,14 +2,14 @@
 
 ## 1. 定位
 
-Generation Detail 是某一次生成的"完整档案视图"，以**共享卡片弹层**（`GenerationDetailDialog`）呈现，**不占路由**。它是浏览器端两个 poll 持有方之一（另一个是 Generate 结果区，见 `05-state-and-data-boundaries.md` §6）。
+Generation Detail 是某一次生成的“完整档案视图”，以**共享卡片弹层**（`GenerationDetailDialog`）呈现，**不占路由**。它是浏览器端两个 poll 持有方之一（另一个是可见的 Generate Stage，见 `05-state-and-data-boundaries.md` §6）。
 
 入口：
 
 1. History 行（整行点击/键盘 Enter）。
 2. Gallery 预览弹层内的"查看生成详情"链接。
 
-不是入口：Generate 结果区（结果区本身就是当次提交的完整视图，不再套弹层）；任何列表的自动预取。
+不是入口：Generate Stage（Stage 本身就是 current task 视图，不再套弹层）；任何列表的自动预取。
 
 ## 2. 弹层层级规则
 
@@ -21,8 +21,8 @@ Generation Detail 是某一次生成的"完整档案视图"，以**共享卡片�
 
 ```text
 ┌ GenerationDetailDialog ────────────────────────┐
-│ ● Partial success              [Cancel] [×]    │  ← 状态头：整体状态 + 非终态时的 Cancel
-│ Prompt 全文 · aspect · count · seed · 创建时间  │
+│ ● 部分完成                     [Cancel] [×]    │  ← 由 jobs 派生的展示摘要
+│ Prompt 全文 · 创建时间 · 更新时间                │
 ├────────────────────────────────────────────────┤
 │ fal.ai · FLUX Schnell    ✗ Failed              │
 │   Error: 401 Unauthorized …                    │
@@ -32,7 +32,7 @@ Generation Detail 是某一次生成的"完整档案视图"，以**共享卡片�
 └────────────────────────────────────────────────┘
 ```
 
-- 状态头：整体离散状态（pending/running/completed/partial/failed/cancelled，与 `GenerationStatus` 同一映射）、Prompt 全文、提交参数、创建/更新时间。
+- 状态头：后端整体五态（pending/running/completed/failed/cancelled）、Prompt 全文、创建/更新时间。若 jobs 同时包含 completed 与 failed/cancelled，可派生“部分完成”展示摘要，但不新增持久化状态。
 - Job 列表：每个 Provider 一行：Provider/model、状态、失败时的错误摘要、产出图片数。无虚假 duration/百分比。
 - 图片网格：可点击进单图视图；每张图有 FavoriteButton。
 - Cancel 仅在 generation 非终态时显示，单击即调已有 cancel endpoint（无二次确认），结果以服务端状态为准。
@@ -55,7 +55,7 @@ DTO 携带 `projectId`（见根级 `02` §2.5.3）：Gallery 为全局收藏，�
 
 - 只调用：`GET /api/generations/:id`（唯一推进 poll 的读取）、已有 cancel endpoint、Favorite add/remove。
 - 不调用任何列表接口；不修改原 generation；不自动重试厂商 job。
-- 弹层内不显示后端未提供的 duration、费用、进度百分比。
+- 弹层内不显示后端未提供/未持久化的 count、aspect、seed、duration、费用、队列位置或进度百分比；实际图片数按 `images[].jobId` 统计。
 
 ## 6. 可访问性
 
@@ -67,5 +67,5 @@ DTO 携带 `projectId`（见根级 `02` §2.5.3）：Gallery 为全局收藏，�
 
 - unit：打开→GET→终态停止/非终态调度的状态机；关闭清理；收藏回滚。
 - integration：打开弹层推进对应 generation 的 poll；History/Gallery 列表本身不触发该 GET。
-- 人工：键盘全流程；从两个入口打开/关闭的焦点返回；与 Generate 结果区并存时各自轮询互不干扰。
+- 人工：键盘全流程；从两个入口打开/关闭的焦点返回；与 Generate Stage 分别打开时轮询所有权正确。
 - 对应根级 `04` 的 C06–C11、D04。

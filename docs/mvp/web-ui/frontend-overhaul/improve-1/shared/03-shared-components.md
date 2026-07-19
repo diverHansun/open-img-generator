@@ -43,15 +43,17 @@ UI primitives 基于 **shadcn/ui**（Tailwind CSS + Radix UI）源码复制落�
 | 组件 | 说明 |
 |---|---|
 | `GenerationDetailDialog` | Generation 完整视图弹层；poll 持有方之一。规格见 `07-generation-detail-dialog.md` |
-| `ImagePreviewDialog` | 单图预览弹层：左图 + 右侧信息卡（Workspace、Provider/model、收藏时间、Prompt 摘要；Gallery 场景额外提供“查看生成详情”链接）；单张 + 关闭，无左右切换。Generate 结果区与 Gallery 共用 |
-| `GenerationStatus` | History、Generate 结果区与 Detail 弹层使用同一离散状态映射 |
+| `ImagePreviewDialog` | 单图预览弹层：左图 + 右侧信息卡（Workspace、Provider/model、收藏时间、Prompt 摘要；Gallery 场景额外提供“查看生成详情”链接）；单张 + 关闭，无左右切换。Generate Stage 与 Gallery 共用 |
+| `GenerationStatus` | History、Generate Stage 与 Detail 弹层使用同一后端五态映射；“部分完成”只可由 Job 集合派生为展示摘要 |
 | `ProviderLabel` | Provider display name + 可选 model；不显示 Connected |
-| `FavoriteButton` | Generate 结果区/Detail 弹层/Gallery 共用，支持 optimistic UI + rollback |
+| `FavoriteButton` | Generate Stage/Detail 弹层/Gallery 共用，支持 optimistic UI + rollback |
 | `CapabilityList` | Models 与 Provider Detail 展示真实 capability |
 | `CredentialSourceLabel` | Providers/Detail 展示 env/user-config/none |
 | `ProviderApplicationLink` | Providers 目录与 Detail 表单复用 catalog 的官方申请 API key 外链与安全新标签属性 |
 
 不得创建一个同时覆盖 History row、Gallery tile、Detail job 的万能 `GenerationCard`；三者信息层级不同。
+
+Generate 的 `GenerationStage`、`CurrentTaskEntry`、`CurrentJobDisclosure` 和图片画布属于页面专属组件，不进入 shared。Stage 与 `GenerationDetailDialog` 只复用稳定 primitive/状态映射，不合并为一个万能 Generation 视图。
 
 ## 5. 组件状态契约
 

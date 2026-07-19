@@ -10,6 +10,7 @@
 3. **视觉层级依赖“卡片套卡片”。** `src/app/globals.css` 同时承担壳、页面、表格、按钮、响应式等全部样式，边框、圆角、阴影成为主要分组手段，信息密度低且难以独立调整某页。
 4. **新产品需求缺少服务端读模型。** 当前 API 有通用 Project、Session、Generation、Favorite 列表，但不能直接、高效表达“非空 Session 分页”“Project 摘要”“全局 Gallery 服务端过滤”“七家 Provider 配置来源”。
 5. **密钥后端能力与 UI 边界尚未对齐。** `src/lib/user-config/` 已能加密读写，但没有 same-origin 配置 API；现有 `/api/providers` 只返回启用 Provider，不能展示固定目录或安全配置摘要。
+6. **Generate 把编辑与结果模式同时铺开。** 当前工作台和早期目标稿都把页头、Session、Prompt、Inspector、结果与 Recent 纵向叠放；即使减少阴影，仍会让文字与容器先于图片占据主视野，生成中的主要任务不够聚焦。
 
 ## 1.2 当前目标/职责分界
 
@@ -94,7 +95,7 @@ src/app/page.tsx
 
 ### 1.6.1 Generate 数据流
 
-当前数据流为：组件加载 Project/Session、Provider/Model Preference → 提交 `POST /api/generations` → 通过响应 `links.self` 调用 `GET /api/generations/:id` → 更新状态和图片。`src/lib/web-client/polling.ts` 提供轮询控制，方向正确。
+当前数据流为：组件加载 Project/Session、Provider/Model Preference → 提交 `POST /api/generations` → 通过响应 `links.self` 调用 `GET /api/generations/:id` → 更新状态和图片。`src/lib/web-client/polling.ts` 提供轮询控制，方向正确。`src/components/generate-workbench.tsx` 同时渲染 Prompt、当次结果与 Recent，说明数据所有权虽已存在，视觉模式尚未分离。
 
 问题在于数据流由根组件集中编排，导航离开“视图”并不会天然触发页面生命周期卸载；轮询所有权不够清晰。
 
@@ -166,8 +167,9 @@ src/app/page.tsx
 2. History 非空 Session 页码 + 组内 cursor 的稳定性。
 3. Gallery 服务端过滤跨 cursor 的正确性。
 4. Provider 配置响应永不含 secret、env 不可覆盖、并发更新不丢 key。
-5. 只有 Generate 结果区与用户显式打开的 Generation Detail 弹层可以推进详情 poll。
+5. 只有可见的 Generate Stage 与用户显式打开的 Generation Detail 弹层可以推进详情 poll。
 6. 离开 Generate、关闭弹层或切换筛选后停止浏览器轮询，陈旧请求不覆盖新状态。
+7. Compose/Stage 切换后只有可见 Stage 持有 current-task poll；新 POST 成功后替换旧 current task，且不把 Session 历史重新引入 Generate。
 
 视觉、焦点、响应式仍需要人工浏览器验收；在未引入 E2E 工具前，不应假装已有自动化像素测试。
 
@@ -176,7 +178,7 @@ src/app/page.tsx
 | 文档约束 | 当前代码 | Gap |
 |---|---|---|
 | `docs/mvp/web-ui/architecture.md`：一个 page 内 view state | `GenerateWorkbench.activeView` | 与本轮真实路由决策冲突，实施后更新文档 |
-| `docs/mvp/api/constraints.md`：只有详情 GET 推进 poll | 详情 route + Session/列表只读 | 已符合；前端只能由结果区与显式 Detail 弹层发起，必须回归保护 |
+| `docs/mvp/api/constraints.md`：只有详情 GET 推进 poll | 详情 route + Session/列表只读 | 已符合；目标前端只能由可见 Stage 与显式 Detail 弹层发起，必须回归保护 |
 | `docs/mvp/api/constraints.md`：本轮无写 key route | 无 Provider 配置 API | 本方案明确新增安全 route，实施后更新 |
 | `docs/mvp/user-config/architecture.md`：env > encrypted file | `resolveCredential`/`store.ts` | 已符合；新 UI 不得改变优先级 |
 | `docs/mvp/library/dfd-interface.md`：Favorites 可回溯 Project | `GalleryItem.projectId/projectTitle` | 已具备标签基础，缺服务端过滤 |

@@ -27,8 +27,9 @@
 | History | 只显示当前 Workspace 内含 Generation 的 Session；每页 5 个 Session，每组首批 10 条 Generation，并支持组内加载更多；行内展示批次缩略图条；组可折叠（默认最新一组展开） |
 | History 读语义 | History、Session、Generation 列表全部只读，不推进异步任务 |
 | Generation Detail | 共享卡片弹层；从 History 行与 Gallery 预览弹层进入；打开期间持有详情 poll，关闭即停 |
-| Generate 提交 | 提交后不跳转，进度与结果内嵌在 Prompt composer 下方的结果区；Generate 按钮在生成中直接变身 Cancel |
-| Cancel | 只有 Generate composer（当次提交）与 Detail 弹层（进行中的任务）两处提供；同一时刻只有一个可见；离开页面不取消任务 |
+| Generate 提交 | 同一 Generate 路由内从 Compose 进入独立 Stage；Compose 不再与结果区同屏，Stage 隐藏 Inspector、以当前任务图片为主 |
+| Generate 当前任务 | 页面只持有最近一次成功提交的 current task；Compose 仅显示紧凑可点击入口，Stage 下方只显示该 Generation 的 Job 明细；新 POST 成功后原子替换旧 current-task 前端状态，不加入 Session 历史列表 |
+| Cancel | 只有 Generate Stage（当次 current task）与 Detail 弹层（进行中的任务）两处提供；同一时刻每个视图只有一个可见；返回 Compose/离开页面不取消任务 |
 | Gallery | 保持全局收藏，不按当前 Workspace 强制裁剪；图片无常驻标签；Workspace 等信息在预览弹层右侧信息卡展示 |
 | Gallery 首批过滤 | 顶部筛选条（Workspace、Provider 下拉）；排序固定 Newest 无控件；Load more；跨分页过滤必须由服务端完成 |
 | 图片预览 | 点击图片打开预览弹层（左图 + 右侧信息卡 + “查看生成详情”链接）；第一批只做单张大图 + 关闭，不做左右切换；任何时刻只开一个弹层 |
@@ -96,6 +97,7 @@ UI 文案使用 Workspace，代码和 HTTP DTO 继续使用 Project/`projectId`�
 9. 不设计尚无产品职责的 Settings；不做明暗主题切换（移除现有开关）。
 10. 不做 History/Gallery 手动 Refresh 按钮与定时轮询。
 11. 图片预览第一批不做左右切换。
+12. Generate 不展示当前 Session 之前的 Generation、Recent 10 或其它历史任务；这些记录只在 History 出现。
 
 ## 0.7 与既有文档的关系
 
@@ -119,10 +121,10 @@ UI 文案使用 Workspace，代码和 HTTP DTO 继续使用 Project/`projectId`�
 | R2 | 多语言 | 不做 | 做。默认中文、可切英文，轻量 context 方案，localStorage 记忆 |
 | R3 | 主题 | 未提及 | 明确不做明暗切换，移除现有 Light 开关 |
 | R4 | 首页品牌 | 左侧 72px 窄品牌 Rail | 顶部品牌条，右侧放语言切换 |
-| R5 | Generation Detail | 独立路由页面，唯一 poll owner | 共享卡片弹层（无路由）；poll 持有方 = Generate 结果区（当次提交）+ Detail 弹层（打开期间） |
-| R6 | Generate 提交后 | 跳转 Detail 页 | 不跳转，进度与结果内嵌在 composer 下方结果区 |
-| R7 | Generate 按钮 | 提交期禁用 | 生成中直接变身 Cancel |
-| R8 | Recent 10 | Generate 保留轻量入口 | 整体移除（结果区看当次，历史去 History） |
+| R5 | Generation Detail | 独立路由页面，唯一 poll owner | 共享卡片弹层（无路由）；poll 持有方 = 可见 Generate Stage + Detail 弹层（打开期间） |
+| R6 | Generate 提交后 | 跳转 Detail 页 | 不新增独立路由；同一 Generate 路由从 Compose 进入图片优先 Stage |
+| R7 | Generate 按钮 | 提交期禁用 | Compose 只显示 Generate；Stage 非终态只显示 danger-outline Cancel |
+| R8 | Recent 10 | Generate 保留轻量入口 | 整体移除；Generate 只看唯一 current task，其余记录去 History |
 | R9 | 首个 Session | 用户手动创建 | 新 Workspace 首次进 Generate 自动创建；name = `session-` + id 前 8 位；可改名（复用已有 PATCH） |
 | R10 | 图片预览 | 本批可不做 lightbox | 做：简单预览弹层（左图 + 右侧信息卡），单张 + 关闭，无左右切换；一次只开一个弹层 |
 | R11 | Gallery Workspace 标签 | 每张图显式显示来源标签 | 无常驻标签；来源信息收于预览弹层信息卡 |
@@ -157,13 +159,13 @@ UI 文案使用 Workspace，代码和 HTTP DTO 继续使用 Project/`projectId`�
 | 色彩 | 不把陶土色设为主色；禁用大面积蓝紫渐变、霓虹发光和多色“AI 感”装饰；颜色应少而明确，accent、success、warning、danger 各司其职 |
 | 色值冻结 | 本轮不冻结最终 hex/OKLCH；文档冻结语义 token、对比度、用色数量和禁用项，具体色相在首个视觉实现提交中用真实页面校准 |
 | 表面 | 页面以 canvas、surface 与 1px hairline 建层级；常规页面不依赖阴影；Dialog/Popover 最多一级轻阴影 |
-| 主动作 | 一屏最多一个实心 accent 主动作；生成中原 Generate 原位变为 danger-outline Cancel，不并排新增第二主按钮 |
+| 主动作 | 一屏最多一个实心 accent 主动作；Compose 只有 Generate，Stage 非终态只有 danger-outline Cancel，不把两者并排或同时渲染 |
 | 圆角 | 采用圆角矩形而非 pill：chip 约 6px，按钮/输入约 8px，卡片/弹层约 12px，图片预览/Workspace 卡约 16px |
 | 字体密度 | sans-serif 为主，ID/credential/session 使用等宽字体；Home 独享 display 标题；Workspace 页面标题更克制；控件高 40px、目录行 48–52px |
 | 图标 | 不使用 emoji 作为 UI；只使用少量、统一线宽的语义图标，纯图标按钮必须有 accessible label |
 | Home | 56–64px 窄品牌顶栏；中央单一选择/创建 surface；Recent 3–4 列；空态不渲染空 Recent 区 |
 | Workspace 壳 | 桌面 248px 完整侧栏；只有 Generate 可出现 320–360px inspector；其余页面使用完整主区 |
-| Generate | Session 紧凑横条；Prompt 单一 surface；结果内嵌；模型与参数在 inspector；不重复参数区 |
+| Generate | Compose/Stage 互斥：Compose 将页名、Session、Prompt 压缩并只在此显示 inspector；Stage 隐藏 inspector、图片优先，下方仅为当前 Generation 的可折叠 Job 明细 |
 | History | 扁平、可折叠 Session 组；分隔线 + 行，不套卡；5 Session/页、组内 10 条 + 加载更多；整行进入 Detail |
 | Gallery | 纯图片、细 gutter、参差错落的 masonry-like 排布；无常驻标签；hover/focus 只显示少量信息，预览弹层承载完整元数据 |
 | Models / Providers | Linear 式扁平目录；Models 主行只保留名称/ID、必要能力摘要和 Switch；Providers 只显示真实配置来源与数量，不显示虚假健康状态 |
@@ -171,3 +173,17 @@ UI 文案使用 Workspace，代码和 HTTP DTO 继续使用 Project/`projectId`�
 | CSS 分层 | `globals.css` 只留 tokens/reset/Tailwind 入口；shadcn primitives 放 `components/ui`；壳、页面与弹层分别用 CSS Modules，按页面迁移后删除旧全局规则 |
 
 这些约束已经足以开始 UI 实施，但不是像素稿。实现模型可以在不违反信息层级、语义色、密度和禁用项的前提下调整具体 hue、留白、字重与图片节奏。
+
+## 0.12 Generate 双状态修订（2026-07-19）
+
+用户以生成式 UI 草图复核 Generate 后，确认此前“Prompt 下方内嵌结果区”的方案仍会让标题、Session、Prompt 与结果产生卡片堆叠。§0.9 的决策表已同步为最终结论，本节补充其完整约束：
+
+| 决策 | 最终结论 |
+|---|---|
+| 页面状态 | 同一路由下使用互斥 `Compose` / `Stage`，不是新全局页面，也不恢复巨型 `activeView` |
+| Compose 密度 | 去掉大副标题；页名与 Session 并排；Prompt 只保留一层输入 surface，默认 3–5 行 |
+| Stage | 提交成功进入；隐藏 Inspector；以实际返回图片为主要内容，不做 glassmorphism 大卡 |
+| 返回编辑 | 退出 Stage 即解除详情 poll，后台 worker 继续；Compose 的“当前任务”区域可重新进入 Stage 并恢复 poll |
+| 当前任务唯一性 | Generate 只保留最近一次成功提交；下一次 POST 成功后原子替换上一次 id/快照/订阅，Stage 只展示本次 Generation；POST 失败保留旧入口 |
+| Job 明细 | 只展示当前 Generation 的 Provider/model/status、实际图片数和安全错误摘要；默认可折叠，不加入 Session 历史 |
+| 后端边界 | 现有 `GenerationView.jobs` + `images[].jobId` 已足够；本批不新增 Job 字段，不伪造 expected total、百分比、队列位置或耗时 |
