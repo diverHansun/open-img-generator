@@ -1,4 +1,5 @@
 import type { TranslationKey } from '@/lib/i18n';
+import type { GenerationStatus, JobView } from '@/lib/web-client';
 
 const JOB_ERROR_MESSAGE_KEYS = {
   AUTH_FAILED: 'generation.jobError.authentication',
@@ -8,6 +9,7 @@ const JOB_ERROR_MESSAGE_KEYS = {
   PROVIDER_ERROR: 'generation.jobError.provider',
   TIMEOUT: 'generation.jobError.timeout',
   CANCEL_UNSUPPORTED: 'generation.jobError.cancelUnconfirmed',
+  CANCEL_UNCONFIRMED: 'generation.jobError.cancelUnconfirmed',
   INTERNAL_ERROR: 'generation.jobError.generic',
   INVALID_HANDLE: 'generation.jobError.generic',
   PROVIDER_NOT_FOUND: 'generation.jobError.provider',
@@ -28,4 +30,18 @@ export function getJobErrorMessageKey(code: string): TranslationKey {
     return JOB_ERROR_MESSAGE_KEYS[code as keyof typeof JOB_ERROR_MESSAGE_KEYS];
   }
   return 'generation.jobError.generic';
+}
+
+/**
+ * A retryable diagnostic is durable so workers can recover it, but it is not
+ * a user-visible failure while the job is still active (or cancelling). A
+ * terminal failed job still shows its diagnostic even if a legacy producer
+ * marked it retryable.
+ */
+export function shouldShowJobError(
+  status: GenerationStatus,
+  error: JobView['error'],
+): boolean {
+  if (!error) return false;
+  return status === 'failed' || error.retryable !== true;
 }

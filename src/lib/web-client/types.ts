@@ -156,7 +156,7 @@ export type GenerationSummary = Omit<
     provider: ProviderId;
     model: string;
     status: GenerationStatus;
-    error: unknown | null;
+    error: JobView['error'] | null;
   }>;
   images: Array<Omit<ImageView, 'index' | 'favorited'>>;
 };

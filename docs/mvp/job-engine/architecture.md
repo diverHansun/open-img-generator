@@ -3,7 +3,7 @@
 > 模块路径: `src/lib/job-engine/`
 > 前置文档: goals-duty.md (已确认)
 > 文档顺序: ① goals-duty → ② architecture(本文) → ④ dfd-interface → ⑤ use-case → ⑦ test
-> 修订说明: 2026-07-20 D1 durable admission、phase/lease lifecycle、默认 in-process worker 与 inline staging
+> 修订说明: 2026-07-20 D1/D2 durable admission、phase/lease lifecycle、默认 worker、inline staging 与持久化 poll/cancel retry
 
 ---
 
@@ -22,7 +22,7 @@ worker or detail GET ─────────→ lifecycle ──→ provider
 | **lifecycle** | 管理**单个** generation_job 的 phase/lease 状态推进：dispatch、poll、storing、cancelling。所有外部结果以 phase + lease + cancel marker 条件写回；图片 row 与状态聚合采用短 transaction checkpoint。 |
 | **validator** | submit 前校验: targets 非空且唯一；每个 target 的 provider/model/capabilities；共享参数对该 target 是否合法；session 是否存在。 |
 | **worker** | 默认启动的进程内 due-job 扫描器；与详情 GET 复用同一 `advance(job)`，不拥有第二套状态逻辑。 |
-| **request-snapshot / state-machine** | 分别约束持久化派发输入与内部 phase 的合法枚举，避免进程重启时从 UI/body 猜测参数或状态。 |
+| **request-snapshot / state-machine / retry-policy** | 分别约束持久化派发输入、内部 phase 的合法枚举与 poll/cancel 有界重试，避免进程重启时从 UI/body 猜测参数、状态或重试预算。 |
 
 **外部依赖**（job-engine 调用但不拥有）:
 
@@ -102,6 +102,7 @@ src/lib/job-engine/
 ├── validator.ts          # targets[] + 每 target capabilities 校验
 ├── request-snapshot.ts   # versioned/allowlisted NormalizedRequest snapshot
 ├── state-machine.ts      # phase 枚举与 public-status 边界
+├── retry-policy.ts       # poll/cancel 的 attempt、elapsed 与 full-jitter 决策
 ├── worker.ts             # 默认后台 due scan + 生命周期清理
 └── types.ts              # SubmitGenerationParams, GenerationView 等
 ```
@@ -180,9 +181,21 @@ sync target 被 claim 后才调用 `provider.submit()`；其返回的 image refs
 
 provider limiter 当前限制同一 provider 的 submit/poll/cancel 并发，不把不同 provider 串行化。全局内存 admission helper 不在 durable POST 路径；有界队列、deadline 与多实例 backpressure 是后续强化项。
 
-### 4.10 不重试
+### 4.10 D2：有界 poll/cancel retry，不重放 submit
 
-本批不对不确定的 submit 自动重放：发送后超时/断线进入 `outcome_unknown`，避免重复计费。poll/storage 的有界退避策略由后续批次补齐；不能把 fulfilled Promise 当作业务成功。
+不确定的 submit 仍绝不自动重放：发送后超时/断线进入 `outcome_unknown`，避免重复计费。D2 只重试已持久化 `JobHandle` 上的安全动作：poll 与 remote cancel。
+
+| 动作 | 最大外部调用次数 | 基础/上限 delay | 总 elapsed 窗口 | 穷尽结果 |
+|------|------------------|-----------------|----------------|----------|
+| poll | 6 | 2s（当前 6-call budget 的最大实际 delay 为 32s；60s 为预留 policy ceiling） | 10 分钟 | `failed + terminal + RETRY_EXHAUSTED` |
+| cancel | 3 | 1s（当前 3-call budget 的最大实际 delay 为 2s；10s 为预留 policy ceiling） | 30 秒 | `cancelled + terminal + RETRY_EXHAUSTED` |
+
+- `attempt_count` 是当前 phase 已发生的 retryable failure 数；`retry_started_at` 是同一窗口的起点。二者必须同时存在或同时为空；损坏/半写状态安全收口，不能重新授予预算。
+- delay 使用带 250ms 下限的 full jitter；worker/detail 都只按持久化 `next_poll_at` 继续，不依赖进程内 timer。
+- typed `ProviderError.retryable === true` 或 poll/cancel 调用异常才进入 retry；成功 pending/running 与进入 storing 会清空 transient error 和 retry state，任何终态/取消切换都会清空 retry state，而终态会保留对应的**安全**诊断（如 `RETRY_EXHAUSTED`）。
+- Provider adapter 的运行时返回会先安全归一化为 plain snapshot；`null`、未知 status 或 poll 的不可读 completed result 以有界 `PROVIDER_ERROR` retry checkpoint 收口。cancel 的不可读附加字段也不会让 lease 悬挂或复活本地状态。
+- 外部错误的原始 message/body/prompt/URL 不写入 job row；持久化与 DTO 只使用 allowlisted code、固定安全文案和已验证的 retryable 布尔值。
+- D2 不改变 adapter 的 HTTP disposition/Retry-After 判定，也不对 storage/download 重试；这些与 limiter queue deadline 一并属于 Batch E。
 
 ---
 

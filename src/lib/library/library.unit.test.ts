@@ -6,6 +6,7 @@ import {
   createProject,
   createSession,
   deleteProject,
+  getProjectHistory,
   listFavorites,
   listGenerations,
   listModelPreferences,
@@ -101,6 +102,39 @@ describe('library domain', () => {
     expect(() => listGenerations({ limit: Number.NaN }, testDb.db)).toThrow(
       'limit must be a positive integer',
     );
+  });
+
+  it('redacts persisted job diagnostics in generation and project history reads', () => {
+    const canary = 'private prompt https://signed.example/image.png?token=secret';
+    seedGeneration(testDb, {
+      generationId: 'generation-private-error',
+      sessionId: 'default-session',
+      createdAt: '2026-07-16T03:00:00.000Z',
+    });
+    testDb.sqlite
+      .prepare('UPDATE generation_jobs SET error = ? WHERE id = ?')
+      .run(
+        JSON.stringify({
+          code: 'TIMEOUT',
+          message: canary,
+          retryable: false,
+        }),
+        'job-generation-private-error',
+      );
+
+    const summary = listGenerations(
+      { sessionId: 'default-session' },
+      testDb.db,
+    ).items[0]!;
+    const history = getProjectHistory({ projectId: 'default-project' }, testDb.db);
+
+    expect(summary.jobs[0]?.error).toEqual({
+      code: 'TIMEOUT',
+      message: 'Provider request timed out',
+      retryable: false,
+    });
+    expect(history.groups[0]?.items[0]?.jobs[0]?.error).toEqual(summary.jobs[0]?.error);
+    expect(JSON.stringify({ summary, history })).not.toContain(canary);
   });
 
   it('returns 404 semantics for missing history targets', () => {

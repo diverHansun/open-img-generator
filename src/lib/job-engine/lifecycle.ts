@@ -26,12 +26,12 @@ import { StorageError } from '../errors';
 import { getById } from '../providers';
 import type {
   JobHandle,
-  PollResult,
   ProviderImageRef,
   SubmitResult,
 } from '../providers';
 import { withProviderLimit } from '../providers/limiter';
 import * as storage from '../storage';
+import { serializeSafeJobError } from './job-error';
 import { parseRequestSnapshot } from './request-snapshot';
 import {
   canTransitionJobPhase,
@@ -39,16 +39,22 @@ import {
   type AdvanceOutcome,
   type JobPhase,
 } from './state-machine';
+import {
+  decideRetry,
+  resetRetryState,
+  type RetryOperation,
+} from './retry-policy';
 import type { GenerationStatus } from './types';
 
 export type StoreImagesResult =
-  | { kind: 'ok'; count: number }
-  | { kind: 'failed'; error: StorageError };
+  { kind: 'ok'; count: number } | { kind: 'failed'; error: StorageError };
 
 // Covers one outside call. A recovery worker must never replay an expired
 // dispatch lease because Provider acceptance is no longer knowable then.
 export const POLL_LEASE_MS = 300_000;
-export const POLL_RETRY_DELAY_MS = 5_000;
+export const POLL_INTERVAL_MS = 5_000;
+/** @deprecated This is the successful-poll cadence, not a failure backoff. */
+export const POLL_RETRY_DELAY_MS = POLL_INTERVAL_MS;
 const MAX_RESULT_SNAPSHOT_BYTES = 128 * 1_024;
 const MAX_RESULT_URL_LENGTH = 8 * 1_024;
 const MAX_RESULT_CONTENT_TYPE_LENGTH = 256;
@@ -62,16 +68,126 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function retryAt(): string {
-  return new Date(Date.now() + POLL_RETRY_DELAY_MS).toISOString();
+function nextPollAt(): string {
+  return new Date(Date.now() + POLL_INTERVAL_MS).toISOString();
 }
 
 function jobDiagnostic(
   code: string,
-  message: string,
+  _message: string,
   retryable = false,
 ): string {
-  return JSON.stringify({ code, message, retryable });
+  return serializeSafeJobError(code, retryable);
+}
+
+function safeRecordValue(value: object, key: string): unknown {
+  try {
+    return Reflect.get(value, key);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Provider error messages are untrusted diagnostic data. Persist only the
+ * allowlisted code and the provider's explicit retryability decision; never
+ * copy its message, response body, prompt, URL, or arbitrary extra fields.
+ */
+function providerFailureDiagnostic(error: unknown): {
+  diagnostic: string;
+  retryable: boolean;
+} {
+  if (
+    typeof error !== 'object' ||
+    error === null ||
+    Array.isArray(error) ||
+    typeof safeRecordValue(error, 'retryable') !== 'boolean'
+  ) {
+    return {
+      diagnostic: serializeSafeJobError(
+        'PROVIDER_ERROR',
+        false,
+        'PROVIDER_ERROR',
+      ),
+      retryable: false,
+    };
+  }
+  const retryable = safeRecordValue(error, 'retryable') as boolean;
+  return {
+    diagnostic: serializeSafeJobError(
+      safeRecordValue(error, 'code'),
+      retryable,
+      'PROVIDER_ERROR',
+    ),
+    retryable,
+  };
+}
+
+type NormalizedPollResult =
+  | { status: 'pending' }
+  | { status: 'running' }
+  | { status: 'completed'; images: unknown[] | null }
+  | { status: 'failed'; error: { code: unknown; retryable: unknown } }
+  | { status: 'cancelled' };
+
+function normalizeProviderImageRefs(value: unknown): unknown[] | null {
+  if (!Array.isArray(value)) return null;
+  try {
+    return Array.from(value, (image) => {
+      if (typeof image !== 'object' || image === null || Array.isArray(image)) {
+        return image;
+      }
+      return {
+        url: safeRecordValue(image, 'url'),
+        width: safeRecordValue(image, 'width'),
+        height: safeRecordValue(image, 'height'),
+        contentType: safeRecordValue(image, 'contentType'),
+        index: safeRecordValue(image, 'index'),
+      };
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Adapter TypeScript types cannot protect the durable worker from a malformed
+ * runtime response. Read each Provider-owned field once into a plain snapshot
+ * so an exception/stateful getter cannot throw after the lease was claimed.
+ */
+function normalizePollResult(value: unknown): NormalizedPollResult | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  switch (safeRecordValue(value, 'status')) {
+    case 'pending':
+      return { status: 'pending' };
+    case 'running':
+      return { status: 'running' };
+    case 'completed':
+      return {
+        status: 'completed',
+        images: normalizeProviderImageRefs(safeRecordValue(value, 'images')),
+      };
+    case 'failed':
+      {
+        const error = safeRecordValue(value, 'error');
+        return {
+          status: 'failed',
+          error:
+            typeof error === 'object' && error !== null && !Array.isArray(error)
+              ? {
+                  code: safeRecordValue(error, 'code'),
+                  retryable: safeRecordValue(error, 'retryable'),
+                }
+              : { code: undefined, retryable: undefined },
+        };
+      }
+    case 'cancelled':
+      return { status: 'cancelled' };
+    default:
+      return null;
+  }
 }
 
 function normalizePhase(value: string): JobPhase {
@@ -149,10 +265,14 @@ export function updateJobAndGeneration(
         )
       : (updateGenerationJob(jobId, normalized, tx), true);
     if (!updated) return;
-    updateGeneration(generationId, {
-      status: deriveGenerationStatus(generationId, tx),
-      updatedAt: normalized.updatedAt,
-    }, tx);
+    updateGeneration(
+      generationId,
+      {
+        status: deriveGenerationStatus(generationId, tx),
+        updatedAt: normalized.updatedAt,
+      },
+      tx,
+    );
   });
   return updated;
 }
@@ -172,10 +292,14 @@ export function updateJobAndGenerationIfNotCancelled(
     if (!normalized) return;
     updated = updateGenerationJobIfNotCancelled(jobId, normalized, tx);
     if (!updated) return;
-    updateGeneration(generationId, {
-      status: deriveGenerationStatus(generationId, tx),
-      updatedAt: normalized.updatedAt,
-    }, tx);
+    updateGeneration(
+      generationId,
+      {
+        status: deriveGenerationStatus(generationId, tx),
+        updatedAt: normalized.updatedAt,
+      },
+      tx,
+    );
   });
   return updated;
 }
@@ -186,7 +310,10 @@ export function syncGenerationStatus(
 ): void {
   updateGeneration(
     generationId,
-    { status: deriveGenerationStatus(generationId, client), updatedAt: nowIso() },
+    {
+      status: deriveGenerationStatus(generationId, client),
+      updatedAt: nowIso(),
+    },
     client,
   );
 }
@@ -206,9 +333,10 @@ export async function storeImages(
     try {
       result = await storage.downloadAndStore(ref.url);
     } catch (err) {
-      const error = err instanceof StorageError
-        ? err
-        : new StorageError('Generated image could not be stored', err);
+      const error =
+        err instanceof StorageError
+          ? err
+          : new StorageError('Generated image could not be stored', err);
       return { kind: 'failed', error };
     }
     const inserted = createImageIfAbsent(
@@ -246,7 +374,8 @@ export async function completeSync(
   expectedPollLeaseUntil?: string,
 ): Promise<void> {
   const current = getGenerationJob(jobId, client);
-  if (!current || current.status === 'cancelled' || current.cancelRequestedAt) return;
+  if (!current || current.status === 'cancelled' || current.cancelRequestedAt)
+    return;
   const result = await storeImages(jobId, images, client);
   const updatedAt = nowIso();
   updateJobAndGeneration(
@@ -261,17 +390,23 @@ export async function completeSync(
           resultSnapshot: null,
           requestSnapshot: null,
           requestSnapshotVersion: null,
+          ...resetRetryState(),
           updatedAt,
         }
       : {
           status: 'failed',
           phase: 'terminal',
-          error: jobDiagnostic('STORAGE_ERROR', result.error.message, false),
+          error: jobDiagnostic(
+            'STORAGE_ERROR',
+            'Generated image could not be stored',
+            false,
+          ),
           pollLeaseUntil: null,
           nextPollAt: null,
           resultSnapshot: null,
           requestSnapshot: null,
           requestSnapshotVersion: null,
+          ...resetRetryState(),
           updatedAt,
         },
     client,
@@ -281,14 +416,18 @@ export async function completeSync(
 }
 
 function imageRefSnapshot(refs: ProviderImageRef[]): string {
-  const snapshot = JSON.stringify(refs.map((ref) => ({
-    url: ref.url,
-    width: ref.width,
-    height: ref.height,
-    contentType: ref.contentType,
-    index: ref.index,
-  })));
-  if (new TextEncoder().encode(snapshot).byteLength > MAX_RESULT_SNAPSHOT_BYTES) {
+  const snapshot = JSON.stringify(
+    refs.map((ref) => ({
+      url: ref.url,
+      width: ref.width,
+      height: ref.height,
+      contentType: ref.contentType,
+      index: ref.index,
+    })),
+  );
+  if (
+    new TextEncoder().encode(snapshot).byteLength > MAX_RESULT_SNAPSHOT_BYTES
+  ) {
     throw new Error('Result snapshot exceeds its limit');
   }
   return snapshot;
@@ -301,12 +440,10 @@ function isInlineImageDataUrl(value: unknown): boolean {
 function isPersistableImageRefUrl(value: unknown): value is string {
   return (
     storage.isStagedImageRef(value) ||
-    (
-      typeof value === 'string' &&
+    (typeof value === 'string' &&
       value.length > 0 &&
       value.length <= MAX_RESULT_URL_LENGTH &&
-      !isInlineImageDataUrl(value)
-    )
+      !isInlineImageDataUrl(value))
   );
 }
 
@@ -315,17 +452,25 @@ function isResultImageCandidateUrl(value: unknown): value is string {
 }
 
 function stagedReferencesFromSnapshot(serialized: string | null): string[] {
-  if (!serialized || new TextEncoder().encode(serialized).byteLength > MAX_RESULT_SNAPSHOT_BYTES) {
+  if (
+    !serialized ||
+    new TextEncoder().encode(serialized).byteLength > MAX_RESULT_SNAPSHOT_BYTES
+  ) {
     return [];
   }
   try {
     const parsed = JSON.parse(serialized) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return [...new Set(parsed.flatMap((value) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
-      const reference = (value as Record<string, unknown>).url;
-      return storage.isStagedImageRef(reference) ? [reference] : [];
-    }))];
+    return [
+      ...new Set(
+        parsed.flatMap((value) => {
+          if (!value || typeof value !== 'object' || Array.isArray(value))
+            return [];
+          const reference = (value as Record<string, unknown>).url;
+          return storage.isStagedImageRef(reference) ? [reference] : [];
+        }),
+      ),
+    ];
   } catch {
     return [];
   }
@@ -419,8 +564,10 @@ function boundedImageRefs(
       isResultImageCandidateUrl(url) &&
       typeof contentType === 'string' &&
       contentType.length <= MAX_RESULT_CONTENT_TYPE_LENGTH &&
-      (width === null || (typeof width === 'number' && Number.isInteger(width))) &&
-      (height === null || (typeof height === 'number' && Number.isInteger(height)))
+      (width === null ||
+        (typeof width === 'number' && Number.isInteger(width))) &&
+      (height === null ||
+        (typeof height === 'number' && Number.isInteger(height)))
     ) {
       unique.set(index, {
         url,
@@ -453,6 +600,7 @@ function applyTerminalFailure(
       resultSnapshot: null,
       requestSnapshot: null,
       requestSnapshotVersion: null,
+      ...resetRetryState(),
       updatedAt: nowIso(),
     },
     client,
@@ -468,17 +616,28 @@ function finishCancelledBeforeDispatch(
   client: DbClient,
   expectedPollLeaseUntil: string,
 ): boolean {
+  return finishCancellation(job, client, expectedPollLeaseUntil, null);
+}
+
+function finishCancellation(
+  job: GenerationJob,
+  client: DbClient,
+  expectedPollLeaseUntil: string,
+  error: string | null,
+): boolean {
   const applied = updateJobAndGeneration(
     job.id,
     job.generationId,
     {
       status: 'cancelled',
       phase: 'terminal',
+      error,
       pollLeaseUntil: null,
       nextPollAt: null,
       resultSnapshot: null,
       requestSnapshot: null,
       requestSnapshotVersion: null,
+      ...resetRetryState(),
       updatedAt: nowIso(),
     },
     client,
@@ -487,6 +646,71 @@ function finishCancelledBeforeDispatch(
   );
   if (applied) cleanupStagedResultSnapshot(job.resultSnapshot);
   return applied;
+}
+
+/**
+ * Poll and remote-cancellation are safe to retry because both target a
+ * durable provider handle. Dispatch intentionally never enters this path:
+ * replaying an ambiguous submit could create a second billable job.
+ */
+function scheduleRetryOrFinish(
+  job: GenerationJob,
+  operation: RetryOperation,
+  error: string,
+  client: DbClient,
+  expectedPollLeaseUntil: string,
+): AdvanceOutcome {
+  const decision = decideRetry(operation, {
+    attemptCount: job.attemptCount,
+    retryStartedAt: job.retryStartedAt,
+  });
+  const expectedPhase: GenerationJobPhase =
+    operation === 'poll' ? 'polling' : 'cancelling';
+
+  if (decision.kind === 'exhausted') {
+    const exhausted = jobDiagnostic(
+      'RETRY_EXHAUSTED',
+      `${operation === 'poll' ? 'Provider poll' : 'Remote cancellation'} retry budget was exhausted (${decision.reason})`,
+      false,
+    );
+    if (operation === 'cancel') {
+      return finishCancellation(job, client, expectedPollLeaseUntil, exhausted)
+        ? 'cancelled'
+        : 'skipped';
+    }
+    return applyTerminalFailure(
+      job,
+      exhausted,
+      client,
+      expectedPollLeaseUntil,
+      expectedPhase,
+    )
+      ? 'failed'
+      : 'skipped';
+  }
+
+  const applied = updateJobAndGeneration(
+    job.id,
+    job.generationId,
+    {
+      status:
+        operation === 'cancel' ? 'cancelled' : (job.status as GenerationStatus),
+      phase: expectedPhase,
+      error,
+      pollLeaseUntil: null,
+      nextPollAt: decision.nextAttemptAt,
+      attemptCount: decision.attemptCount,
+      retryStartedAt: decision.retryStartedAt,
+      updatedAt: nowIso(),
+    },
+    client,
+    expectedPollLeaseUntil,
+    {
+      expectedPhase,
+      allowCancellation: operation === 'cancel',
+    },
+  );
+  return applied ? 'retried' : 'skipped';
 }
 
 function isCurrentDispatchLease(
@@ -544,13 +768,15 @@ function commitStoredImageAttempt(
     // This conditional write is the serialization point with cancellation.
     // It keeps the same lease token but takes SQLite's write lock before an
     // image row can be inserted.
-    if (!updateGenerationJobIfLease(
-      job.id,
-      expectedPollLeaseUntil,
-      { updatedAt: checkpointAt },
-      tx,
-      { expectedPhase: 'storing' },
-    )) {
+    if (
+      !updateGenerationJobIfLease(
+        job.id,
+        expectedPollLeaseUntil,
+        { updatedAt: checkpointAt },
+        tx,
+        { expectedPhase: 'storing' },
+      )
+    ) {
       return;
     }
     const inserted = createImageIfAbsent(
@@ -574,6 +800,7 @@ function commitStoredImageAttempt(
           phase: 'storing',
           pollLeaseUntil: null,
           nextPollAt: checkpointAt,
+          ...resetRetryState(),
           updatedAt: checkpointAt,
         }
       : {
@@ -584,30 +811,34 @@ function commitStoredImageAttempt(
           resultSnapshot: null,
           requestSnapshot: null,
           requestSnapshotVersion: null,
+          ...resetRetryState(),
           updatedAt: checkpointAt,
         };
-    if (!updateGenerationJobIfLease(
-      job.id,
-      expectedPollLeaseUntil,
-      nextPatch,
-      tx,
-      { expectedPhase: 'storing' },
-    )) {
+    if (
+      !updateGenerationJobIfLease(
+        job.id,
+        expectedPollLeaseUntil,
+        nextPatch,
+        tx,
+        { expectedPhase: 'storing' },
+      )
+    ) {
       throw new Error('Stored image checkpoint lost its lease unexpectedly');
     }
-    updateGeneration(job.generationId, {
-      status: deriveGenerationStatus(job.generationId, tx),
-      updatedAt: checkpointAt,
-    }, tx);
+    updateGeneration(
+      job.generationId,
+      {
+        status: deriveGenerationStatus(job.generationId, tx),
+        updatedAt: checkpointAt,
+      },
+      tx,
+    );
     result = { accepted: true, inserted, completed: !hasMore };
   });
   return result;
 }
 
-function applyOutcomeUnknown(
-  job: GenerationJob,
-  client: DbClient,
-): boolean {
+function applyOutcomeUnknown(job: GenerationJob, client: DbClient): boolean {
   const changed = markExpiredDispatchingJobOutcomeUnknown(
     job.id,
     nowIso(),
@@ -624,7 +855,7 @@ function applyOutcomeUnknown(
 
 async function persistProviderImages(
   job: GenerationJob,
-  images: ProviderImageRef[],
+  images: unknown,
   client: DbClient,
   expectedPollLeaseUntil: string,
   expectedPhase: GenerationJobPhase,
@@ -632,13 +863,26 @@ async function persistProviderImages(
   // Adapter typings are not a security or reliability boundary. A malformed
   // provider response must become a durable safe failure, never escape the
   // worker and leave a due job permanently pending.
-  const rawImages: unknown[] = Array.isArray(images) ? images : [];
+  const rawImages = normalizeProviderImageRefs(images);
+  if (rawImages === null) {
+    return applyTerminalFailure(
+      job,
+      jobDiagnostic(
+        'STORAGE_RESPONSE_INVALID',
+        'Provider returned an invalid image result',
+      ),
+      client,
+      expectedPollLeaseUntil,
+      expectedPhase,
+    )
+      ? 'failed'
+      : 'skipped';
+  }
   let requestedCount = 1;
   try {
-    requestedCount = parseRequestSnapshot(
-      job.requestSnapshot,
-      job.requestSnapshotVersion,
-    ).count ?? 1;
+    requestedCount =
+      parseRequestSnapshot(job.requestSnapshot, job.requestSnapshotVersion)
+        .count ?? 1;
   } catch {
     // v2 jobs that already hold an async handle are intentionally recoverable
     // after the v3 migration even though they never had a request snapshot.
@@ -651,7 +895,10 @@ async function persistProviderImages(
     } else {
       return applyTerminalFailure(
         job,
-        jobDiagnostic('INTERNAL_ERROR', 'Stored generation request could not be recovered'),
+        jobDiagnostic(
+          'INTERNAL_ERROR',
+          'Stored generation request could not be recovered',
+        ),
         client,
         expectedPollLeaseUntil,
         expectedPhase,
@@ -685,7 +932,10 @@ async function persistProviderImages(
   } catch {
     return applyTerminalFailure(
       job,
-      jobDiagnostic('STORAGE_RESPONSE_INVALID', 'Provider returned an invalid inline image result'),
+      jobDiagnostic(
+        'STORAGE_RESPONSE_INVALID',
+        'Provider returned an invalid inline image result',
+      ),
       client,
       expectedPollLeaseUntil,
       expectedPhase,
@@ -693,21 +943,29 @@ async function persistProviderImages(
       ? 'failed'
       : 'skipped';
   }
-  const warning = refs.length < requestedCount
-    ? jobDiagnostic(
-        'PROVIDER_PARTIAL_RESULT',
-        'Provider returned fewer images than requested',
-        false,
-      )
-    : null;
+  const warning =
+    refs.length < requestedCount
+      ? jobDiagnostic(
+          'PROVIDER_PARTIAL_RESULT',
+          'Provider returned fewer images than requested',
+          false,
+        )
+      : null;
   let resultSnapshot: string;
   try {
     resultSnapshot = imageRefSnapshot(refs);
   } catch {
-    cleanupStagedReferences(refs.filter((ref) => storage.isStagedImageRef(ref.url)).map((ref) => ref.url));
+    cleanupStagedReferences(
+      refs
+        .filter((ref) => storage.isStagedImageRef(ref.url))
+        .map((ref) => ref.url),
+    );
     return applyTerminalFailure(
       job,
-      jobDiagnostic('STORAGE_RESPONSE_INVALID', 'Provider returned an oversized image result'),
+      jobDiagnostic(
+        'STORAGE_RESPONSE_INVALID',
+        'Provider returned an oversized image result',
+      ),
       client,
       expectedPollLeaseUntil,
       expectedPhase,
@@ -725,6 +983,7 @@ async function persistProviderImages(
       error: warning,
       pollLeaseUntil: null,
       nextPollAt: nowIso(),
+      ...resetRetryState(),
       updatedAt: nowIso(),
     },
     client,
@@ -732,7 +991,11 @@ async function persistProviderImages(
     { expectedPhase },
   );
   if (!applied) {
-    cleanupStagedReferences(refs.filter((ref) => storage.isStagedImageRef(ref.url)).map((ref) => ref.url));
+    cleanupStagedReferences(
+      refs
+        .filter((ref) => storage.isStagedImageRef(ref.url))
+        .map((ref) => ref.url),
+    );
   }
   return applied ? 'advanced' : 'skipped';
 }
@@ -743,7 +1006,14 @@ async function dispatchQueuedJob(
 ): Promise<AdvanceOutcome> {
   const now = new Date();
   const claimedUntil = new Date(now.getTime() + POLL_LEASE_MS).toISOString();
-  if (!tryClaimQueuedJobForDispatch(job.id, now.toISOString(), claimedUntil, client)) {
+  if (
+    !tryClaimQueuedJobForDispatch(
+      job.id,
+      now.toISOString(),
+      claimedUntil,
+      client,
+    )
+  ) {
     return 'skipped';
   }
   const claimed = getGenerationJob(job.id, client);
@@ -758,7 +1028,10 @@ async function dispatchQueuedJob(
   } catch {
     return applyTerminalFailure(
       claimed,
-      jobDiagnostic('INTERNAL_ERROR', 'Stored generation request could not be recovered'),
+      jobDiagnostic(
+        'INTERNAL_ERROR',
+        'Stored generation request could not be recovered',
+      ),
       client,
       claimedUntil,
       'dispatching',
@@ -781,13 +1054,17 @@ async function dispatchQueuedJob(
 
   let result: SubmitResult | null;
   try {
-    result = await withProviderLimit<SubmitResult | null>(provider.id, async () => {
-      // This executes after a possible limiter wait. Do not start a new
-      // billable request if cancellation committed while the work was queued.
-      if (!isCurrentDispatchLease(claimed.id, claimedUntil, client)) return null;
-      return provider.submit(request, claimed.model);
-    });
-  } catch (cause) {
+    result = await withProviderLimit<SubmitResult | null>(
+      provider.id,
+      async () => {
+        // This executes after a possible limiter wait. Do not start a new
+        // billable request if cancellation committed while the work was queued.
+        if (!isCurrentDispatchLease(claimed.id, claimedUntil, client))
+          return null;
+        return provider.submit(request, claimed.model);
+      },
+    );
+  } catch {
     // Batch D deliberately treats a started request whose result is unknown as
     // non-replayable. Batch E will classify pre-send vs. remote outcomes.
     return updateJobAndGeneration(
@@ -798,7 +1075,7 @@ async function dispatchQueuedJob(
         phase: 'outcome_unknown',
         error: jobDiagnostic(
           'PROVIDER_OUTCOME_UNKNOWN',
-          cause instanceof Error ? cause.message : 'Provider dispatch outcome is unknown',
+          'Provider dispatch outcome is unknown',
           false,
         ),
         pollLeaseUntil: null,
@@ -806,6 +1083,7 @@ async function dispatchQueuedJob(
         resultSnapshot: null,
         requestSnapshot: null,
         requestSnapshotVersion: null,
+        ...resetRetryState(),
         updatedAt: nowIso(),
       },
       client,
@@ -818,12 +1096,10 @@ async function dispatchQueuedJob(
 
   if (result === null) {
     const cancelled = getGenerationJob(claimed.id, client);
-    return (
-      cancelled?.phase === 'cancelling' &&
+    return cancelled?.phase === 'cancelling' &&
       cancelled.cancelRequestedAt !== null &&
       cancelled.pollLeaseUntil === claimedUntil &&
       finishCancelledBeforeDispatch(claimed, client, claimedUntil)
-    )
       ? 'cancelled'
       : 'skipped';
   }
@@ -839,6 +1115,7 @@ async function dispatchQueuedJob(
           providerHandle: JSON.stringify(result.handle),
           pollLeaseUntil: null,
           nextPollAt: nowIso(),
+          ...resetRetryState(),
           updatedAt: nowIso(),
         },
         client,
@@ -864,16 +1141,18 @@ async function dispatchQueuedJob(
         claimedUntil,
         'dispatching',
       );
-    case 'failed':
+    case 'failed': {
+      const failure = providerFailureDiagnostic(result.error);
       return applyTerminalFailure(
         claimed,
-        JSON.stringify(result.error),
+        failure.diagnostic,
         client,
         claimedUntil,
         'dispatching',
       )
         ? 'failed'
         : 'skipped';
+    }
   }
 }
 
@@ -906,25 +1185,9 @@ async function pollJob(
   if (!provider?.poll) {
     return applyTerminalFailure(
       claimed,
-      jobDiagnostic('PROVIDER_NOT_FOUND', 'Configured provider cannot poll this job'),
-      client,
-      claimedUntil,
-      'polling',
-    )
-      ? 'failed'
-      : 'skipped';
-  }
-
-  let result: PollResult;
-  try {
-    result = await withProviderLimit(provider.id, () => provider.poll!(handle));
-  } catch (cause) {
-    return applyTerminalFailure(
-      claimed,
       jobDiagnostic(
-        'PROVIDER_ERROR',
-        cause instanceof Error ? cause.message : 'Provider poll failed',
-        false,
+        'PROVIDER_NOT_FOUND',
+        'Configured provider cannot poll this job',
       ),
       client,
       claimedUntil,
@@ -934,16 +1197,46 @@ async function pollJob(
       : 'skipped';
   }
 
+  let providerResult: unknown;
+  try {
+    providerResult = await withProviderLimit(provider.id, () =>
+      provider.poll!(handle),
+    );
+  } catch {
+    return scheduleRetryOrFinish(
+      claimed,
+      'poll',
+      jobDiagnostic('PROVIDER_ERROR', 'Provider poll failed', true),
+      client,
+      claimedUntil,
+    );
+  }
+  const result = normalizePollResult(providerResult);
+  if (!result) {
+    return scheduleRetryOrFinish(
+      claimed,
+      'poll',
+      jobDiagnostic('PROVIDER_ERROR', 'Provider returned an invalid poll result', true),
+      client,
+      claimedUntil,
+    );
+  }
+
   switch (result.status) {
     case 'pending': {
       const applied = updateJobAndGeneration(
         claimed.id,
         claimed.generationId,
         {
-          status: keepMonotonicStatus(claimed.status as GenerationStatus, 'pending'),
+          status: keepMonotonicStatus(
+            claimed.status as GenerationStatus,
+            'pending',
+          ),
           phase: 'polling',
+          error: null,
           pollLeaseUntil: null,
-          nextPollAt: retryAt(),
+          nextPollAt: nextPollAt(),
+          ...resetRetryState(),
           updatedAt: nowIso(),
         },
         client,
@@ -959,8 +1252,10 @@ async function pollJob(
         {
           status: 'running',
           phase: 'polling',
+          error: null,
           pollLeaseUntil: null,
-          nextPollAt: retryAt(),
+          nextPollAt: nextPollAt(),
+          ...resetRetryState(),
           updatedAt: nowIso(),
         },
         client,
@@ -970,6 +1265,19 @@ async function pollJob(
       return applied ? 'advanced' : 'skipped';
     }
     case 'completed':
+      if (result.images === null) {
+        return scheduleRetryOrFinish(
+          claimed,
+          'poll',
+          jobDiagnostic(
+            'PROVIDER_ERROR',
+            'Provider returned an invalid completed result',
+            true,
+          ),
+          client,
+          claimedUntil,
+        );
+      }
       return persistProviderImages(
         claimed,
         result.images,
@@ -977,16 +1285,27 @@ async function pollJob(
         claimedUntil,
         'polling',
       );
-    case 'failed':
+    case 'failed': {
+      const failure = providerFailureDiagnostic(result.error);
+      if (failure.retryable) {
+        return scheduleRetryOrFinish(
+          claimed,
+          'poll',
+          failure.diagnostic,
+          client,
+          claimedUntil,
+        );
+      }
       return applyTerminalFailure(
         claimed,
-        JSON.stringify(result.error),
+        failure.diagnostic,
         client,
         claimedUntil,
         'polling',
       )
         ? 'failed'
         : 'skipped';
+    }
     case 'cancelled': {
       const applied = updateJobAndGeneration(
         claimed.id,
@@ -994,11 +1313,13 @@ async function pollJob(
         {
           status: 'cancelled',
           phase: 'terminal',
+          error: null,
           pollLeaseUntil: null,
           nextPollAt: null,
           resultSnapshot: null,
           requestSnapshot: null,
           requestSnapshotVersion: null,
+          ...resetRetryState(),
           updatedAt: nowIso(),
         },
         client,
@@ -1028,7 +1349,10 @@ async function storeNextImage(
   } catch {
     return applyTerminalFailure(
       claimed,
-      jobDiagnostic('STORAGE_RESPONSE_INVALID', 'Stored image result is invalid'),
+      jobDiagnostic(
+        'STORAGE_RESPONSE_INVALID',
+        'Stored image result is invalid',
+      ),
       client,
       claimedUntil,
       'storing',
@@ -1049,6 +1373,7 @@ async function storeNextImage(
         resultSnapshot: null,
         requestSnapshot: null,
         requestSnapshotVersion: null,
+        ...resetRetryState(),
         updatedAt: nowIso(),
       },
       client,
@@ -1061,14 +1386,10 @@ async function storeNextImage(
   let stored: Awaited<ReturnType<typeof storage.downloadAndStore>>;
   try {
     stored = await storage.downloadAndStore(next.url);
-  } catch (cause) {
+  } catch {
     return applyTerminalFailure(
       claimed,
-      jobDiagnostic(
-        'STORAGE_ERROR',
-        cause instanceof Error ? cause.message : 'Image storage failed',
-        false,
-      ),
+      jobDiagnostic('STORAGE_ERROR', 'Image storage failed', false),
       client,
       claimedUntil,
       'storing',
@@ -1088,15 +1409,11 @@ async function storeNextImage(
       claimedUntil,
       client,
     );
-  } catch (cause) {
+  } catch {
     removeUncommittedStoredFile(stored.storagePath);
     return applyTerminalFailure(
       claimed,
-      jobDiagnostic(
-        'STORAGE_ERROR',
-        cause instanceof Error ? cause.message : 'Image record could not be stored',
-        false,
-      ),
+      jobDiagnostic('STORAGE_ERROR', 'Image record could not be stored', false),
       client,
       claimedUntil,
       'storing',
@@ -1121,49 +1438,130 @@ async function finishCancellingJob(
 ): Promise<AdvanceOutcome> {
   const now = new Date();
   const claimedUntil = new Date(now.getTime() + POLL_LEASE_MS).toISOString();
-  if (!tryClaimCancellingLease(job.id, now.toISOString(), claimedUntil, client)) {
+  if (
+    !tryClaimCancellingLease(job.id, now.toISOString(), claimedUntil, client)
+  ) {
     return 'skipped';
   }
   const claimed = getGenerationJob(job.id, client);
   if (!claimed) return 'skipped';
-  let error: string | null = null;
-  if (claimed.providerHandle) {
-    try {
-      const handle = JSON.parse(claimed.providerHandle) as JobHandle;
-      const provider = getById(handle.providerId);
-      if (!provider?.cancel) {
-        error = jobDiagnostic('CANCEL_UNSUPPORTED', 'Provider has no remote cancel endpoint');
-      } else {
-        const result = await withProviderLimit(provider.id, () => provider.cancel!(handle));
-        if (result.status === 'failed') error = JSON.stringify(result.error);
-      }
-    } catch (cause) {
-      error = jobDiagnostic(
+  if (!claimed.providerHandle) {
+    return finishCancellation(claimed, client, claimedUntil, null)
+      ? 'cancelled'
+      : 'skipped';
+  }
+
+  let handle: JobHandle;
+  try {
+    handle = JSON.parse(claimed.providerHandle) as JobHandle;
+  } catch {
+    return finishCancellation(
+      claimed,
+      client,
+      claimedUntil,
+      jobDiagnostic('CANCEL_UNSUPPORTED', 'Stored provider handle is invalid'),
+    )
+      ? 'cancelled'
+      : 'skipped';
+  }
+  const provider = getById(handle.providerId);
+  if (!provider?.cancel) {
+    return finishCancellation(
+      claimed,
+      client,
+      claimedUntil,
+      jobDiagnostic(
         'CANCEL_UNSUPPORTED',
-        cause instanceof Error ? cause.message : 'Remote cancellation could not be confirmed',
+        'Provider has no remote cancel endpoint',
+      ),
+    )
+      ? 'cancelled'
+      : 'skipped';
+  }
+
+  let providerResult: unknown;
+  try {
+    providerResult = await withProviderLimit(provider.id, () =>
+      provider.cancel!(handle),
+    );
+  } catch {
+    return scheduleRetryOrFinish(
+      claimed,
+      'cancel',
+      jobDiagnostic(
+        'PROVIDER_ERROR',
+        'Remote cancellation could not be confirmed',
+        true,
+      ),
+      client,
+      claimedUntil,
+    );
+  }
+  const result = normalizePollResult(providerResult);
+  if (!result) {
+    return scheduleRetryOrFinish(
+      claimed,
+      'cancel',
+      jobDiagnostic(
+        'PROVIDER_ERROR',
+        'Provider returned an invalid cancellation result',
+        true,
+      ),
+      client,
+      claimedUntil,
+    );
+  }
+  if (result.status === 'failed') {
+    const failure = providerFailureDiagnostic(result.error);
+    if (failure.retryable) {
+      return scheduleRetryOrFinish(
+        claimed,
+        'cancel',
+        failure.diagnostic,
+        client,
+        claimedUntil,
       );
     }
+    return finishCancellation(claimed, client, claimedUntil, failure.diagnostic)
+      ? 'cancelled'
+      : 'skipped';
   }
-  const applied = updateJobAndGeneration(
-    claimed.id,
-    claimed.generationId,
-    {
-      status: 'cancelled',
-      phase: 'terminal',
-      error,
-      pollLeaseUntil: null,
-      nextPollAt: null,
-      resultSnapshot: null,
-      requestSnapshot: null,
-      requestSnapshotVersion: null,
-      updatedAt: nowIso(),
-    },
+  if (result.status === 'cancelled') {
+    return finishCancellation(claimed, client, claimedUntil, null)
+      ? 'cancelled'
+      : 'skipped';
+  }
+  if (result.status === 'pending' || result.status === 'running') {
+    // A cancel endpoint may acknowledge the request before the remote job has
+    // reached a cancelled state. Keep the local cancellation authoritative,
+    // but consume the bounded cancellation budget until it is confirmed.
+    return scheduleRetryOrFinish(
+      claimed,
+      'cancel',
+      jobDiagnostic(
+        'CANCEL_UNCONFIRMED',
+        'Remote cancellation is still pending confirmation',
+        true,
+      ),
+      client,
+      claimedUntil,
+    );
+  }
+  // A remote job may complete in the race with a local cancellation. Never
+  // revive the public cancelled status or persist completed images here; make
+  // the unconfirmed remote outcome visible as a safe terminal diagnostic.
+  return finishCancellation(
+    claimed,
     client,
     claimedUntil,
-    { expectedPhase: 'cancelling', allowCancellation: true },
-  );
-  if (applied) cleanupStagedResultSnapshot(claimed.resultSnapshot);
-  return applied ? 'cancelled' : 'skipped';
+    jobDiagnostic(
+      'CANCEL_UNCONFIRMED',
+      'Remote job completed before cancellation could be confirmed',
+      false,
+    ),
+  )
+    ? 'cancelled'
+    : 'skipped';
 }
 
 /** Advances exactly one durable phase. No route may call Provider APIs directly. */

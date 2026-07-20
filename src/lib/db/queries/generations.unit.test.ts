@@ -15,6 +15,7 @@ import {
   tryClaimQueuedJobForDispatch,
   listDueGenerationJobs,
   markExpiredDispatchingJobOutcomeUnknown,
+  requestGenerationCancellation,
 } from './generations';
 import { createImage } from './images';
 
@@ -373,6 +374,46 @@ describe('generations queries', () => {
     expect(
       listDueGenerationJobs('2026-07-12T10:00:10.000Z', 10, db).map((job) => job.id),
     ).toEqual(['job-first', 'job-later']);
+  });
+
+  it('keeps a scheduled retry out of the due set and clears its state on cancellation', () => {
+    const { db } = createTestDb();
+    createGenerationAndJob(
+      makeGenParams(),
+      {
+        ...makeJobParams(),
+        phase: 'polling',
+        nextPollAt: '2026-07-12T10:00:10.000Z',
+        attemptCount: 1,
+        retryStartedAt: now,
+      },
+      db,
+    );
+    updateGenerationJob(
+      'job-1',
+      {
+        error: JSON.stringify({ code: 'TIMEOUT', message: 'temporary', retryable: true }),
+        updatedAt: now,
+      },
+      db,
+    );
+
+    expect(listDueGenerationJobs(now, 10, db)).toEqual([]);
+    expect(
+      listDueGenerationJobs('2026-07-12T10:00:10.000Z', 10, db).map((job) => job.id),
+    ).toEqual(['job-1']);
+
+    expect(
+      requestGenerationCancellation('gen-1', '2026-07-12T10:00:01.000Z', db),
+    ).toBe(true);
+    expect(getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]).toMatchObject({
+      status: 'cancelled',
+      phase: 'cancelling',
+      error: null,
+      attemptCount: 0,
+      retryStartedAt: null,
+      nextPollAt: '2026-07-12T10:00:01.000Z',
+    });
   });
 
   it('marks an expired dispatch checkpoint as unknown instead of reopening queued work', () => {

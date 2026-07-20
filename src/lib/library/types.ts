@@ -1,5 +1,6 @@
 import type { GenerationStatus } from '../db';
 import type { Project, Session } from '../db';
+import type { JobView } from '../job-engine/types';
 
 export type ProjectSummary = {
   project: Project;
@@ -44,7 +45,7 @@ export type GenerationSummary = {
     provider: string;
     model: string;
     status: GenerationStatus;
-    error: unknown | null;
+    error: JobView['error'] | null;
   }>;
   images: Array<{
     id: string;

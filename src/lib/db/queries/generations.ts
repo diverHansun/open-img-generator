@@ -529,6 +529,8 @@ export function markExpiredDispatchingJobOutcomeUnknown(
       requestSnapshot: null,
       requestSnapshotVersion: null,
       resultSnapshot: null,
+      attemptCount: 0,
+      retryStartedAt: null,
       updatedAt: now,
     })
     .where(
@@ -558,6 +560,9 @@ function cancellationPatch(requestedAt: string) {
   return {
     status: 'cancelled' as const,
     cancelRequestedAt: requestedAt,
+    // A previous poll retry is not a cancellation failure. Clear the stale
+    // diagnostic immediately so the local cancelled response is truthful.
+    error: null,
     phase: sql`CASE
       WHEN ${untouchedQueued} THEN 'terminal'
       ELSE 'cancelling'
@@ -576,6 +581,8 @@ function cancellationPatch(requestedAt: string) {
     requestSnapshot: null,
     requestSnapshotVersion: null,
     resultSnapshot: null,
+    attemptCount: 0,
+    retryStartedAt: null,
     updatedAt: requestedAt,
   };
 }
@@ -657,6 +664,8 @@ export function persistLateProviderHandleForCancellation(
       requestSnapshot: null,
       requestSnapshotVersion: null,
       resultSnapshot: null,
+      attemptCount: 0,
+      retryStartedAt: null,
       updatedAt: now,
     })
     .where(

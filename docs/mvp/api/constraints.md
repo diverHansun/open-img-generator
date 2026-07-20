@@ -6,7 +6,7 @@
 > 修订说明: 2026-07-16 sessionId 必填；Project/Favorite/ModelPrefs 路由；取消零散 Session
 > 修订说明: 2026-07-16 §14–§16 页面矩阵、DTO、prefs 默认全开、迁移（后端契约锁定）
 > 修订说明: 2026-07-16 Kling 独立 adapter、加密 user-config、取消/worker/限流、可选单用户 auth、图片清理
-> 修订说明: 2026-07-20 durable admission、phase/lease lifecycle、默认 worker、原子取消与 inline-image staging（D1）
+> 修订说明: 2026-07-20 D1/D2 durable admission、phase/lease lifecycle、默认 worker、原子取消、inline staging 与持久化 poll/cancel retry
 
 本文档闭合并行审查中发现的运行时语义缺口。编码时必须遵守。
 
@@ -29,7 +29,7 @@
 | 项 | 建议值 |
 |----|--------|
 | 首次推进 | POST 返回 `202` 后 worker 尽快扫描；worker 关闭时 Stage 可立即请求一次详情 |
-| 轮询间隔 | 当前 lifecycle 对 Provider `pending/running` 使用 5s due；D2/E 将替换为有预算的退避与 jitter |
+| 轮询间隔 | Provider `pending/running` 的正常 due 为 5s；retryable poll failure 使用 D2 持久化 full-jitter（2s base、60s cap、最多 6 次/10 分钟） |
 | 放弃条件 | 连续 poll 超过 10 分钟仍有 pending/running → 客户端停止；服务端状态保留，稍后 GET 可继续推进 |
 | 厂商 URL 过期 | 必须在过期前完成 poll + 转存 |
 | POST 响应 | `202`、`Location`、`X-Request-Id` 与 `links.self` → `GET /api/generations/:id` |
@@ -79,7 +79,7 @@ sync Provider 与 async Provider 共享 admission → dispatch → storing 生�
 - 已成功的 `images` **保留**
 - **仅该 job** → `failed`；其他 jobs 不受影响
 - generation 聚合见 §8
-- 不自动重试；客户端可发起新 generation
+- D2 不重试 storage/download；客户端可发起新 generation。仅已有 handle 的 poll/cancel 使用其各自的有界 retry，不能据此推断 submit 可重放。
 
 ---
 
@@ -438,7 +438,7 @@ pool = registry.enabledModels
 
 ## 17. 运行时控制（2026-07-16）
 
-- `POST /api/generations/:id/cancel` 是幂等的本地取消入口。一个短 transaction 批量写取消标记、phase 与 Generation 聚合；worker 之后才对已有 handle 尽力调用 provider cancel。Kling 标准图片 API 没有远程取消端点，因此保留 `CANCEL_UNSUPPORTED` 诊断而不伪造成功。
+- `POST /api/generations/:id/cancel` 是幂等的本地取消入口。一个短 transaction 批量写取消标记、phase 与 Generation 聚合，并清除此前 poll retry/error；worker 之后才对已有 handle 尽力调用 provider cancel。retryable remote cancel 最多 3 次、总窗口 30 秒，穷尽后仍保持本地 `cancelled` 并写 `RETRY_EXHAUSTED`；Kling 标准图片 API 没有远程取消端点，因此保留 `CANCEL_UNSUPPORTED` 诊断而不伪造成功。
 - `MAX_INFLIGHT_PER_PROVIDER` 限制同一 provider 的 submit/poll/cancel 并发。`MAX_INFLIGHT_GENERATIONS` 的旧内存 admission helper 已不在 durable POST 路径使用；队列上限、deadline 与 admission backpressure 由后续 Batch E 统一收口，不能把当前实现误表述为已提供 429 队列保护。
 - Node worker 默认启动；只有 `JOB_WORKER_ENABLED=false` 才关闭。它在 generation **POST** durable admission 后首次进入 Node 进程时 bootstrap（不依赖 Next instrumentation 的 Edge bundle），generation/session/history 列表 GET 不因读取而启动 worker。`WORKER_INTERVAL_MS`、`WORKER_BATCH_SIZE` 控制扫描，`IMAGE_CLEANUP_INTERVAL_MS` 触发清理。关闭 worker 时仍可由详情 GET 按 due/lease 规则辅助推进。
 - `IMAGE_RETENTION_DAYS=30`（设为 `0` 禁用）删除过期且未收藏图片；文件缺失会被视为已清理。孤儿文件需超过 `IMAGE_ORPHAN_GRACE_MS` 才删除，收藏永不因保留期被删除。

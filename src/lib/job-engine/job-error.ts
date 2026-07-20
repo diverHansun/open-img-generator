@@ -31,6 +31,10 @@ const SAFE_JOB_ERRORS = {
     message: 'Remote cancellation could not be confirmed',
     retryable: false,
   },
+  CANCEL_UNCONFIRMED: {
+    message: 'Remote cancellation could not be confirmed',
+    retryable: false,
+  },
   INTERNAL_ERROR: {
     message: 'The job could not be completed',
     retryable: false,
@@ -48,7 +52,8 @@ const SAFE_JOB_ERRORS = {
     retryable: true,
   },
   PROVIDER_OUTCOME_UNKNOWN: {
-    message: 'The provider may have accepted the job; check its status before retrying',
+    message:
+      'The provider may have accepted the job; check its status before retrying',
     retryable: false,
   },
   PROVIDER_REJECTED: {
@@ -85,14 +90,34 @@ const SAFE_JOB_ERRORS = {
   },
 } as const satisfies Record<string, { message: string; retryable: boolean }>;
 
+export type SafeJobErrorCode = keyof typeof SAFE_JOB_ERRORS;
+
 const SAFE_INTERNAL_ERROR: SafeJobError = {
   code: 'INTERNAL_ERROR',
   message: SAFE_JOB_ERRORS.INTERNAL_ERROR.message,
   retryable: SAFE_JOB_ERRORS.INTERNAL_ERROR.retryable,
 };
 
-function isSafeJobErrorCode(code: unknown): code is keyof typeof SAFE_JOB_ERRORS {
+export function isSafeJobErrorCode(code: unknown): code is SafeJobErrorCode {
   return typeof code === 'string' && Object.hasOwn(SAFE_JOB_ERRORS, code);
+}
+
+/**
+ * Persists an allowlisted diagnostic only. Provider-originated messages must
+ * never enter the durable job row because they can contain prompts, signed
+ * URLs, or provider payloads.
+ */
+export function serializeSafeJobError(
+  code: unknown,
+  retryable: boolean,
+  fallbackCode: SafeJobErrorCode = 'INTERNAL_ERROR',
+): string {
+  const safeCode = isSafeJobErrorCode(code) ? code : fallbackCode;
+  return JSON.stringify({
+    code: safeCode,
+    message: SAFE_JOB_ERRORS[safeCode].message,
+    retryable,
+  });
 }
 
 /**
@@ -126,6 +151,9 @@ export function toSafeJobError(serialized: string | null): JobView['error'] {
   return {
     code,
     message: policy.message,
-    retryable: policy.retryable,
+    // The code controls the public message, while the persisted boolean is
+    // deliberately retained: a provider can make an otherwise retryable code
+    // terminal for this specific job (for example a non-retryable timeout).
+    retryable: Reflect.get(parsed, 'retryable') as boolean,
   };
 }

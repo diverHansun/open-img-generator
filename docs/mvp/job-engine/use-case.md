@@ -6,7 +6,7 @@
 > 说明: 可选文档；因扇出含多步骤编排，供 Codex 实施时对照主路径
 
 > 修订说明: 2026-07-16 sessionId 必填；Project 由 library 先创建
-> 修订说明: 2026-07-20 improve-1 D1：POST 只接纳可恢复意图并返回 `202`；默认 worker 按 phase/lease 推进
+> 修订说明: 2026-07-20 improve-1 D1/D2：durable admission、phase/lease worker 与持久化 poll/cancel retry
 
 ---
 
@@ -23,6 +23,7 @@
 | UC-7 | 同 key 重放 | 相同 clientRequestId + 相同 payload 重发 | `202` 返回同一 generation，`replayed=true`；不创建或 dispatch 第二个 job |
 | UC-8 | 取消 | POST cancel | 本地一次事务取消所有 active jobs；worker 随后 best-effort 远端 cancel |
 | UC-9 | Session 内查看 | GET session | 只读返回历史；不推进任何未终结 job |
+| UC-10 | 瞬时 poll/cancel 故障 | typed retryable ProviderError 或调用异常 | 写入有界 retry checkpoint，重启后继续或明确收口 |
 
 ---
 
@@ -66,15 +67,25 @@
 
 1. 用户对仍有 active jobs 的 generation 调用 cancel。
 2. `cancelGeneration` 在一个 transaction 中批量写入 `cancel_requested_at`、将 active job 的 public status 置为 `cancelled`，并重聚合 generation；API 立即返回，不等待 Provider。
-3. 从未 claim 的 queued job 直接到 `terminal`。已有 handle 的 job 留在 `cancelling`，worker 后续尽力调用 `provider.cancel(handle)`；Provider 不支持或失败只留下安全诊断，public status 不回退。
+3. 从未 claim 的 queued job 直接到 `terminal`。已有 handle 的 job 留在 `cancelling`，worker 后续尽力调用 `provider.cancel(handle)`；只有 remote `cancelled` 才确认成功，remote `pending/running` 也占用最多 3 次/30 秒的重试预算，remote `completed` 以 `CANCEL_UNCONFIRMED` 安全诊断收口。Provider 不支持或非 retryable failure 同样留下安全诊断，public status 不回退。
 4. 若取消与 dispatch 竞争，晚到 async handle 仅能经 cancellation CAS 持久化为远端 cancel 的依据，不得复活 job。若取消与 storing checkpoint 竞争，取消先赢时不会新增 image row；已提交 checkpoint 的图片保持可见。
 
 ---
 
-## 5. 与 web-ui 的衔接
+## 5. UC-10 瞬时 poll/cancel 故障
+
+1. 已持久化 handle 的 polling job 收到 `retryable=true` 的失败，或 `provider.poll` 抛异常。
+2. 当前 lease owner 在同一条件写入中保存 error、`attempt_count`、`retry_started_at` 与 full-jitter `next_poll_at`，并释放 lease；公开状态仍为 pending/running。
+3. 进程退出后，新 worker 只会在该 due time 后继续同一预算。第 6 次 retryable poll failure 或 10 分钟窗口耗尽时写 `failed/terminal + RETRY_EXHAUSTED`；不会派发第二次 submit。
+4. remote cancel 使用同样方式，但最多 3 次/30 秒；跨进程只按持久化 due time 继续同一预算，穷尽后保持 `cancelled/terminal + RETRY_EXHAUSTED`。
+5. 一次 successful pending/running poll、进入 storing、任一终态或用户取消都会归零 retry state；前端不把 active retry diagnostic 误报为失败。
+
+---
+
+## 6. 与 web-ui 的衔接
 
 - web-ui 负责：为一次用户意图生成并在刷新/重试时复用 `clientRequestId`；模型多选、aspectRatio 交集、seed 显隐（任一 supportsSeed 则显示）。
-- job-engine 负责：接收已构造的 targets + 共享参数，durable admission 后执行 UC-1～UC-8；UI 只能依据 GenerationView 的公开状态呈现进度。
+- job-engine 负责：接收已构造的 targets + 共享参数，durable admission 后执行 UC-1～UC-8 与 UC-10；UI 只能依据 GenerationView 的公开状态呈现进度。
 - `staging:<uuid>`、request/result snapshot 只属于服务端恢复细节，不能显示、缓存或传回 web-ui。
 
 ---
@@ -82,5 +93,5 @@
 ## 自检
 
 - 每个用例可映射到 goals-duty 的 Duties
-- `202`、idempotency、默认 worker、due/lease 和取消竞态均有可追踪主路径
+- `202`、idempotency、默认 worker、due/lease、poll/cancel retry 和取消竞态均有可追踪主路径
 - inline staging 只承诺 D1 的 25 MiB/metadata 边界；magic-byte 与远端 URL 安全策略留给 E3

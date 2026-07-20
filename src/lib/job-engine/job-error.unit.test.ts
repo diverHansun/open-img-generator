@@ -53,4 +53,21 @@ describe('public job error DTO', () => {
       retryable: false,
     });
   });
+
+  it('keeps a verified terminal retryability decision while redacting the message', () => {
+    const result = toSafeJobError(
+      JSON.stringify({
+        code: 'TIMEOUT',
+        message:
+          'private provider payload https://signed.example/image?token=secret',
+        retryable: false,
+      }),
+    );
+
+    expect(result).toEqual({
+      code: 'TIMEOUT',
+      message: 'Provider request timed out',
+      retryable: false,
+    });
+  });
 });

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
 
 import { createTestDb } from '../../../tests/helpers/db';
-import { createGenerationAndJob, getGenerationJob } from '../db';
+import { createGenerationAndJob, generationJobs, getGenerationJob } from '../db';
 import type { ImageProvider } from '../providers';
 import * as providers from '../providers';
 import * as storage from '../storage';
@@ -41,6 +42,23 @@ function seedQueuedJob(db: ReturnType<typeof createTestDb>['db']) {
     },
     db,
   );
+}
+
+function seedPollingJob(db: ReturnType<typeof createTestDb>['db']) {
+  seedQueuedJob(db);
+  db.update(generationJobs).set({
+    phase: 'polling',
+    providerHandle: JSON.stringify({
+      providerId: 'fal',
+      model: 'fal-ai/flux/schnell',
+      externalId: 'worker-retry',
+      statusUrl: 'https://status.example.test/worker-retry',
+      responseUrl: 'https://response.example.test/worker-retry',
+      cancelUrl: null,
+      submittedAt: now,
+    }),
+    nextPollAt: '2000-01-01T00:00:00.000Z',
+  }).where(eq(generationJobs.id, 'job-worker')).run();
 }
 
 describe('job worker', () => {
@@ -95,5 +113,51 @@ describe('job worker', () => {
       cancelled: 0,
       skipped: 0,
     });
+  });
+
+  it('counts a durable retry once and does not call the provider before its due time', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { db } = createTestDb();
+      seedPollingJob(db);
+      const poll = vi.fn().mockResolvedValue({
+        status: 'failed',
+        error: { code: 'TIMEOUT', message: 'temporary outage', retryable: true },
+      });
+      vi.mocked(providers.getById).mockReturnValue({
+        id: 'fal',
+        displayName: 'fal.ai',
+        capabilities: new Map(),
+        submit: vi.fn(),
+        poll,
+      } as ImageProvider);
+
+      await expect(runWorkerOnce({ db, batchSize: 4 })).resolves.toEqual({
+        scanned: 1,
+        advanced: 0,
+        retried: 1,
+        completed: 0,
+        failed: 0,
+        unknown: 0,
+        cancelled: 0,
+        skipped: 0,
+      });
+      await expect(runWorkerOnce({ db, batchSize: 4 })).resolves.toEqual({
+        scanned: 0,
+        advanced: 0,
+        retried: 0,
+        completed: 0,
+        failed: 0,
+        unknown: 0,
+        cancelled: 0,
+        skipped: 0,
+      });
+      expect(poll).toHaveBeenCalledOnce();
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

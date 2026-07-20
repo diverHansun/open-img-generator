@@ -187,10 +187,10 @@ Generation POST/detail/cancel、health readiness 至少统一到：
 | auth/config | `AUTHENTICATION_REQUIRED`, `CONFIGURATION_UNAVAILABLE`, `CREDENTIAL_MANAGED_BY_ENV` |
 | admission | `RATE_LIMITED`, `QUEUE_SATURATED` |
 | resource | `NOT_FOUND`, `GENERATION_FINALIZING` |
-| job diagnostics | `PROVIDER_REJECTED`, `PROVIDER_RATE_LIMITED`, `PROVIDER_TIMEOUT`, `PROVIDER_OUTCOME_UNKNOWN`, `RETRY_EXHAUSTED`, `PROVIDER_EMPTY_RESULT`, `PROVIDER_PARTIAL_RESULT`, `STORAGE_RESPONSE_INVALID`, `CANCEL_UNSUPPORTED` |
+| job diagnostics | `PROVIDER_REJECTED`, `PROVIDER_RATE_LIMITED`, `PROVIDER_TIMEOUT`, `PROVIDER_OUTCOME_UNKNOWN`, `RETRY_EXHAUSTED`, `PROVIDER_EMPTY_RESULT`, `PROVIDER_PARTIAL_RESULT`, `STORAGE_RESPONSE_INVALID`, `CANCEL_UNSUPPORTED`, `CANCEL_UNCONFIRMED` |
 | internal | `INTERNAL_ERROR` |
 
-Job diagnostics 出现在 Generation view 的 job.error，但必须经过 safe mapper；API error 与 job error 共用 code registry，不共用任意原始 message。
+Job diagnostics 出现在 Generation view 与 History/read-model 的 job.error，但必须经过同一 safe mapper；API error 与 job error 共用 code registry，不共用任意原始 message。
 
 ### 4.3 Health
 
@@ -308,7 +308,7 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 - URL 已有 `generation` 时，Stage shell 和 detail request 立即启动；Sessions/Providers/Preferences 失败只影响返回 Compose 后的配置，不阻塞当前任务。
 - 每个 GET 有 12s deadline；unsubscribe、route change 和组件 unmount 真正 abort 网络请求。
 - retry 使用 jitter；`navigator.onLine=false` 或页面 hidden 时暂停定时请求，恢复后先进行一次带抖动的 GET。
-- 连续 6 次 transient failure 后停止自动轮询，展示最后成功快照、错误类别和手动“继续检查”；不把任务伪装成 failed。
+- 连续 6 次**浏览器 detail 请求** transient failure 后停止客户端自动轮询，展示最后成功快照、错误类别和手动“继续检查”；这不改变服务端 Job 的真实状态。Provider poll 的 D2 预算耗尽则明确写 `failed + RETRY_EXHAUSTED`。
 - 若 Job 为 `PROVIDER_OUTCOME_UNKNOWN`，Stage 提醒远端可能仍运行，不提供无提示的“自动再生成”。
 
 ### 7.4 fan-out 与参数
@@ -375,7 +375,7 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 - DoD：所有 crash checkpoint 在重启后恢复或明确 unknown；无永久无解释 pending；终态不可逆；每个 commit 都有 fault-injection integration。
 - 对应：P-04、P-05、P-07、P-08、P-09。
 
-**实施状态（2026-07-20）**：D1 已实现、复审并提交（`feat(job-engine): persist recoverable dispatch state`）：schema v3/backfill、202 durable admission、版本化 request/result snapshot、phase/lease worker、late-handle cancellation CAS、fan-out 原子取消、lease-guarded image checkpoint、终态快照清理，以及有界 inline-image staging（raw Base64 不入 SQLite）。D2 只承担 retry policy/预算、取消重试收敛与更完整的恢复故障注入，不重复打开 D1 已闭合的竞态窗口。
+**实施状态（2026-07-20）**：D1 与 D2 已实现、复审并独立验证。D1 覆盖 schema v3/backfill、202 durable admission、版本化 request/result snapshot、phase/lease worker、late-handle cancellation CAS、fan-out 原子取消、lease-guarded image checkpoint、终态快照清理与有界 inline-image staging（raw Base64 不入 SQLite）。D2 新增集中 `retry-policy`：已有 handle 的 typed-retryable poll（最多 6 次/10 分钟）和 remote cancel（最多 3 次/30 秒）以 full jitter、due/lease CAS 与重启延续收口；只有远端 `cancelled` 确认 remote cancel，`pending/running` 重排、`completed` 以安全诊断收口，畸形 runtime result 也写有界 checkpoint。所有新写入的 job 诊断、详情与 History read model 只使用 allowlisted code、固定文案和 retryable 布尔值，绝不暴露 Provider 原始 message/body/prompt/URL；成功/phase 切换/终态/本地取消清空 retry state，submit 仍不重放。D2 使用 unit + file-backed SQLite typed-fake integration 验证，不宣称真实 HTTP classifier、Retry-After、limiter queue 或 adapter mapping 已由本批闭合。
 
 ### Batch E — Provider、队列与 storage 边界
 

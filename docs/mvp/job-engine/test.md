@@ -4,7 +4,7 @@
 > 前置文档: goals-duty.md, architecture.md, dfd-interface.md, use-case.md
 > 文档顺序: ⑦ test(本文)
 > 项目级规则: 遵循 `docs/test-blueprint.md`（若有）；本文件只补充扇出相关场景
-> 修订说明: 2026-07-20 improve-1 D1：覆盖 durable admission、request/result snapshot、phase/lease、默认 worker 与原子取消/转存竞态
+> 修订说明: 2026-07-20 improve-1 D1/D2：覆盖 durable admission、snapshot、phase/lease、原子取消/转存竞态与跨重启 retry 预算
 
 ---
 
@@ -25,6 +25,8 @@
 - inline result：Base64/data URL 在 25 MiB 上限内先写私有 staging，SQLite/result snapshot 只出现 opaque `staging:<uuid>`，终态/取消清理 staging。
 - cancelGeneration：扇出任务在一个 transaction 本地取消；worker best-effort provider.cancel；晚到 submit handle / poll / store 不得复活 cancelled job。
 - `runWorkerOnce`：读取 due jobs、推进一条 durable phase、统计 `advanced/retried/completed/failed/unknown/cancelled/skipped`；worker cleanup 使用传入 DbClient。
+- retry-policy：poll（6 次/10 分钟）与 cancel（3 次/30 秒）使用 full jitter、持久化 attempt/window/due；成功、终态和取消均清空 retry state；dispatch 不得 replay。
+- Provider runtime result guard：poll/cancel 返回 `null`、未知 status 或畸形对象时安全归一化；需要 retry 的情形写有界 `PROVIDER_ERROR` checkpoint，任何情形都不得只等 lease 过期后无限重调。
 
 ### 不覆盖
 
@@ -102,6 +104,10 @@
 | fan-out cancel | 单一 transaction 更新所有 active jobs 和 generation 聚合；中途 DB 异常不得半取消 |
 | cancel 与 provider limiter 队列 | cancel 先赢则 provider.submit 不开始 |
 | cancel 与晚到 async handle | 仅持久化 handle 供 worker remote cancel；public status 仍 cancelled |
+| retryable poll failure | 写 retry checkpoint；未 due 时 worker/详情均不再调 Provider；重启后在 due 继续同一预算，成功后清零 |
+| retryable remote cancel | public status 始终 cancelled；file-backed SQLite 关闭/重开后仍按 due 延续同一预算，最多 3 次后以 `RETRY_EXHAUSTED` 收口，不转 failed |
+| remote cancel 返回 pending/running/completed | pending/running 继续取消重试；completed 不写 image、不复活公开状态，而以 `CANCEL_UNCONFIRMED` 安全诊断收口 |
+| Provider 返回畸形 poll/cancel result | 写 `PROVIDER_ERROR` retry checkpoint、释放 lease、消耗同一有界预算 |
 
 ---
 
@@ -114,16 +120,16 @@
 | 聚合函数与 constraints §8 一致 | 单元表驱动测试 |
 | GET detail 的 due/lease 辅助语义 | API/合同 + integration：未 due/有 lease 时不调用 Provider |
 | GET session/history 只读，不调用 getGeneration 推进 | API/合同测试 |
-| route/SQLite + typed fake Provider | 当前 integration 覆盖 sync、async、fanout、idempotency、cancel、inline b64 staging；不等同真实 Next HTTP server |
+| route/SQLite + typed fake Provider | 当前 integration 覆盖 sync、async、fanout、idempotency、cancel、inline b64 staging，以及 file-backed SQLite 关闭/重开后的 poll 与 remote-cancel retry 恢复；不等同真实 Next HTTP server |
 
 ---
 
 ## 4. Verification Strategy（验证策略）
 
 - 单元: mock providers/prompt/storage/db；覆盖 state machine、snapshot 边界、lease CAS 和取消竞态。
-- 集成: SQLite + 真实 transaction + typed fake Provider/route 调用；覆盖 worker 重启/恢复与 staging 保留。
+- 集成: SQLite + 真实 transaction + typed fake Provider/route 调用；覆盖 worker 重启/恢复、D2 retry budget 延续/成功归零与 staging 保留。
 - 合同: POST `202`/Location/idempotency、GET 多 `jobs` 与错误 envelope。
-- E2E（后续 F）: 真实 Next HTTP + local fake Provider 与浏览器流；D1 当前不把 route/SQLite integration 误报为该 E2E。
+- E2E（后续 F）: 真实 Next HTTP + local fake Provider 与浏览器流；D2 当前不把 typed fake retry integration 误报为 adapter/HTTP 或浏览器 E2E。
 - 回归: 保留单模型路径（`targets` 长度为 1），但断言 admission 后由 worker/lifecycle 完成。
 
 ---

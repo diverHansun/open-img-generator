@@ -13,7 +13,10 @@ import type { ImageProvider } from '../providers';
 import * as providers from '../providers';
 import { advance } from './lifecycle';
 import { cancelGeneration } from './orchestrator';
-import { createRequestSnapshot, REQUEST_SNAPSHOT_VERSION } from './request-snapshot';
+import {
+  createRequestSnapshot,
+  REQUEST_SNAPSHOT_VERSION,
+} from './request-snapshot';
 import { resetProviderLimiters, withProviderLimit } from '../providers/limiter';
 
 vi.mock('../providers', () => ({ getById: vi.fn() }));
@@ -60,17 +63,20 @@ function seedJob(
   // createGenerationAndJob intentionally starts no handle. Set it via a
   // direct update only for the cancellation recovery checkpoint fixture.
   if (options.handle) {
-    db.update(generationJobs).set({
-      providerHandle: JSON.stringify({
-        providerId: 'kling',
-        model: 'kling-v3',
-        externalId: 'kling-task',
-        statusUrl: 'https://status.example.test/kling-task',
-        responseUrl: 'https://response.example.test/kling-task',
-        cancelUrl: null,
-        submittedAt: now,
-      }),
-    }).where(eq(generationJobs.id, 'job-cancel')).run();
+    db.update(generationJobs)
+      .set({
+        providerHandle: JSON.stringify({
+          providerId: 'kling',
+          model: 'kling-v3',
+          externalId: 'kling-task',
+          statusUrl: 'https://status.example.test/kling-task',
+          responseUrl: 'https://response.example.test/kling-task',
+          cancelUrl: null,
+          submittedAt: now,
+        }),
+      })
+      .where(eq(generationJobs.id, 'job-cancel'))
+      .run();
   }
 }
 
@@ -114,10 +120,286 @@ describe('durable cancellation', () => {
     expect(cancel).not.toHaveBeenCalled();
     expect(getGenerationJob('job-cancel', db)?.phase).toBe('cancelling');
 
-    await expect(advance(getGenerationJob('job-cancel', db)!, db)).resolves.toBe('cancelled');
+    await expect(
+      advance(getGenerationJob('job-cancel', db)!, db),
+    ).resolves.toBe('cancelled');
     expect(cancel).toHaveBeenCalledOnce();
     expect(getGenerationJob('job-cancel', db)?.phase).toBe('terminal');
-    expect(getGenerationWithJobsAndImages('gen-cancel', db)?.status).toBe('cancelled');
+    expect(getGenerationWithJobsAndImages('gen-cancel', db)?.status).toBe(
+      'cancelled',
+    );
+  });
+
+  it('keeps local cancellation terminal with a safe diagnostic when remote cancel is unsupported', async () => {
+    const { db } = createTestDb();
+    seedJob(db, { handle: true });
+    vi.mocked(providers.getById).mockReturnValue({
+      id: 'kling',
+      displayName: 'Kling AI',
+      capabilities: new Map(),
+      submit: vi.fn(),
+    } as ImageProvider);
+
+    await cancelGeneration('gen-cancel', { db });
+    await expect(
+      advance(getGenerationJob('job-cancel', db)!, db),
+    ).resolves.toBe('cancelled');
+
+    expect(getGenerationJob('job-cancel', db)).toMatchObject({
+      status: 'cancelled',
+      phase: 'terminal',
+      error: expect.stringContaining('CANCEL_UNSUPPORTED'),
+      pollLeaseUntil: null,
+      nextPollAt: null,
+      attemptCount: 0,
+      retryStartedAt: null,
+    });
+    expect(getGenerationWithJobsAndImages('gen-cancel', db)?.status).toBe(
+      'cancelled',
+    );
+  });
+
+  it('clears a prior poll retry diagnostic as soon as cancellation wins locally', async () => {
+    const { db } = createTestDb();
+    seedJob(db, { handle: true });
+    db.update(generationJobs)
+      .set({
+        attemptCount: 1,
+        retryStartedAt: '2026-07-20T00:00:00.000Z',
+        error: JSON.stringify({
+          code: 'TIMEOUT',
+          message: 'temporary',
+          retryable: true,
+        }),
+      })
+      .where(eq(generationJobs.id, 'job-cancel'))
+      .run();
+
+    await cancelGeneration('gen-cancel', { db });
+
+    expect(getGenerationJob('job-cancel', db)).toMatchObject({
+      status: 'cancelled',
+      phase: 'cancelling',
+      error: null,
+      attemptCount: 0,
+      retryStartedAt: null,
+    });
+  });
+
+  it('retries a retryable remote cancellation and clears retry state after confirmation', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { db } = createTestDb();
+      seedJob(db, { handle: true });
+      const cancel = vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'failed',
+          error: {
+            code: 'TIMEOUT',
+            message: 'temporary outage',
+            retryable: true,
+          },
+        })
+        .mockResolvedValueOnce({ status: 'cancelled' });
+      vi.mocked(providers.getById).mockReturnValue({
+        id: 'kling',
+        displayName: 'Kling AI',
+        capabilities: new Map(),
+        submit: vi.fn(),
+        cancel,
+      } as ImageProvider);
+
+      await cancelGeneration('gen-cancel', { db });
+      await expect(
+        advance(getGenerationJob('job-cancel', db)!, db),
+      ).resolves.toBe('retried');
+      const scheduled = getGenerationJob('job-cancel', db)!;
+      expect(scheduled).toMatchObject({
+        status: 'cancelled',
+        phase: 'cancelling',
+        pollLeaseUntil: null,
+        attemptCount: 1,
+        retryStartedAt: '2026-07-20T00:00:00.000Z',
+        nextPollAt: '2026-07-20T00:00:00.250Z',
+        error: expect.stringContaining('TIMEOUT'),
+      });
+
+      await expect(advance(scheduled, db)).resolves.toBe('skipped');
+      expect(cancel).toHaveBeenCalledOnce();
+
+      vi.setSystemTime(new Date(scheduled.nextPollAt!));
+      await expect(
+        advance(getGenerationJob('job-cancel', db)!, db),
+      ).resolves.toBe('cancelled');
+      expect(getGenerationJob('job-cancel', db)).toMatchObject({
+        status: 'cancelled',
+        phase: 'terminal',
+        error: null,
+        attemptCount: 0,
+        retryStartedAt: null,
+        nextPollAt: null,
+      });
+      expect(cancel).toHaveBeenCalledTimes(2);
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['pending', 'running'] as const)(
+    'keeps the local cancellation durable while remote cancel reports %s',
+    async (remoteStatus) => {
+      const { db } = createTestDb();
+      seedJob(db, { handle: true });
+      const cancel = vi.fn().mockResolvedValue({ status: remoteStatus });
+      vi.mocked(providers.getById).mockReturnValue({
+        id: 'kling',
+        displayName: 'Kling AI',
+        capabilities: new Map(),
+        submit: vi.fn(),
+        cancel,
+      } as ImageProvider);
+
+      await cancelGeneration('gen-cancel', { db });
+      await expect(
+        advance(getGenerationJob('job-cancel', db)!, db),
+      ).resolves.toBe('retried');
+
+      expect(getGenerationJob('job-cancel', db)).toMatchObject({
+        status: 'cancelled',
+        phase: 'cancelling',
+        pollLeaseUntil: null,
+        attemptCount: 1,
+        retryStartedAt: expect.any(String),
+        nextPollAt: expect.any(String),
+        error: expect.stringContaining('CANCEL_UNCONFIRMED'),
+      });
+      expect(getGenerationWithJobsAndImages('gen-cancel', db)?.status).toBe(
+        'cancelled',
+      );
+      expect(cancel).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('turns a malformed remote cancellation result into a bounded retry checkpoint', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { db } = createTestDb();
+      seedJob(db, { handle: true });
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      vi.mocked(providers.getById).mockReturnValue({
+        id: 'kling',
+        displayName: 'Kling AI',
+        capabilities: new Map(),
+        submit: vi.fn(),
+        cancel,
+      } as ImageProvider);
+
+      await cancelGeneration('gen-cancel', { db });
+      await expect(
+        advance(getGenerationJob('job-cancel', db)!, db),
+      ).resolves.toBe('retried');
+      expect(getGenerationJob('job-cancel', db)).toMatchObject({
+        status: 'cancelled',
+        phase: 'cancelling',
+        pollLeaseUntil: null,
+        attemptCount: 1,
+        retryStartedAt: '2026-07-20T00:00:00.000Z',
+        nextPollAt: '2026-07-20T00:00:00.250Z',
+        error: expect.stringContaining('PROVIDER_ERROR'),
+      });
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not silently claim remote cancellation when the remote job already completed', async () => {
+    const { db } = createTestDb();
+    seedJob(db, { handle: true });
+    const cancel = vi
+      .fn()
+      .mockResolvedValue({ status: 'completed', images: [] });
+    vi.mocked(providers.getById).mockReturnValue({
+      id: 'kling',
+      displayName: 'Kling AI',
+      capabilities: new Map(),
+      submit: vi.fn(),
+      cancel,
+    } as ImageProvider);
+
+    await cancelGeneration('gen-cancel', { db });
+    await expect(
+      advance(getGenerationJob('job-cancel', db)!, db),
+    ).resolves.toBe('cancelled');
+
+    expect(getGenerationJob('job-cancel', db)).toMatchObject({
+      status: 'cancelled',
+      phase: 'terminal',
+      error: expect.stringContaining('CANCEL_UNCONFIRMED'),
+      nextPollAt: null,
+      pollLeaseUntil: null,
+      attemptCount: 0,
+      retryStartedAt: null,
+    });
+    expect(getGenerationWithJobsAndImages('gen-cancel', db)).toMatchObject({
+      status: 'cancelled',
+      images: [],
+    });
+  });
+
+  it('stops after the third remote cancellation failure but keeps the generation cancelled', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    try {
+      const { db } = createTestDb();
+      seedJob(db, { handle: true });
+      const cancel = vi.fn().mockResolvedValue({
+        status: 'failed',
+        error: { code: 'TIMEOUT', message: 'still down', retryable: true },
+      });
+      vi.mocked(providers.getById).mockReturnValue({
+        id: 'kling',
+        displayName: 'Kling AI',
+        capabilities: new Map(),
+        submit: vi.fn(),
+        cancel,
+      } as ImageProvider);
+
+      await cancelGeneration('gen-cancel', { db });
+      db.update(generationJobs)
+        .set({
+          attemptCount: 2,
+          retryStartedAt: '2026-07-20T00:00:00.000Z',
+        })
+        .where(eq(generationJobs.id, 'job-cancel'))
+        .run();
+
+      await expect(
+        advance(getGenerationJob('job-cancel', db)!, db),
+      ).resolves.toBe('cancelled');
+      expect(getGenerationJob('job-cancel', db)).toMatchObject({
+        status: 'cancelled',
+        phase: 'terminal',
+        error: expect.stringContaining('RETRY_EXHAUSTED'),
+        nextPollAt: null,
+        pollLeaseUntil: null,
+        attemptCount: 0,
+        retryStartedAt: null,
+      });
+      expect(getGenerationWithJobsAndImages('gen-cancel', db)?.status).toBe(
+        'cancelled',
+      );
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('persists a late dispatch handle under cancellation and then remote-cancels it', async () => {
@@ -181,7 +463,9 @@ describe('durable cancellation', () => {
       pollLeaseUntil: null,
     });
 
-    await expect(advance(getGenerationJob('job-cancel', db)!, db)).resolves.toBe('cancelled');
+    await expect(
+      advance(getGenerationJob('job-cancel', db)!, db),
+    ).resolves.toBe('cancelled');
     expect(cancel).toHaveBeenCalledOnce();
     expect(getGenerationJob('job-cancel', db)).toMatchObject({
       phase: 'terminal',
@@ -241,7 +525,10 @@ describe('durable cancellation', () => {
         createdAt: now,
         updatedAt: now,
       },
-      [{ ...job, id: 'job-first' }, { ...job, id: 'job-second' }],
+      [
+        { ...job, id: 'job-first' },
+        { ...job, id: 'job-second' },
+      ],
       db,
     );
     sqlite.exec(`
@@ -256,7 +543,9 @@ describe('durable cancellation', () => {
     await expect(cancelGeneration('gen-fanout-cancel', { db })).rejects.toThrow(
       'second cancellation rejected',
     );
-    expect(getGenerationWithJobsAndImages('gen-fanout-cancel', db)).toMatchObject({
+    expect(
+      getGenerationWithJobsAndImages('gen-fanout-cancel', db),
+    ).toMatchObject({
       status: 'pending',
       jobs: [
         { id: 'job-first', status: 'pending', cancelRequestedAt: null },

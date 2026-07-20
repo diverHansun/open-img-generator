@@ -68,8 +68,8 @@ tests/helpers/fake-provider-server.ts
 | U-06 | user status 单调 | running 后 pending poll 不回退；terminal 晚到结果无效 | lifecycle/state unit | P-08/D |
 | U-07 | aggregate/partial/unknown | active 优先；完成+失败为 completed/partial；unknown 不被当普通可重试失败 | generation query/status tests | P-08/P-09/D/F |
 | U-08 | retry classifier | queue/pre-send timeout/abort 为 `not_started` 可重排；明确 429 为 `rejected`；HTTP started 后 timeout/reset/未知 5xx 为 `unknown`；poll 5xx/timeout retryable | retry policy/provider tests | P-06/E |
-| U-09 | retry schedule | attempt/elapsed cap、full jitter 下界/上界、Retry-After、成功重置 | `retry-policy.unit.test.ts` | P-06/D/E |
-| U-10 | retry exhaustion | 达到 attempt 或 elapsed budget 写稳定终态，不再 schedule | lifecycle unit | P-06/D |
+| U-09 | retry schedule/runtime guard | D2：attempt/elapsed cap、full jitter 下界/上界、损坏 state 与畸形 poll/cancel result 安全收口、成功重置；Retry-After 留 E | `retry-policy.unit.test.ts`、lifecycle/cancel unit | P-06/D/E |
+| U-10 | retry exhaustion | D2：poll 第 6 次、cancel 第 3 次 retryable failure 写稳定终态且不再 due；submit 不进入 retry | lifecycle/cancel unit | P-06/D |
 | U-11 | provider limiter | queue 上限快速拒绝；排队 deadline/AbortSignal 移除 item 且 Provider HTTP 0 调用；不同 provider 不互阻 | `limiter.unit.test.ts` | P-06/P-08/E |
 | U-12 | 七家 adapter error mapping | 429/4xx/5xx/timeout 的 code/retryable/disposition/Retry-After 一致；普通 Provider JSON > 2 MiB 被流式中止且 raw body 不泄漏 | 各 adapter/http-client unit | P-06/P-10/E |
 | U-13 | dynamic Provider URL auth | Fal 仅接受 exact configured origin 且 manual redirect；Qwen/Kling 从 base + external ID 重建；cross-origin 不请求/不转发 Authorization | fal/qwen/kling adapter tests | P-10/E |
@@ -131,7 +131,7 @@ tests/helpers/fake-provider-server.ts
 
 测试通过“持久化 checkpoint → 丢弃旧 engine instance → 新 worker/GET 恢复”模拟进程退出，不添加生产 test-only 分支。
 
-Batch D 的 lifecycle/retry 测试使用 typed fake Provider，只验证持久化 retry state、phase/lease/CAS 与重启预算；真实 HTTP classifier、七家 adapter 和 limiter 的接线由 Batch E 的 I-22… I-25 验收。
+Batch D 的 lifecycle/retry 测试使用 typed fake Provider，只验证持久化 retry state、phase/lease/CAS、重启预算、成功归零与取消收口；真实 HTTP classifier、七家 adapter 和 limiter 的接线仍由 Batch E 的 I-22… I-25 验收。
 
 | ID | 持久化检查点 | 重启后预期 | 对应 |
 |---|---|---|---|
@@ -147,6 +147,7 @@ Batch D 的 lifecycle/retry 测试使用 typed fake Provider，只验证持久�
 | I-19 | Provider 返回少/多 refs | 保留有界有效结果和 warning，永不超 requested count | P-09 |
 | I-20 | lease 失效时 storage 响应返回 | 旧 attempt 不写终态；临时/loser file 清理 | P-09 |
 | I-21 | store 期间取消 | user cancelled 不复活；attempt images/files 补偿或被 cleanup 精确发现 | P-05/P-09 |
+| I-21A | file-backed SQLite poll retry 重启 | 失败 checkpoint 后关闭/重开 DB；同一 retry budget 在 due 后继续，successful poll 清 error/count/window | P-06/D2 |
 
 ### 5.4 Retry/cancel/worker
 
@@ -155,10 +156,10 @@ Batch D 的 lifecycle/retry 测试使用 typed fake Provider，只验证持久�
 | I-22 | limiter queue/pre-send deadline 后成功 | 第一次 Provider server 0 请求、disposition `not_started`、同 job 按 due 安全重排；随后只发送一次 | P-06/E |
 | I-22A | submit 429 两次后成功 | real fake HTTP 最多 3 attempts、同 job/request ID、按 due 推进 | P-06/E |
 | I-23 | HTTP started 后 submit timeout/connection reset/unknown 5xx | fake server 可观测一次请求；随后 unknown，进程重启也不重投 | P-03/P-06/E |
-| I-24 | poll timeout/5xx 后成功 | real fake HTTP 接线；retry count/backoff 持久化，进程重启不重置预算，成功后归零 | P-06/E |
-| I-25 | poll 连续失败耗尽 | real fake HTTP 接线；terminal `RETRY_EXHAUSTED`，不再 due | P-06/E |
-| I-26 | cancel marker committed 后进程退出 | user 仍 cancelled；新 worker 有界 remote cancel 后 terminal | P-05 |
-| I-27 | remote cancel unsupported/fails | 本地不回退；warning 安全；预算后停止 | P-05/P-06 |
+| I-24 | poll timeout/5xx 后成功 | D2 typed fake 已验证持久化/重启/归零；E 追加 real fake HTTP、Retry-After 与 adapter classifier | P-06/D/E |
+| I-25 | poll 连续失败耗尽 | D2 typed fake 已验证第 6 次 terminal `RETRY_EXHAUSTED`、不再 due；E 追加 real fake HTTP | P-06/D/E |
+| I-26 | cancel marker committed 后进程退出 | D2 file-backed SQLite 验证 local cancelled + remote cancel retry checkpoint 在关闭/重开后按 due 继续并收口；E/F 可追加 real HTTP/restart process | P-05/D/E |
+| I-27 | remote cancel unsupported/fails | D2 验证 retryable 失败预算后停止且本地不回退；不支持/HTTP mapping 的完整矩阵留 E | P-05/P-06/D/E |
 | I-28 | due batch 前部均有 active lease | 后续 unleased due jobs 仍被扫描，稳定排序，无饥饿 | P-08 |
 | I-29 | limiter queue saturated | 多余任务快速获得可重试本地拒绝，不无限驻留内存 | P-06/P-08 |
 | I-30 | fan-out 一 completed、一 unknown | 成功图片保留，Generation partial/警告正确，其他 Provider 不重试 | P-04/P-12 |

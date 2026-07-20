@@ -5,7 +5,7 @@
 > 文档顺序: ④ dfd-interface(本文) → ⑤ use-case → ⑦ test
 > 运行时约束: 见 `docs/mvp/api/constraints.md`
 > 修订说明: 2026-07-15 `targets[]` 扇出；共享 aspectRatio；按 target 构造 NormalizedRequest
-> 修订说明: 2026-07-20 improve-1 D1：POST 仅 durable admission 并返回 `202`；执行改由 phase/lease worker 推进，内联结果使用 opaque staging
+> 修订说明: 2026-07-20 improve-1 D1/D2：POST durable admission；phase/lease worker、opaque staging 与持久化 poll/cancel retry
 
 ---
 
@@ -110,9 +110,9 @@ API 层: POST /api/generations
   2. 对每个 job 调用同一个 lifecycle.advance(job)
      queued      → claim dispatch lease → 从 versioned request snapshot 恢复 → provider.submit
      dispatching → lease 过期但无 durable result → outcome_unknown（不盲目 replay）
-     polling     → claim lease → provider.poll
+     polling     → claim lease → provider.poll；typed retryable failure 写 retry state + next due，非 retryable/预算耗尽才 terminal
      storing     → claim lease → 每次处理一张 result snapshot 中尚未落库的图片
-     cancelling  → claim lease → 若有 handle 则 provider.cancel（best effort）→ terminal
+     cancelling  → claim lease → 若有 handle 则 provider.cancel（best effort）；仅 remote `cancelled` 确认成功，`pending/running` 按 cancel budget 重排，`completed` 以安全的“取消未确认”诊断收口且不复活本地状态
   3. 所有外部结果写回均以 phase + lease + cancel marker CAS；再聚合 generation.status
 
 详情 GET:
@@ -123,6 +123,8 @@ API 层: POST /api/generations
 
 worker 默认启用；只有 `JOB_WORKER_ENABLED=false` 才关闭。关闭时详情 GET 是恢复辅助入口，**不是**绕过 `next_poll_at` 或有效 lease 的强制 poll。已全部终态的 generation 不触发外部工作。
 
+**D2 retry 规则**：poll 仅在 `ProviderError.retryable === true` 或调用抛错时重排，最多 6 次外部 poll/10 分钟；remote cancel 同理，最多 3 次/30 秒。`attempt_count`、`retry_started_at`、error 与 `next_poll_at` 在同一 lease CAS 写入，因此新进程继续同一预算；成功 pending/running、进入 storing、终态及本地取消会清空 retry state。submit 永不走此路径。
+
 ### 2.3 Cancel 流程（POST /api/generations/:id/cancel）
 
 ```
@@ -132,7 +134,8 @@ API → orchestrator.cancelGeneration
        重新聚合 generation.status
   → 立即返回本地 GenerationView；不等待 Provider
   → worker 后续处理 phase=cancelling：有 durable handle 时尽力调用 provider.cancel(handle)
-  → 将 job 收口为 terminal；远端失败/不支持仅记录安全诊断，不复活 public status
+  → retryable remote failure、或 remote 仍为 pending/running 时写下一次 due（最多 3 次/30 秒）；不支持/非 retryable/预算耗尽才收口 terminal
+  → 全程不复活 public status；预算耗尽也保持 `cancelled`
 ```
 
 尚未 claim 的 queued job 直接 terminal；dispatch/storing 期间的 lease 与晚到 async handle 受 cancellation CAS 保护，晚到 handle 只可用于远端 cancel。取消先于图片 checkpoint 赢得事务时，不会出现新的 image row；已完成 checkpoint 的图片保持已持久化资产。
@@ -227,6 +230,8 @@ ImageView { id, jobId, index, url, width, height, favorited }
 ```
 
 `getGeneration()` 读取后可以辅助调用 `advance()`，但 caller 不可据此假设同步完成：只有该 job 当前 due 且 lease 可 claim 时才可能发生一次生命周期动作。
+
+`error` 永远是安全 code 的 DTO。D2 可在 active/cancelling job 上暂存 retryable 诊断供恢复；前端不应把这种 retryable 诊断渲染为终态失败，下一次成功 phase 会清除它。
 
 ### 3.3 API 路由契约（generation 相关）
 

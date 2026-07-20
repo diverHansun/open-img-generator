@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getJobErrorMessageKey } from './job-error';
+import { getJobErrorMessageKey, shouldShowJobError } from './job-error';
 
 describe('job error presentation', () => {
   it.each([
@@ -10,6 +10,7 @@ describe('job error presentation', () => {
     ['RATE_LIMITED', 'generation.jobError.rateLimited'],
     ['PROVIDER_TIMEOUT', 'generation.jobError.timeout'],
     ['CANCEL_UNSUPPORTED', 'generation.jobError.cancelUnconfirmed'],
+    ['CANCEL_UNCONFIRMED', 'generation.jobError.cancelUnconfirmed'],
     ['STORAGE_RESPONSE_INVALID', 'generation.jobError.storage'],
     ['PROVIDER_OUTCOME_UNKNOWN', 'generation.jobError.outcomeUnknown'],
     ['RETRY_EXHAUSTED', 'generation.jobError.retryExhausted'],
@@ -26,5 +27,28 @@ describe('job error presentation', () => {
 
     expect(messageKey).toBe('generation.jobError.generic');
     expect(messageKey).not.toContain(canary);
+  });
+
+  it('does not present transient retry diagnostics as a failed active job', () => {
+    const transient = { code: 'TIMEOUT', message: 'internal', retryable: true };
+
+    expect(shouldShowJobError('pending', transient)).toBe(false);
+    expect(shouldShowJobError('running', transient)).toBe(false);
+    expect(shouldShowJobError('cancelled', transient)).toBe(false);
+    expect(shouldShowJobError('failed', transient)).toBe(true);
+    expect(
+      shouldShowJobError('cancelled', {
+        code: 'CANCEL_UNSUPPORTED',
+        message: 'internal',
+        retryable: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowJobError('cancelled', {
+        code: 'TIMEOUT',
+        message: 'internal',
+        retryable: false,
+      }),
+    ).toBe(true);
   });
 });

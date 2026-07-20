@@ -1,6 +1,6 @@
 # 图片生成链路鲁棒性改造 · improve-1
 
-> 状态：实施中；Batch A–C 与 D1 已完成并独立验证，Batch D2–F 待实施
+> 状态：实施中；Batch A–C 与 D1/D2 已完成并独立验证，Batch E–F 待实施
 > 日期：2026-07-20
 > 文档落点：`docs/mvp/probelm-list/2026-07-20-generation-pipeline-resilience/improve-1/`
 > 触发事件：Generate 提交因运行中 SQLite schema 缺少 `generation_jobs.next_poll_at` 而返回 500；事务已回滚，Provider 未被调用。
@@ -71,7 +71,7 @@
 | A | 数据库恢复与 readiness | 迁移旧库、schema preflight、健康契约与迁移回归测试 | 已完成（`e12bf09`） |
 | B | 结构化错误与前端可行动反馈 | API error envelope、correlation ID、i18n 分类和提交错误测试 | 已完成（`311f01e`） |
 | C | 幂等接纳 | clientRequestId、payload hash、唯一约束与重复/并发提交测试 | 已完成 |
-| D | 持久化 lifecycle | 请求/结果快照、dispatch/poll/store/cancel phase、状态单调、worker 与崩溃恢复 | D1 已完成；D2 待实施 |
+| D | 持久化 lifecycle | 请求/结果快照、dispatch/poll/store/cancel phase、状态单调、worker、崩溃恢复与 poll/cancel 有界 retry | 已完成（D1/D2） |
 | E | Provider 与 storage 韧性 | 副作用感知重试、队列上限、远端图片安全、脱敏与副作用补偿 | 待实施 |
 | F | 前端与端到端收口 | Generate/Stage 恢复、成本护栏、unit/integration/E2E/build、文档对齐和子代理复审 | 待实施 |
 

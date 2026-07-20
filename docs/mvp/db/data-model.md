@@ -4,7 +4,7 @@
 > 技术栈: Drizzle ORM + SQLite (better-sqlite3)
 > 前置文档: 各模块 goals-duty / dfd-interface 中的数据需求
 > 修订说明: 2026-07-16 新增 projects / favorites / model_preferences；Session 必属 Project；Generation 必属 Session（取消零散路径）
-> 修订说明: 2026-07-20 improve-1 D1：Generation durable admission/idempotency；GenerationJob versioned snapshot、phase/lease 与 opaque staging result 恢复字段
+> 修订说明: 2026-07-20 improve-1 D1/D2：Generation durable admission/idempotency；GenerationJob snapshot、phase/lease、opaque staging 与持久化 retry state
 
 ---
 
@@ -102,17 +102,17 @@
 | request_snapshot | TEXT NULL | 已校验、版本化、target-specific `NormalizedRequest` JSON；仅供恢复 dispatch，终态清理 |
 | request_snapshot_version | INTEGER NULL | request snapshot 格式版本；未知版本禁止 dispatch |
 | result_snapshot | TEXT NULL | 短期图片 refs；仅有界远端 URL 或 opaque `staging:<uuid>`，终态/取消清理；禁止 raw data URL/Base64 |
-| attempt_count | INTEGER NOT NULL | durable retry/attempt 计数槽位；D1 不对外暴露自动重试语义 |
-| retry_started_at | TEXT NULL | durable retry window 起点；D1 不对外暴露自动重试语义 |
+| attempt_count | INTEGER NOT NULL | 当前 phase 已发生的 retryable failure 数；D2 仅用于 poll/cancel，成功/phase 切换/终态归零 |
+| retry_started_at | TEXT NULL | 与 attempt_count 成对存在的 durable retry window 起点；半写或无效值安全收口为 `RETRY_EXHAUSTED` |
 | poll_lease_until | TEXT NULL | **物理旧列名**；现在是当前 phase 的短期 lease 到期值与 CAS token，不表示厂商状态 |
 | next_poll_at | TEXT NULL | **物理旧列名**；现在是当前 phase 的下一次 due 时间，worker 与详情辅助均须遵守 |
 | cancel_requested_at | TEXT NULL | 本地取消 CAS 标记；非空后 public status 不可复活，worker 可在 `cancelling` phase 尽力远端 cancel |
 | created_at | TEXT | ISO 8601 |
 | updated_at | TEXT | ISO 8601 |
 
-生命周期: admission 创建 `status=pending, phase=queued`。worker/详情 helper 以 phase、due、lease 与 cancel marker 条件 claim 后推进；`dispatching` lease 过期而没有 durable Provider 结果时标为 `status=failed, phase=outcome_unknown`，不猜测重投。async handle 在 dispatch 成功时写入；取消与晚到 handle 竞争时可保留 handle，仅用于后续远端 cancel，不能复活 public status。
+生命周期: admission 创建 `status=pending, phase=queued`。worker/详情 helper 以 phase、due、lease 与 cancel marker 条件 claim 后推进；`dispatching` lease 过期而没有 durable Provider 结果时标为 `status=failed, phase=outcome_unknown`，不猜测重投。async handle 在 dispatch 成功时写入；D2 对 typed-retryable poll/cancel 将 attempt/window/next due 一起写入，重启后继续同一预算；取消与晚到 handle 竞争时可保留 handle，仅用于后续远端 cancel，不能复活 public status。
 
-`updated_at` 更新时机: 每次 `status`、`error`、`provider_handle`、`phase`、snapshot、`poll_lease_until`、`next_poll_at`、`cancel_requested_at` 变更时。
+`updated_at` 更新时机: 每次 `status`、`error`、`provider_handle`、`phase`、snapshot、`attempt_count`、`retry_started_at`、`poll_lease_until`、`next_poll_at`、`cancel_requested_at` 变更时。
 
 扇出: 一个 generation_id 对应 N 行 job（N ≥ 1）。`POST /api/generations` 的 `targets[]` 长度决定创建行数。
 

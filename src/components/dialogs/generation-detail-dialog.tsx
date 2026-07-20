@@ -4,7 +4,10 @@ import * as React from 'react';
 import { ArrowLeft, ImageOff } from 'lucide-react';
 
 import { FavoriteButton } from '@/components/generation/favorite-button';
-import { getJobErrorMessageKey } from '@/components/generation/job-error';
+import {
+  getJobErrorMessageKey,
+  shouldShowJobError,
+} from '@/components/generation/job-error';
 import { reconcileGenerationSnapshot } from '@/components/generation/generation-view-state';
 import { GenerationStatus } from '@/components/generation/generation-status';
 import { useLocale } from '@/components/i18n/locale-provider';
@@ -328,6 +331,9 @@ export function GenerationDetailDialog({
                   const imageCount = view.images.filter(
                     (image) => image.jobId === job.id,
                   ).length;
+                  const visibleError = shouldShowJobError(job.status, job.error)
+                    ? job.error
+                    : undefined;
                   return (
                     <article key={job.id} className={styles.jobRow}>
                       <div className={styles.jobIdentity}>
@@ -338,10 +344,10 @@ export function GenerationDetailDialog({
                       <span className={styles.jobCount}>
                         {t('dialogs.jobImageCount', { count: imageCount })}
                       </span>
-                      {job.error ? (
+                      {visibleError ? (
                         <p className={styles.jobError}>
                           {t('dialogs.jobError', {
-                            message: t(getJobErrorMessageKey(job.error.code)),
+                            message: t(getJobErrorMessageKey(visibleError.code)),
                           })}
                         </p>
                       ) : null}

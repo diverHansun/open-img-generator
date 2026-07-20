@@ -6,7 +6,10 @@ import { useRouter } from 'next/navigation';
 
 import { ImagePreviewDialog } from '@/components/dialogs/image-preview-dialog';
 import { FavoriteButton } from '@/components/generation/favorite-button';
-import { getJobErrorMessageKey } from '@/components/generation/job-error';
+import {
+  getJobErrorMessageKey,
+  shouldShowJobError,
+} from '@/components/generation/job-error';
 import { reconcileGenerationSnapshot } from '@/components/generation/generation-view-state';
 import { useLocale } from '@/components/i18n/locale-provider';
 import { Button } from '@/components/ui/button';
@@ -427,6 +430,9 @@ export function GenerateStage({
                 const imageCount = view.images.filter(
                   (image) => image.jobId === job.id,
                 ).length;
+                const visibleError = shouldShowJobError(job.status, job.error)
+                  ? job.error
+                  : undefined;
                 return (
                   <div className={styles.jobRow} key={job.id}>
                     <span>
@@ -439,9 +445,9 @@ export function GenerateStage({
                         {t('generate.jobImages', { count: imageCount })}
                       </small>
                     </span>
-                    {job.error ? (
+                    {visibleError ? (
                       <p className={styles.jobError}>
-                        {t(getJobErrorMessageKey(job.error.code))}
+                        {t(getJobErrorMessageKey(visibleError.code))}
                       </p>
                     ) : null}
                   </div>

@@ -22,6 +22,7 @@ import {
   type GenerationStatus,
   type Image,
 } from '../db';
+import { toSafeJobError } from '../job-engine/job-error';
 import { getProject } from './projects';
 import { NotFoundError, ValidationError } from '../errors';
 import type { GenerationSummary, HistoryPage, Page } from './types';
@@ -57,13 +58,8 @@ function cursorCondition(cursor: Cursor | undefined): SQL | undefined {
   );
 }
 
-function parseError(error: string | null): unknown | null {
-  if (!error) return null;
-  try {
-    return JSON.parse(error) as unknown;
-  } catch {
-    return { code: 'UNKNOWN', message: error, retryable: false };
-  }
+function parseError(error: string | null): GenerationSummary['jobs'][number]['error'] {
+  return toSafeJobError(error) ?? null;
 }
 
 function appendToMap<T>(map: Map<string, T[]>, key: string, value: T): void {

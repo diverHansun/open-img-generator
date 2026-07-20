@@ -5,7 +5,7 @@
 > 修订说明: 2026-07-15 启用扇出（1 generation + N jobs）；原「MVP 不扇出」作废
 > 修订说明: 2026-07-16 `sessionId` **必填**；不负责 Project/History/Gallery（归 library）
 > 修订说明: 2026-07-16 本地取消、next_poll_at worker、provider/generation 限流已实现
-> 修订说明: 2026-07-20 improve-1 D1：POST 改为 durable admission `202`；按 phase/lease 恢复推进；请求快照与内联图片 opaque staging 落库边界已收紧
+> 修订说明: 2026-07-20 improve-1 D1/D2：POST durable admission `202`、phase/lease 恢复与 opaque staging；poll/cancel 具备持久化有界重试
 
 ---
 
@@ -42,11 +42,11 @@
 
 1. **接收并 durable admission 扇出请求**: 接收参数（`clientRequestId`、`targets[]`、prompt、**必填 sessionId**、共享运行时参数），经 prompt 模块处理后，为每个 target 构造 capability 裁剪后的、版本化 `NormalizedRequest` snapshot；在同一事务内写入 1 条 generation、N 条 `phase=queued` jobs、snapshot 和 Session touch。Provider 调用只能发生在该事务 commit 之后的生命周期推进中。
 2. **按 target 校验与请求裁剪**: 每个 `(provider, model)` 必须已启用且存在于 capabilities；校验 mode、count（含 sync `count=1` MVP 限制）、尺寸/公开宽高比、negativePrompt。`image-to-image` 必须带 `referenceImages`。seed 若有值：仅写入 `supportsSeed===true` 的 target 的 NormalizedRequest，其余 target 省略（不因此整单 400）。
-3. **按 durable phase/lease 推进任务**: worker 扫描 due 且无有效 lease 的 jobs；`getGeneration()` 可调用同一 `lifecycle.advance()` 作恢复辅助，但仍受 phase、due 和 lease CAS 约束。dispatch lease 过期而未记录 Provider 结果时，保守进入 `outcome_unknown`，不盲目重投。
+3. **按 durable phase/lease 推进任务**: worker 扫描 due 且无有效 lease 的 jobs；`getGeneration()` 可调用同一 `lifecycle.advance()` 作恢复辅助，但仍受 phase、due 和 lease CAS 约束。dispatch lease 过期而未记录 Provider 结果时，保守进入 `outcome_unknown`，不盲目重投。D2 仅对已有 durable handle 的 poll/cancel 使用 `retry-policy` 的持久化、全抖动、有界 retry；submit 不进入该路径。
 4. **下载、staging 与原子转存图片**: Provider completed 后先持久化有界 result snapshot，逐图下载/物化；图片 row 的插入、lease 校验、job phase/status 与 Generation 聚合在短事务内 checkpoint。取消先赢时不得留下可见 image row；已成功 checkpoint 的图片可保留。
 5. **统一状态查询与聚合**: 对外提供 `getGeneration(id)` 返回 `GenerationView`（含全部 jobs 与 images）；generation.status 由全部 job 状态聚合（见 `api/constraints.md` §8）。
 6. **session 关联（必填）**: 校验 session 存在；写入 `generations.session_id`；关联成功后 `db.touchSession(sessionId)`。缺少 sessionId → 校验失败（400）。
-7. **取消本地原子、远端尽力**: cancel 在一个短事务内批量标记全部 active jobs 并重聚合 generation，立即返回本地状态；worker 对有 durable handle 的 `cancelling` job 再尽力调用 provider.cancel。晚到 submit handle 只能用于远端取消，绝不复活公开状态。
+7. **取消本地原子、远端尽力**: cancel 在一个短事务内批量标记全部 active jobs 并重聚合 generation，立即返回本地状态；worker 对有 durable handle 的 `cancelling` job 再尽力调用 provider.cancel。retryable remote cancel 以独立的 3 次/30 秒预算收口；晚到 submit handle 只能用于远端取消，绝不复活公开状态。
 8. **部分失败隔离**: 某一 target 的 submit/poll/转存失败只将该 job 标为 failed，不回滚已成功的其他 jobs 及其 images；generation 聚合状态按 §8 规则更新。
 
 ---
@@ -59,7 +59,7 @@
 4. **不定义 db schema**: schema 定义是 db 模块的职责。job-engine 通过 db 查询/写入函数操作数据。
 5. **不处理 HTTP 路由**: API 层负责解析 HTTP 请求和返回 JSON。job-engine 不感知 Request/Response 对象。
 6. **不计算「前端交集」**: 多模型宽高比交集是 web-ui 的职责。服务端只校验「每个 target 是否支持提交的 aspectRatio」。
-7. **不重试失败的 provider 调用（MVP）**: 单次 submit/poll 失败即标记该 job failed，不做自动重试。
+7. **不重放不确定的 submit，也不把所有失败都重试**: submit 发送后异常/租约过期仍进入 `outcome_unknown`。D2 只重试已有 handle 的 typed-retryable poll/cancel（poll 最多 6 次且总窗口 10 分钟；cancel 最多 3 次且总窗口 30 秒）；storage、HTTP disposition/Retry-After 与 Provider-specific 规则仍由 E 收口。
 8. **不做跨进程限流/熔断或外部队列**: 当前依赖单进程 worker、SQLite lease 和 per-provider semaphore；多实例共享限流仍不在 MVP 范围。
 9. **不优化 prompt**: prompt 预处理是 prompt 模块的职责。
 10. **不定义厂商取消协议**: 取消入口与本地状态机归 job-engine；providers 只负责在官方支持时实现 `cancel(handle)`。不支持时 job-engine 仍完成本地取消，不能承诺远端停止或不计费。
