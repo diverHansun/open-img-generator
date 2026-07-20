@@ -67,9 +67,9 @@ export function GenerateInspector({
         <div className={styles.inspectorHeading}>
           <h2>{t('generate.inspectorTitle')}</h2>
           <span>
-            {t('generate.modelsSelected', {
-              selected: selectedKeys.size,
-              total: models.length,
+            {t('generate.generationImpact', {
+              calls: selectedKeys.size,
+              images: selectedKeys.size * count,
             })}
           </span>
         </div>

@@ -127,7 +127,7 @@ describe('web API client', () => {
       }),
     ).resolves.toMatchObject({ id: 'generation-1', replayed: false });
 
-    expect(fetcher).toHaveBeenCalledWith('/api/generations', {
+    expect(fetcher).toHaveBeenCalledWith('/api/generations', expect.objectContaining({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -139,7 +139,27 @@ describe('web API client', () => {
         targets: [],
         sessionId: 'session-1',
       }),
-    });
+      signal: expect.any(AbortSignal),
+    }));
+  });
+
+  it('aborts a generation detail request after its deadline', async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+    );
+    const client = createApiClient(fetcher as typeof fetch);
+    const request = client.getGenerationById('generation-1');
+    const rejection = expect(request).rejects.toThrow('aborted');
+
+    try {
+      await vi.advanceTimersByTimeAsync(15_000);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('falls back to a safe header request ID and caps HTTP-date Retry-After', async () => {
@@ -269,11 +289,12 @@ describe('web API client', () => {
 
     await expect(client.getAuthSession()).resolves.toEqual({ authenticated: true });
     await expect(client.cancelGeneration('gen/1')).resolves.toEqual(view);
-    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/generations/gen%2F1/cancel', {
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/generations/gen%2F1/cancel', expect.objectContaining({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
-    });
+      signal: expect.any(AbortSignal),
+    }));
   });
 
   it('encodes the new workspace, History, Gallery and Provider contract methods', async () => {
@@ -347,8 +368,12 @@ describe('web API client', () => {
     await client.listProviderConfigurations({ signal });
 
     expect(fetcher).toHaveBeenCalledTimes(15);
-    for (const [, init] of fetcher.mock.calls) {
-      expect(init).toEqual({ signal });
+    for (const [index, [, init]] of fetcher.mock.calls.entries()) {
+      if (index === 3 || index === 4) {
+        expect(init).toEqual({ signal: expect.any(AbortSignal) });
+      } else {
+        expect(init).toEqual({ signal });
+      }
     }
   });
 });

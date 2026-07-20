@@ -1,6 +1,6 @@
 # 图片生成链路鲁棒性改造 · improve-1
 
-> 状态：实施中；Batch A–C、D1/D2 与 Batch E 已完成并独立验证，Batch F 待实施
+> 状态：实施中；Batch A–E 与 Batch F1 已完成并独立验证，Batch F2 端到端验收进行中
 > 日期：2026-07-20
 > 文档落点：`docs/mvp/probelm-list/2026-07-20-generation-pipeline-resilience/improve-1/`
 > 触发事件：Generate 提交因运行中 SQLite schema 缺少 `generation_jobs.next_poll_at` 而返回 500；事务已回滚，Provider 未被调用。
@@ -73,7 +73,7 @@
 | C | 幂等接纳 | clientRequestId、payload hash、唯一约束与重复/并发提交测试 | 已完成 |
 | D | 持久化 lifecycle | 请求/结果快照、dispatch/poll/store/cancel phase、状态单调、worker、崩溃恢复与 poll/cancel 有界 retry | 已完成（D1/D2） |
 | E | Provider 与 storage 韧性 | 副作用感知重试、队列上限、远端图片安全、脱敏与副作用补偿 | 已完成（E1/E2/E3） |
-| F | 前端与端到端收口 | Generate/Stage 恢复、成本护栏、unit/integration/E2E/build、文档对齐和子代理复审 | 待实施 |
+| F | 前端与端到端收口 | Generate/Stage 恢复、成本护栏、unit/integration/E2E/build、文档对齐和子代理复审 | F1 已完成；F2 进行中 |
 
 具体提交边界以 `02` 为准；若某批无法保持可独立验证，应继续拆小，而不是把多种风险混入一个提交。
 

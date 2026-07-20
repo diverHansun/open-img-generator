@@ -79,7 +79,7 @@ sync Provider 与 async Provider 共享 admission → dispatch → storing 生�
 - 已成功的 `images` **保留**
 - **仅该 job** → `failed`；其他 jobs 不受影响
 - generation 聚合见 §8
-- D2 不重试 storage/download；客户端可发起新 generation。仅已有 handle 的 poll/cancel 使用其各自的有界 retry，不能据此推断 submit 可重放。
+- storage/download 的网络、超时、429/5xx 与短读使用独立持久化预算（最多 3 次调用/60 秒）；URL/MIME/magic/local write 等确定性失败不重试。已有 handle 的 poll/cancel 使用各自预算；这些规则都不能据此推断 submit 可盲目重放。
 
 ---
 

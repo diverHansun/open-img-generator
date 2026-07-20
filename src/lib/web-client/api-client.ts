@@ -39,6 +39,9 @@ export type ApiRequestOptions = {
   signal?: AbortSignal;
 };
 
+const SUBMIT_DEADLINE_MS = 30_000;
+const DETAIL_DEADLINE_MS = 15_000;
+
 function jsonInit(method: string, payload: unknown): RequestInit {
   return {
     method,
@@ -63,12 +66,37 @@ async function requestJson<T>(
   fetcher: FetchLike,
   input: RequestInfo | URL,
   init?: RequestInit,
+  deadlineMs?: number,
 ): Promise<T> {
-  const response = await fetcher(input, init);
-  if (!response.ok) {
-    throw await toApiClientError(response);
+  const deadline = deadlineMs ? requestWithDeadline(init, deadlineMs) : null;
+  try {
+    const response = await fetcher(input, deadline?.init ?? init);
+    if (!response.ok) {
+      throw await toApiClientError(response);
+    }
+    return response.json() as Promise<T>;
+  } finally {
+    deadline?.cleanup();
   }
-  return response.json() as Promise<T>;
+}
+
+function requestWithDeadline(
+  init: RequestInit | undefined,
+  timeoutMs: number,
+): { init: RequestInit; cleanup: () => void } {
+  const controller = new AbortController();
+  const callerSignal = init?.signal;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortFromCaller();
+  else callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    init: { ...init, signal: controller.signal },
+    cleanup: () => {
+      clearTimeout(timeout);
+      callerSignal?.removeEventListener('abort', abortFromCaller);
+    },
+  };
 }
 
 function requestInitWithSignal(options?: ApiRequestOptions): RequestInit | undefined {
@@ -178,20 +206,28 @@ export function createApiClient(fetcher: FetchLike = fetch) {
             'Idempotency-Key': payload.clientRequestId,
           },
         },
+        SUBMIT_DEADLINE_MS,
       ),
     getGeneration: (selfLink: string, options?: ApiRequestOptions) =>
-      requestJson<GenerationView>(fetcher, selfLink, requestInitWithSignal(options)),
+      requestJson<GenerationView>(
+        fetcher,
+        selfLink,
+        requestInitWithSignal(options),
+        DETAIL_DEADLINE_MS,
+      ),
     getGenerationById: (id: string, options?: ApiRequestOptions) =>
       requestJson<GenerationView>(
         fetcher,
         `/api/generations/${encodeURIComponent(id)}`,
         requestInitWithSignal(options),
+        DETAIL_DEADLINE_MS,
       ),
     cancelGeneration: (id: string) =>
       requestJson<GenerationView>(
         fetcher,
         `/api/generations/${encodeURIComponent(id)}/cancel`,
         jsonInit('POST', {}),
+        DETAIL_DEADLINE_MS,
       ),
     listGenerations: (
       query: {

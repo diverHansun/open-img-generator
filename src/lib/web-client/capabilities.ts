@@ -59,7 +59,7 @@ export function deriveGenerationControls(
         item.protocol === 'sync' ? Math.min(item.maxCount, 1) : item.maxCount,
       ),
     ),
-    canSetSeed: capabilities.some((item) => item.supportsSeed),
+    canSetSeed: capabilities.every((item) => item.supportsSeed),
     canSetNegativePrompt: capabilities.every((item) => item.supportsNegativePrompt),
   };
 }
@@ -88,6 +88,9 @@ export function buildSubmitGenerationRequest(
   }
   if (request.negativePrompt && !controls.canSetNegativePrompt) {
     throw new Error('Negative prompt is not supported by every selected target');
+  }
+  if (request.seed != null && !controls.canSetSeed) {
+    throw new Error('Seed is not supported by every selected target');
   }
   return { ...request, targets: [...request.targets] };
 }

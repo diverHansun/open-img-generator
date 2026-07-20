@@ -232,7 +232,7 @@ Job diagnostics 出现在 Generation view 与 History/read-model 的 job.error�
 | Provider cancel | 429、timeout、network、5xx，且有 cancel endpoint/handle | 3 | 1s / 10s | 30s | unsupported；本地 cancelled 不回退 |
 | image download | 429、timeout、network、5xx、短读 | 3 | 500ms / 5s | 每张 60s | 非图片、超限、私网、非法 redirect、4xx（429 除外） |
 | browser POST | network/timeout/429/5xx；始终同 key | 2 | 500ms / 2s | 30s | 4xx 非 retryable、payload conflict |
-| browser detail GET | network/timeout/429/5xx | 连续 6 后暂停 | 2s / 30s | 单次 12s | 404/401/非 retryable；用户可手动恢复 |
+| browser detail GET | network/timeout/429/5xx | 连续 6 后暂停 | 2s / 30s | 单次 15s | 404/401/非 retryable；用户可手动恢复 |
 
 Provider adapter 的 submit error 新增副作用判定 `disposition: not_started | rejected | unknown`：
 
@@ -307,7 +307,7 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 ### 7.3 Stage 与轮询
 
 - URL 已有 `generation` 时，Stage shell 和 detail request 立即启动；Sessions/Providers/Preferences 失败只影响返回 Compose 后的配置，不阻塞当前任务。
-- 每个 GET 有 12s deadline；unsubscribe、route change 和组件 unmount 真正 abort 网络请求。
+- 每个 Generation detail GET 有 15s deadline；unsubscribe、route change 和组件 unmount 真正 abort 网络请求。
 - retry 使用 jitter；`navigator.onLine=false` 或页面 hidden 时暂停定时请求，恢复后先进行一次带抖动的 GET。
 - 连续 6 次**浏览器 detail 请求** transient failure 后停止客户端自动轮询，展示最后成功快照、错误类别和手动“继续检查”；这不改变服务端 Job 的真实状态。Provider poll 的 D2 预算耗尽则明确写 `failed + RETRY_EXHAUSTED`。
 - 若 Job 为 `PROVIDER_OUTCOME_UNKNOWN`，Stage 提醒远端可能仍运行，不提供无提示的“自动再生成”。
@@ -404,6 +404,8 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 - 新增 backend + browser E2E；同步权威 MVP 文档与测试蓝图。
 - DoD：`04` 全部门禁通过，浏览器真实走通 submit → Stage → refresh → completed；子代理审查无未处理 blocker/high。
 - 对应：P-11、P-12、P-14，以及全部回归。
+
+**实施状态（2026-07-20）**：F1 已实现 Stage 与 Compose bootstrap 解耦、Generation API 有界 deadline、离线/隐藏暂停、连续 6 次失败后手动恢复、默认单模型、调用量提示，以及前后端一致的 Seed capability 交集校验；unit、contract、integration 已通过。F2 正在补真实 Next + 本地 fake Provider 的端到端流与生产构建验收。
 
 ## 9. 按目录的具体改动面
 

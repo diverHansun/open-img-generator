@@ -150,7 +150,7 @@ export function GenerateScreen({
         setSelectedKeys(
           new Set(
             models
-              .slice(0, MAX_GENERATION_TARGETS)
+              .slice(0, 1)
               .map((model) => modelKey(model.target)),
           ),
         );
@@ -180,12 +180,13 @@ export function GenerateScreen({
   }, [projectId, runtime]);
 
   React.useEffect(() => {
+    if (initialGenerationId) return;
     load();
     return () => {
       loadController.current?.abort();
       loadController.current = null;
     };
-  }, [load]);
+  }, [initialGenerationId, load]);
 
   React.useEffect(() => {
     if (previousRouteGeneration.current === initialGenerationId) return;
@@ -466,6 +467,19 @@ export function GenerateScreen({
     [handleErrorAction, load],
   );
 
+  if (task.view === 'stage' && task.currentGenerationId) {
+    return (
+      <GenerateStage
+        key={task.currentGenerationId}
+        projectId={projectId}
+        generationId={task.currentGenerationId}
+        initialSnapshot={task.snapshot}
+        onSnapshot={receiveSnapshot}
+        onBack={backToCompose}
+      />
+    );
+  }
+
   if (loadState.status === 'loading') {
     return (
       <div className={styles.loadingState} aria-live="polite">
@@ -499,19 +513,6 @@ export function GenerateScreen({
           </Button>
         ) : null}
       </div>
-    );
-  }
-
-  if (task.view === 'stage' && task.currentGenerationId) {
-    return (
-      <GenerateStage
-        key={task.currentGenerationId}
-        projectId={projectId}
-        generationId={task.currentGenerationId}
-        initialSnapshot={task.snapshot}
-        onSnapshot={receiveSnapshot}
-        onBack={backToCompose}
-      />
     );
   }
 

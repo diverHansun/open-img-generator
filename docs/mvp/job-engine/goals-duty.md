@@ -41,7 +41,7 @@
 ## 2. Duties（职责）
 
 1. **接收并 durable admission 扇出请求**: 接收参数（`clientRequestId`、`targets[]`、prompt、**必填 sessionId**、共享运行时参数），经 prompt 模块处理后，为每个 target 构造 capability 裁剪后的、版本化 `NormalizedRequest` snapshot；在同一事务内写入 1 条 generation、N 条 `phase=queued` jobs、snapshot 和 Session touch。Provider 调用只能发生在该事务 commit 之后的生命周期推进中。
-2. **按 target 校验与请求裁剪**: 每个 `(provider, model)` 必须已启用且存在于 capabilities；校验 mode、count（含 sync `count=1` MVP 限制）、尺寸/公开宽高比、negativePrompt。`image-to-image` 必须带 `referenceImages`。seed 若有值：仅写入 `supportsSeed===true` 的 target 的 NormalizedRequest，其余 target 省略（不因此整单 400）。
+2. **按 target 校验与请求裁剪**: 每个 `(provider, model)` 必须已启用且存在于 capabilities；校验 mode、count（含 sync `count=1` MVP 限制）、尺寸/公开宽高比、negativePrompt 与 seed 的共同能力。`image-to-image` 必须带 `referenceImages`。seed 若有值但任一 target 不支持，整单 400，禁止静默部分生效。
 3. **按 durable phase/lease 推进任务**: worker 扫描 due 且无有效 lease 的 jobs；`getGeneration()` 可调用同一 `lifecycle.advance()` 作恢复辅助，但仍受 phase、due 和 lease CAS 约束。dispatch lease 过期而未记录 Provider 结果时，保守进入 `outcome_unknown`，不盲目重投。D2 仅对已有 durable handle 的 poll/cancel 使用 `retry-policy` 的持久化、全抖动、有界 retry；submit 不进入该路径。
 4. **下载、staging 与原子转存图片**: Provider completed 后先持久化有界 result snapshot，逐图下载/物化；图片 row 的插入、lease 校验、job phase/status 与 Generation 聚合在短事务内 checkpoint。取消先赢时不得留下可见 image row；已成功 checkpoint 的图片可保留。
 5. **统一状态查询与聚合**: 对外提供 `getGeneration(id)` 返回 `GenerationView`（含全部 jobs 与 images）；generation.status 由全部 job 状态聚合（见 `api/constraints.md` §8）。

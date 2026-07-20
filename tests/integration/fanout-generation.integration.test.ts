@@ -24,7 +24,32 @@ describe('fan-out generation (Fal + ZenMux)', () => {
     else process.env.JOB_WORKER_ENABLED = originalWorkerEnabled;
   });
 
-  it('submits independent jobs, omits ZenMux seed, and aggregates both results', async () => {
+  it('rejects a partially supported Seed before durable admission or provider calls', async () => {
+    global.fetch = vi.fn();
+    const response = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientRequestId: '123e4567-e89b-42d3-a456-426614174099',
+          prompt: 'A calm reading room',
+          targets: [
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+            { provider: 'zenmux', model: 'openai/gpt-image-2' },
+          ],
+          aspectRatio: '1:1',
+          count: 1,
+          seed: 42,
+          sessionId: 'default-session',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('submits independent jobs and aggregates both results', async () => {
     const imageBuffer = Buffer.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
       ...Buffer.from('fanout-image'),
@@ -74,7 +99,6 @@ describe('fan-out generation (Fal + ZenMux)', () => {
           ],
           aspectRatio: '1:1',
           count: 1,
-          seed: 42,
           sessionId: 'default-session',
         }),
       }),
@@ -91,7 +115,8 @@ describe('fan-out generation (Fal + ZenMux)', () => {
       { params: Promise.resolve({ id: postBody.id }) },
     );
     expect((await dispatchResponse.json()).status).toBe('running');
-    expect(falRequest).toMatchObject({ seed: 42, image_size: 'square_hd' });
+    expect(falRequest).toMatchObject({ image_size: 'square_hd' });
+    expect(falRequest).not.toHaveProperty('seed');
     expect(zenmuxRequest).not.toHaveProperty('seed');
 
     const pollResponse = await getGeneration(

@@ -99,6 +99,9 @@ export function validate(
     if (params.negativePrompt && !capabilities.supportsNegativePrompt) {
       throw new ValidationError('Negative prompt not supported by every selected target');
     }
+    if (params.seed != null && !capabilities.supportsSeed) {
+      throw new ValidationError('Seed not supported by every selected target');
+    }
   }
 
   if (typeof params.sessionId !== 'string' || params.sessionId.length === 0) {

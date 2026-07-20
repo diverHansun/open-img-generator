@@ -13,8 +13,8 @@ web-ui → web-client → `/api/*` → library / job-engine / providers。
 ## 2. Data Flow
 
 1. UI 调用 `api.listProjects()` 等 → JSON DTO
-2. UI 调用 `api.submitGeneration(body)` → 201 摘要
-3. `polling.start(id, onUpdate)` → 反复 GET → 终态 stop
+2. UI 先生成/复用 sessionStorage submission intent，再调用 `api.submitGeneration(body)` → 202 摘要
+3. `pollRegistry.subscribe(id)` → 反复 GET → 终态 stop；offline/hidden 暂停，连续 6 次失败后由 UI 手动恢复
 4. `deriveGenerationControls(selectedCaps)` → 控件模型
 
 ---
@@ -32,6 +32,7 @@ web-ui → web-client → `/api/*` → library / job-engine / providers。
 | deriveGenerationControls | 无网络 |
 
 Submit body 必须含 `sessionId: string` 与 `targets[]`。
+submit deadline 为 30 秒；Generation detail/cancel deadline 为 15 秒。超时不会清除 submission intent，重试继续复用同一 `clientRequestId`。
 
 列表：`listGenerations({ sessionId, limit })` → `GenerationSummary[]`（不 poll）。
 收藏 / prefs DTO 对齐 `api/constraints.md` §15。

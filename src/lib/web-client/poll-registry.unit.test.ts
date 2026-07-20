@@ -121,6 +121,49 @@ describe('GenerationPollRegistry', () => {
     expect(registry.subscriptionCount('generation-1')).toBe(1);
   });
 
+  it('pauses network calls while offline or hidden and resumes on the next tick', async () => {
+    const getGenerationById = vi.fn().mockResolvedValue(pending);
+    const { scheduler, timers } = createScheduler();
+    let canPoll = false;
+    const registry = new GenerationPollRegistry(
+      { getGenerationById },
+      scheduler,
+      2_000,
+      5_000,
+      6,
+      () => canPoll,
+    );
+
+    registry.subscribe('generation-1', { onUpdate: vi.fn() });
+    expect(getGenerationById).not.toHaveBeenCalled();
+    expect(timers).toHaveLength(1);
+
+    canPoll = true;
+    timers[0]!.callback();
+    await vi.waitFor(() => expect(getGenerationById).toHaveBeenCalledOnce());
+  });
+
+  it('stops automatic polling after six consecutive retryable failures', async () => {
+    const getGenerationById = vi
+      .fn()
+      .mockRejectedValue(new ApiClientError('Temporary failure', 503, 'UNAVAILABLE', true));
+    const { scheduler, timers } = createScheduler();
+    const registry = new GenerationPollRegistry({ getGenerationById }, scheduler);
+    const onError = vi.fn();
+
+    registry.subscribe('generation-1', { onUpdate: vi.fn(), onError });
+    await vi.waitFor(() => expect(getGenerationById).toHaveBeenCalledTimes(1));
+    for (let index = 0; index < 5; index += 1) {
+      await vi.waitFor(() => expect(timers[index]).toBeDefined());
+      timers[index]!.callback();
+      await vi.waitFor(() => expect(getGenerationById).toHaveBeenCalledTimes(index + 2));
+    }
+
+    expect(onError).toHaveBeenCalledTimes(6);
+    expect(registry.subscriptionCount('generation-1')).toBe(0);
+    expect(timers).toHaveLength(5);
+  });
+
   it('aborts an in-flight detail request when its final subscriber leaves', async () => {
     let signal: AbortSignal | undefined;
     const getGenerationById = vi.fn(

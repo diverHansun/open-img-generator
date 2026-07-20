@@ -15,7 +15,7 @@ Compose 是唯一显示 inspector 的状态：Workspace 侧栏约 248px，主区
 
 ```text
 ┌──────────────┬────────────────────────────────────┬───────────────┐
-│ ← 工作区列表 │ 生成  Session: session-a7f2 [∨][+ ]│ 模型 2/2      │
+│ ← 工作区列表 │ 生成  Session: session-a7f2 [∨][+ ]│ 模型 1/2      │
 │ Workspace    ├────────────────────────────────────┤ ───────────   │
 │ ───────────  │ ┌ 描述你想生成的画面……            │ [ ] FLUX      │
 │ 生成         │ │                                  │ [x] GPT Image │
@@ -33,10 +33,13 @@ Compose 是唯一显示 inspector 的状态：Workspace 侧栏约 248px，主区
 - Prompt 输入本身是 Compose 主区唯一主要 surface，不再使用“外层卡片 + 内层 textarea”。默认约 3–5 行，有限自动增高，达到上限后内部滚动。
 - “清空”是低层级文字/ghost 动作，“生成”是 Compose 唯一实心 accent 动作。
 - 没有 current task 时不渲染空结果框；有 current task 时只显示一条紧凑、整行可点击的入口，不伪装实时状态。
+- 初次加载默认只选择第一个已启用模型；用户主动多选后，在 Inspector 紧凑显示“模型任务数 / 最多图片数”，不新增成本卡片。
 
 ## 3. Stage 桌面结构
 
 Stage 隐藏 inspector，主区使用 WorkspaceShell 剩余全部宽度。它是低 chrome 的生成画布，不是玻璃拟态、半透明浮层或厚边框大卡片。
+
+当 URL 已包含合法 `generation` query 时，Stage 必须先于 Sessions、Providers、Preferences 等 Compose bootstrap 呈现并请求详情；这些配置加载失败不能遮住已知任务。
 
 ```text
 ┌──────────────┬──────────────────────────────────────────────────────┐

@@ -97,7 +97,7 @@ describe('validator', () => {
     ).toThrow('Sync provider supports count=1 only in MVP');
   });
 
-  it('allows a seed when only some selected targets support it', () => {
+  it('rejects a seed when any selected target does not support it', () => {
     expect(() =>
       validate(
         makeParams({
@@ -109,7 +109,7 @@ describe('validator', () => {
         }),
         { db },
       ),
-    ).not.toThrow();
+    ).toThrow('Seed not supported by every selected target');
   });
 
   it('rejects a negative prompt when any selected target does not support it', () => {

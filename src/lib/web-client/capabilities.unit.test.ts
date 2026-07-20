@@ -42,7 +42,7 @@ describe('web-client capabilities', () => {
     expect(deriveGenerationControls(providers, targets)).toEqual({
       aspectRatios: ['1:1'],
       maxCount: 1,
-      canSetSeed: true,
+      canSetSeed: false,
       canSetNegativePrompt: false,
     });
   });
@@ -50,10 +50,17 @@ describe('web-client capabilities', () => {
   it('builds the public targets request and rejects unsupported shared choices', () => {
     expect(
       buildSubmitGenerationRequest(
+        { prompt: 'A cat', targets, sessionId: 'session-1', aspectRatio: '1:1' },
+        providers,
+      ),
+    ).toMatchObject({ targets });
+
+    expect(() =>
+      buildSubmitGenerationRequest(
         { prompt: 'A cat', targets, sessionId: 'session-1', aspectRatio: '1:1', seed: 42 },
         providers,
       ),
-    ).toMatchObject({ targets, seed: 42 });
+    ).toThrow('Seed is not supported by every selected target');
 
     expect(() =>
       buildSubmitGenerationRequest(

@@ -200,8 +200,8 @@ SubmitGenerationParams {
   count?: number                 // 默认 1；对每个 target 分别校验
   negativePrompt?: string
   seed?: number                  // 可选。构造每 target 的 NormalizedRequest 时：
-                                 //   supportsSeed → 传入 seed；否则省略。
-                                 // web-ui：任一选中模型 supportsSeed 则展示 seed 控件。
+                                 //   所有 targets supportsSeed → 传入 seed；否则整单校验失败。
+                                 // web-ui：仅全部选中模型 supportsSeed 才展示 seed 控件。
   referenceImages?: string[]     // image-to-image 至少一张；按 adapter 限制裁剪/翻译
   providerOptions?: Record<string, unknown>
 }

@@ -10,7 +10,7 @@
 | 数据流衔接 | OK | web-ui → API `targets[]` → job-engine → providers NormalizedRequest；GET 轮询推进多 job |
 | 职责不重叠 | OK | 扇出=job-engine；映射=providers；交集 UX=web-ui；持久化=db/storage |
 | 公开宽高比 | OK | providers capabilities 声明公开比；adapter 映射；UI/校验共用字符串 |
-| seed 规则 | OK | UI 任一 supportsSeed 则显示；服务端对不支持 target 省略，不整单 400 |
+| seed 规则 | OK | 只有全部 targets 支持时 UI 才显示；服务端收到部分支持的 Seed 时整单 400，避免静默部分生效 |
 | negativePrompt | OK | UI 仅全部支持时显示；服务端任一不支持且有值 → 400 |
 | 假参数 | OK | web-ui Non-Duty：无 capabilities 字段不渲染 Guidance/Steps/Quality/Safety |
 | 状态聚合 | OK | constraints §8 与 db/data-model、job-engine 对齐（部分成功 → completed） |
@@ -24,6 +24,7 @@
 2. `db/data-model.md`「MVP 每次只写一行」→ 改为 N jobs
 3. job-engine goals Goal #5 措辞与 seed 省略规则对齐
 4. brainstorm spec 标记为 superseded，以免 Codex 读错源
+5. improve-1 将默认选择收紧为单模型，并把 Seed 从“部分生效”收紧为 capability 交集
 
 ## 实施顺序建议（给 Codex）
 

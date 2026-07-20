@@ -18,12 +18,19 @@ type Entry = {
   delayMs: number;
   timer: unknown | undefined;
   abortController: AbortController | undefined;
+  failureCount: number;
 };
 
 const browserScheduler: PollScheduler = {
   setTimeout: (callback, milliseconds) => setTimeout(callback, milliseconds),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
+
+function browserAllowsPolling(): boolean {
+  const online = typeof navigator === 'undefined' || navigator.onLine !== false;
+  const visible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
+  return online && visible;
+}
 
 /**
  * Shares the one poll-capable detail GET across every visible subscriber for a
@@ -38,6 +45,8 @@ export class GenerationPollRegistry {
     private readonly scheduler: PollScheduler = browserScheduler,
     private readonly initialDelayMs = 2_000,
     private readonly maxDelayMs = 5_000,
+    private readonly maxFailures = 6,
+    private readonly canPoll: () => boolean = browserAllowsPolling,
   ) {}
 
   subscribe(
@@ -52,6 +61,7 @@ export class GenerationPollRegistry {
         delayMs: this.initialDelayMs,
         timer: undefined,
         abortController: undefined,
+        failureCount: 0,
       };
       this.entries.set(generationId, entry);
     }
@@ -77,6 +87,10 @@ export class GenerationPollRegistry {
     if (this.entries.get(entry.generationId) !== entry || entry.listeners.size === 0) {
       return;
     }
+    if (!this.canPoll()) {
+      this.scheduleNext(entry);
+      return;
+    }
     const controller = new AbortController();
     entry.abortController = controller;
     try {
@@ -84,6 +98,7 @@ export class GenerationPollRegistry {
         signal: controller.signal,
       });
       if (!this.isCurrent(entry, controller)) return;
+      entry.failureCount = 0;
       for (const listener of entry.listeners) listener.onUpdate(view);
       if (areAllJobsTerminal(view)) {
         this.stop(entry);
@@ -96,8 +111,12 @@ export class GenerationPollRegistry {
       );
     } catch (error) {
       if (!this.isCurrent(entry, controller) || controller.signal.aborted) return;
+      entry.failureCount += 1;
       for (const listener of entry.listeners) listener.onError?.(error);
-      if (error instanceof ApiClientError && !error.retryable) {
+      if (
+        (error instanceof ApiClientError && !error.retryable) ||
+        entry.failureCount >= this.maxFailures
+      ) {
         this.stop(entry);
         return;
       }

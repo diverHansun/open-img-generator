@@ -10,7 +10,8 @@
 web-client/
   types.ts           # DTO 与状态枚举
   api-client.ts      # fetch 封装与各资源方法
-  polling.ts         # GenerationPollingController
+  poll-registry.ts   # 共享详情轮询、失败预算与暂停
+  submission-intent.ts # sessionStorage 幂等意图
   capabilities.ts    # deriveGenerationControls
   index.ts           # 导出
 ```
@@ -23,7 +24,7 @@ web-client/
 
 - **Facade**: `createApiClient()` 聚合资源方法。
 - **纯函数派生**: capabilities → controls，便于单测。
-- **不引入**全局单例强制；由 UI 注入 baseUrl。
+- 浏览器 runtime 只共享瞬时 poll registry，不承担业务数据缓存。
 
 ---
 
@@ -37,3 +38,5 @@ web-client/
 
 - 仅在 client / 同构安全代码中引用。
 - list generations **不**假装推进 poll；详情 GET 才推进。
+- submit 30 秒、detail/cancel 15 秒 deadline；轮询在 offline/hidden 时不发请求，连续 6 次失败后等待用户手动恢复。
+- Seed、negativePrompt、aspectRatio 等共享参数按全部 targets 的 capability 交集派生。

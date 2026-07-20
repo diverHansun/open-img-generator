@@ -84,7 +84,7 @@
 
 ## 6. 与 web-ui 的衔接
 
-- web-ui 负责：为一次用户意图生成并在刷新/重试时复用 `clientRequestId`；模型多选、aspectRatio 交集、seed 显隐（任一 supportsSeed 则显示）。
+- web-ui 负责：为一次用户意图生成并在刷新/重试时复用 `clientRequestId`；默认只选一个模型；aspectRatio 与 seed 均按全部选中模型的 capability 交集呈现，并显示 fan-out 调用/图片数量。
 - job-engine 负责：接收已构造的 targets + 共享参数，durable admission 后执行 UC-1～UC-8 与 UC-10；UI 只能依据 GenerationView 的公开状态呈现进度。
 - `staging:<uuid>`、request/result snapshot 只属于服务端恢复细节，不能显示、缓存或传回 web-ui。
 
