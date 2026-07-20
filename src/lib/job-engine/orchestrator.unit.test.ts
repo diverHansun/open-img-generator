@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createTestDb } from '../../../tests/helpers/db';
 import { createSession } from '../db/queries/sessions';
-import { sessions, getGenerationWithJobsAndImages } from '../db';
+import { favorites, sessions, getGenerationWithJobsAndImages } from '../db';
 import { submitGeneration, getGeneration } from './orchestrator';
 import * as providers from '../providers';
 import * as storage from '../storage';
@@ -361,6 +361,18 @@ describe('orchestrator', () => {
       expect(view.status).toBe('completed');
       expect(view.images).toHaveLength(1);
       expect(view.images[0].url).toMatch(/^\/api\/images\//);
+      expect(view.images[0].favorited).toBe(false);
+
+      db.insert(favorites)
+        .values({
+          id: 'favorite-1',
+          imageId: view.images[0].id,
+          createdAt: now,
+        })
+        .run();
+
+      const refreshed = await getGeneration(submitResult.generationId, { db });
+      expect(refreshed.images[0].favorited).toBe(true);
     });
   });
 });

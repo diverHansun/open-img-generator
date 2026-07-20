@@ -1,13 +1,12 @@
 import { ValidationError } from '../errors';
 import { sessionExists, type DbClient } from '../db';
 import { getById } from '../providers';
+import { MAX_GENERATION_TARGETS } from '../generation-constraints';
 import type { SubmitGenerationParams } from './types';
 
 export type ValidationContext = {
   db: DbClient;
 };
-
-export const MAX_GENERATION_TARGETS = 8;
 
 export function validate(
   params: SubmitGenerationParams,

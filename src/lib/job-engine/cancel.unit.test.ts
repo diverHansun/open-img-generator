@@ -1,6 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb } from '../../../tests/helpers/db';
-import { createGenerationAndJob, getGenerationJob, updateGenerationJob, generations, getGenerationWithJobsAndImages, requestGenerationJobCancellation } from '../db';
+import {
+  createGenerationAndJob,
+  createImage,
+  favorites,
+  generations,
+  getGenerationJob,
+  getGenerationWithJobsAndImages,
+  requestGenerationJobCancellation,
+  updateGenerationJob,
+} from '../db';
 import type { ImageProvider } from '../providers';
 import * as providers from '../providers';
 import { cancelGeneration, submitGeneration } from './orchestrator';
@@ -63,12 +72,32 @@ describe('cancelGeneration', () => {
       poll: vi.fn(),
     };
     vi.mocked(providers.getById).mockReturnValue(provider);
+    createImage(
+      {
+        id: 'image-cancel',
+        jobId: 'job-cancel',
+        index: 0,
+        storagePath: 'cancel.png',
+        contentType: 'image/png',
+        width: 1,
+        height: 1,
+        sizeBytes: 1,
+        createdAt: now,
+      },
+      db,
+    );
+    db.insert(favorites)
+      .values({ id: 'favorite-cancel', imageId: 'image-cancel', createdAt: now })
+      .run();
 
     const view = await cancelGeneration('gen-cancel', { db });
 
     expect(view.status).toBe('cancelled');
     expect(view.jobs[0]?.status).toBe('cancelled');
     expect(view.jobs[0]?.error?.code).toBe('CANCEL_UNSUPPORTED');
+    expect(view.images).toEqual([
+      expect.objectContaining({ id: 'image-cancel', favorited: true }),
+    ]);
     expect(getGenerationJob('job-cancel', db)?.cancelRequestedAt).toBeTruthy();
   });
 

@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ValidationError, NotFoundError } from '../../src/lib/errors';
 import { GET as getGeneration } from '../../src/app/api/generations/[id]/route';
+import { POST as cancelGeneration } from '../../src/app/api/generations/[id]/cancel/route';
 import { GET as listGenerations, POST as postGeneration } from '../../src/app/api/generations/route';
 
 vi.mock('../../src/lib/job-engine', () => ({
   submitGeneration: vi.fn(),
   getGeneration: vi.fn(),
+  cancelGeneration: vi.fn(),
   ensureWorkerStarted: vi.fn(),
 }));
 
@@ -122,7 +124,17 @@ describe('GET /api/generations/:id', () => {
       createdAt: '2026-07-12T10:00:00.000Z',
       updatedAt: '2026-07-12T10:00:00.000Z',
       jobs: [],
-      images: [],
+      images: [
+        {
+          id: 'image-1',
+          jobId: 'job-1',
+          index: 0,
+          url: '/api/images/image-1',
+          width: 1024,
+          height: 1024,
+          favorited: true,
+        },
+      ],
     });
 
     const response = await getGeneration(
@@ -134,6 +146,7 @@ describe('GET /api/generations/:id', () => {
     const body = await response.json();
     expect(body.id).toBe('gen-1');
     expect(body.status).toBe('completed');
+    expect(body.images[0]).toMatchObject({ id: 'image-1', favorited: true });
   });
 
   it('returns 404 for missing generation', async () => {
@@ -145,5 +158,54 @@ describe('GET /api/generations/:id', () => {
     );
 
     expect(response.status).toBe(404);
+  });
+});
+
+describe('POST /api/generations/:id/cancel', () => {
+  beforeEach(() => {
+    vi.mocked(jobEngine.cancelGeneration).mockReset();
+  });
+
+  it('returns the same favorite-aware image shape as generation detail', async () => {
+    vi.mocked(jobEngine.cancelGeneration).mockResolvedValue({
+      id: 'gen-1',
+      sessionId: 'session-1',
+      projectId: 'project-1',
+      prompt: 'A cat',
+      status: 'cancelled',
+      createdAt: '2026-07-12T10:00:00.000Z',
+      updatedAt: '2026-07-12T10:01:00.000Z',
+      jobs: [],
+      images: [
+        {
+          id: 'image-1',
+          jobId: 'job-1',
+          index: 0,
+          url: '/api/images/image-1',
+          width: 1024,
+          height: 1024,
+          favorited: true,
+        },
+      ],
+    });
+
+    const response = await cancelGeneration(
+      new Request('http://localhost:3000/api/generations/gen-1/cancel', {
+        method: 'POST',
+      }),
+      { params: Promise.resolve({ id: 'gen-1' }) },
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.images[0]).toEqual({
+      id: 'image-1',
+      jobId: 'job-1',
+      index: 0,
+      url: '/api/images/image-1',
+      width: 1024,
+      height: 1024,
+      favorited: true,
+    });
   });
 });

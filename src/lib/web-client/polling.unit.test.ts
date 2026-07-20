@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { GenerationPollingController, areAllJobsTerminal } from './polling';
+import { describe, expect, it } from 'vitest';
+import { areAllJobsTerminal } from './polling';
 import type { GenerationView } from './types';
 
 const pending: GenerationView = {
@@ -15,21 +15,7 @@ const completed: GenerationView = {
   jobs: [{ ...pending.jobs[0]!, status: 'completed' }],
 };
 
-describe('GenerationPollingController', () => {
-  it('polls until every job is terminal and reports each view', async () => {
-    const getGeneration = vi.fn().mockResolvedValueOnce(pending).mockResolvedValueOnce(completed);
-    const sleep = vi.fn().mockResolvedValue(undefined);
-    const onUpdate = vi.fn();
-    const controller = new GenerationPollingController({ getGeneration });
-
-    const result = await controller.start('/api/generations/gen-1', { sleep, onUpdate });
-
-    expect(result).toEqual(completed);
-    expect(getGeneration).toHaveBeenCalledTimes(2);
-    expect(sleep).toHaveBeenCalledWith(2_000);
-    expect(onUpdate).toHaveBeenCalledTimes(2);
-  });
-
+describe('generation polling status', () => {
   it('does not treat a partially complete generation as terminal', () => {
     expect(areAllJobsTerminal({
       ...completed,
@@ -40,14 +26,9 @@ describe('GenerationPollingController', () => {
     })).toBe(false);
   });
 
-  it('stops without another request when cancelled during backoff', async () => {
-    const getGeneration = vi.fn().mockResolvedValue(pending);
-    const controller = new GenerationPollingController({ getGeneration });
-    const result = await controller.start('/api/generations/gen-1', {
-      sleep: async () => controller.cancel(),
-    });
-
-    expect(result).toBeUndefined();
-    expect(getGeneration).toHaveBeenCalledTimes(1);
+  it('only treats a non-empty set of terminal jobs as terminal', () => {
+    expect(areAllJobsTerminal(completed)).toBe(true);
+    expect(areAllJobsTerminal({ ...completed, jobs: [] })).toBe(false);
+    expect(areAllJobsTerminal(pending)).toBe(false);
   });
 });

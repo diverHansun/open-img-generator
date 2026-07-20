@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { createTestDb } from '../../../../tests/helpers/db';
+import { favorites } from '../schema';
 import { createGenerationAndJob } from './generations';
-import { createImage, imageExists, getImage } from './images';
+import {
+  createImage,
+  getImage,
+  imageExists,
+  listFavoriteImageIds,
+} from './images';
 import { NotFoundError } from '../../errors';
 
 const now = '2026-07-12T10:00:00.000Z';
@@ -82,5 +88,32 @@ describe('images queries', () => {
     } catch (err) {
       expect(err).toBeInstanceOf(NotFoundError);
     }
+  });
+
+  it('returns favorite membership for a batch of image ids', () => {
+    const { db } = createTestDb();
+    seedJob(db);
+    for (const [index, id] of ['img-1', 'img-2'].entries()) {
+      createImage(
+        {
+          id,
+          jobId: 'job-1',
+          index,
+          storagePath: `${id}.png`,
+          contentType: 'image/png',
+          width: 1,
+          height: 1,
+          sizeBytes: 1,
+          createdAt: now,
+        },
+        db,
+      );
+    }
+    db.insert(favorites)
+      .values({ id: 'favorite-1', imageId: 'img-2', createdAt: now })
+      .run();
+
+    expect([...listFavoriteImageIds(['img-1', 'img-2'], db)]).toEqual(['img-2']);
+    expect(listFavoriteImageIds([], db).size).toBe(0);
   });
 });

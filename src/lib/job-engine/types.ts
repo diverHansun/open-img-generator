@@ -42,6 +42,7 @@ export type ImageView = {
   url: string;
   width: number | null;
   height: number | null;
+  favorited: boolean;
 };
 
 export type GenerationView = {

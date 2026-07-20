@@ -6,6 +6,7 @@ import {
   createGenerationWithJobs,
   getGenerationWithJobsAndImages,
   getGenerationJob,
+  listFavoriteImageIds,
   sessions,
   touchSession,
   requestGenerationJobCancellation,
@@ -382,6 +383,10 @@ function toGenerationView(
     .where(eq(sessions.id, generation.sessionId))
     .get();
   if (!session) throw new NotFoundError(`Session not found: ${generation.sessionId}`);
+  const favoriteImageIds = listFavoriteImageIds(
+    generation.images.map((image) => image.id),
+    client,
+  );
   return {
     id: generation.id,
     sessionId: generation.sessionId,
@@ -404,6 +409,7 @@ function toGenerationView(
       url: `/api/images/${image.id}`,
       width: image.width,
       height: image.height,
+      favorited: favoriteImageIds.has(image.id),
     })),
   };
 }

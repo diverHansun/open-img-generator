@@ -90,6 +90,7 @@ export type ImageView = {
   url: string;
   width: number | null;
   height: number | null;
+  favorited: boolean;
 };
 
 export type GenerationView = {
@@ -139,7 +140,7 @@ export type GenerationSummary = Omit<
     status: GenerationStatus;
     error: unknown | null;
   }>;
-  images: Array<Omit<ImageView, 'index'>>;
+  images: Array<Omit<ImageView, 'index' | 'favorited'>>;
 };
 
 export type Page<T> = {

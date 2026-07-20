@@ -4,6 +4,7 @@ import type {
   ProviderInfo,
   SubmitGenerationRequest,
 } from './types';
+import { MAX_GENERATION_TARGETS } from '../generation-constraints';
 
 export type GenerationControls = {
   aspectRatios: string[];
@@ -69,6 +70,11 @@ export function buildSubmitGenerationRequest(
 ): SubmitGenerationRequest {
   if (request.targets.length === 0) {
     throw new Error('At least one target must be selected');
+  }
+  if (request.targets.length > MAX_GENERATION_TARGETS) {
+    throw new Error(
+      `At most ${MAX_GENERATION_TARGETS} targets may be selected`,
+    );
   }
   const controls = deriveGenerationControls(providers, request.targets);
   if (request.aspectRatio && !controls.aspectRatios.includes(request.aspectRatio)) {

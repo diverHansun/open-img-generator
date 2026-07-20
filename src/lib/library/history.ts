@@ -1,7 +1,16 @@
-import { and, desc, eq, lt, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  lt,
+  lte,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import {
   db,
-  fetchGenerationDetails,
   generationJobs,
   generations,
   images,
@@ -9,7 +18,9 @@ import {
   sessions,
   type DbClient,
   type Generation,
+  type GenerationJob,
   type GenerationStatus,
+  type Image,
 } from '../db';
 import { getProject } from './projects';
 import { NotFoundError, ValidationError } from '../errors';
@@ -42,32 +53,6 @@ function cursorCondition(cursor: Cursor | undefined): SQL | undefined {
   );
 }
 
-function toSummary(generation: Generation, client: DbClient): GenerationSummary {
-  const details = fetchGenerationDetails(generation, client);
-  return {
-    id: details.id,
-    sessionId: details.sessionId,
-    prompt: details.prompt,
-    status: details.status as GenerationStatus,
-    createdAt: details.createdAt,
-    updatedAt: details.updatedAt,
-    jobs: details.jobs.map((job) => ({
-      id: job.id,
-      provider: job.provider,
-      model: job.model,
-      status: job.status as GenerationStatus,
-      error: parseError(job.error),
-    })),
-    images: details.images.map((image) => ({
-      id: image.id,
-      jobId: image.generationJobId,
-      url: `/api/images/${image.id}`,
-      width: image.width,
-      height: image.height,
-    })),
-  };
-}
-
 function parseError(error: string | null): unknown | null {
   if (!error) return null;
   try {
@@ -75,6 +60,71 @@ function parseError(error: string | null): unknown | null {
   } catch {
     return { code: 'UNKNOWN', message: error, retryable: false };
   }
+}
+
+function appendToMap<T>(map: Map<string, T[]>, key: string, value: T): void {
+  const values = map.get(key);
+  if (values) values.push(value);
+  else map.set(key, [value]);
+}
+
+function toSummaries(
+  generationRows: Generation[],
+  client: DbClient,
+): GenerationSummary[] {
+  if (generationRows.length === 0) return [];
+
+  const generationIds = generationRows.map((generation) => generation.id);
+  const jobRows = client
+    .select()
+    .from(generationJobs)
+    .where(inArray(generationJobs.generationId, generationIds))
+    .all();
+  const jobIds = jobRows.map((job) => job.id);
+  const imageRows =
+    jobIds.length > 0
+      ? client
+          .select()
+          .from(images)
+          .where(inArray(images.generationJobId, jobIds))
+          .all()
+      : [];
+
+  const jobsByGeneration = new Map<string, GenerationJob[]>();
+  const generationByJob = new Map<string, string>();
+  for (const job of jobRows) {
+    appendToMap(jobsByGeneration, job.generationId, job);
+    generationByJob.set(job.id, job.generationId);
+  }
+
+  const imagesByGeneration = new Map<string, Image[]>();
+  for (const image of imageRows) {
+    const generationId = generationByJob.get(image.generationJobId);
+    if (generationId) appendToMap(imagesByGeneration, generationId, image);
+  }
+
+  return generationRows.map((generation) => ({
+    id: generation.id,
+    sessionId: generation.sessionId,
+    prompt: generation.prompt,
+    status: generation.status as GenerationStatus,
+    createdAt: generation.createdAt,
+    updatedAt: generation.updatedAt,
+    jobs: (jobsByGeneration.get(generation.id) ?? []).map((job) => ({
+      id: job.id,
+      provider: job.provider,
+      model: job.model,
+      status: job.status as GenerationStatus,
+      error: parseError(job.error),
+    })),
+    images: (imagesByGeneration.get(generation.id) ?? []).map((image) => ({
+      id: image.id,
+      jobId: image.generationJobId,
+      url: `/api/images/${image.id}`,
+      width: image.width,
+      height: image.height,
+    })),
+  }));
 }
 
 export function listGenerations(
@@ -140,7 +190,7 @@ export function listGenerations(
   const pageRows = rows.slice(0, limit);
   const last = pageRows.at(-1);
   return {
-    items: pageRows.map((generation) => toSummary(generation, client)),
+    items: toSummaries(pageRows, client),
     nextCursor:
       hasMore && last
         ? encodeCursor({ createdAt: last.createdAt, id: last.id })
@@ -188,7 +238,23 @@ export function getProjectHistory(
   );
   getProject(input.projectId, client);
 
-  const groups = client
+  const totalsRow = client
+    .select({
+      totalSessions: sql<number>`count(distinct ${sessions.id})`,
+      generations: sql<number>`count(distinct ${generations.id})`,
+      images: sql<number>`count(${images.id})`,
+    })
+    .from(sessions)
+    .innerJoin(generations, eq(generations.sessionId, sessions.id))
+    .leftJoin(generationJobs, eq(generationJobs.generationId, generations.id))
+    .leftJoin(images, eq(images.generationJobId, generationJobs.id))
+    .where(eq(sessions.projectId, input.projectId))
+    .get();
+  const totalSessions = Number(totalsRow?.totalSessions ?? 0);
+  const totalPages = Math.ceil(totalSessions / sessionLimit);
+  const start = (page - 1) * sessionLimit;
+
+  const pageGroups = client
     .select({
       session: sessions,
       generationCount: sql<number>`count(distinct ${generations.id})`,
@@ -202,6 +268,8 @@ export function getProjectHistory(
     .where(eq(sessions.projectId, input.projectId))
     .groupBy(sessions.id)
     .orderBy(desc(sql`max(${generations.createdAt})`), desc(sessions.id))
+    .limit(sessionLimit)
+    .offset(start)
     .all()
     .map((group) => ({
       ...group,
@@ -209,16 +277,64 @@ export function getProjectHistory(
       imageCount: Number(group.imageCount),
     }));
 
-  const totalSessions = groups.length;
-  const totalPages = Math.ceil(totalSessions / sessionLimit);
-  const start = (page - 1) * sessionLimit;
-  const pageGroups = groups.slice(start, start + sessionLimit);
-  const totals = groups.reduce(
-    (total, group) => ({
-      generations: total.generations + group.generationCount,
-      images: total.images + group.imageCount,
-    }),
-    { generations: 0, images: 0 },
+  const sessionIds = pageGroups.map((group) => group.session.id);
+  let generationRows: Generation[] = [];
+  if (sessionIds.length > 0) {
+    const rankedGenerations = client
+      .select({
+        id: generations.id,
+        sessionId: generations.sessionId,
+        prompt: generations.prompt,
+        status: generations.status,
+        createdAt: generations.createdAt,
+        updatedAt: generations.updatedAt,
+        rowNumber:
+          sql<number>`row_number() over (partition by ${generations.sessionId} order by ${generations.createdAt} desc, ${generations.id} desc)`.as(
+            'row_number',
+          ),
+      })
+      .from(generations)
+      .where(inArray(generations.sessionId, sessionIds))
+      .as('ranked_generations');
+
+    generationRows = client
+      .select({
+        id: rankedGenerations.id,
+        sessionId: rankedGenerations.sessionId,
+        prompt: rankedGenerations.prompt,
+        status: rankedGenerations.status,
+        createdAt: rankedGenerations.createdAt,
+        updatedAt: rankedGenerations.updatedAt,
+      })
+      .from(rankedGenerations)
+      .where(lte(rankedGenerations.rowNumber, generationLimit + 1))
+      .orderBy(
+        desc(rankedGenerations.createdAt),
+        desc(rankedGenerations.id),
+      )
+      .all();
+  }
+
+  const generationsBySession = new Map<string, Generation[]>();
+  for (const generation of generationRows) {
+    appendToMap(generationsBySession, generation.sessionId, generation);
+  }
+
+  const visibleGenerationsBySession = new Map<string, Generation[]>();
+  const visibleGenerationRows: Generation[] = [];
+  for (const group of pageGroups) {
+    const visible = (generationsBySession.get(group.session.id) ?? []).slice(
+      0,
+      generationLimit,
+    );
+    visibleGenerationsBySession.set(group.session.id, visible);
+    visibleGenerationRows.push(...visible);
+  }
+  const summariesById = new Map(
+    toSummaries(visibleGenerationRows, client).map((summary) => [
+      summary.id,
+      summary,
+    ]),
   );
 
   return {
@@ -227,19 +343,24 @@ export function getProjectHistory(
     pageSize: sessionLimit,
     totalSessions,
     totalPages,
-    totals,
+    totals: {
+      generations: Number(totalsRow?.generations ?? 0),
+      images: Number(totalsRow?.images ?? 0),
+    },
     groups: pageGroups.map((group) => {
-      const generationPage = listGenerations(
-        { sessionId: group.session.id, limit: generationLimit },
-        client,
-      );
+      const allRows = generationsBySession.get(group.session.id) ?? [];
+      const visibleRows = visibleGenerationsBySession.get(group.session.id) ?? [];
+      const last = visibleRows.at(-1);
       return {
         session: group.session,
         generationCount: group.generationCount,
         imageCount: group.imageCount,
         lastGenerationAt: group.lastGenerationAt,
-        items: generationPage.items,
-        nextCursor: generationPage.nextCursor,
+        items: visibleRows.map((generation) => summariesById.get(generation.id)!),
+        nextCursor:
+          allRows.length > generationLimit && last
+            ? encodeCursor({ createdAt: last.createdAt, id: last.id })
+            : null,
       };
     }),
   };

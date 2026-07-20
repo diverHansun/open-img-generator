@@ -1,4 +1,4 @@
-import { eq, and, isNull, lt, notExists } from 'drizzle-orm';
+import { and, eq, inArray, isNull, lt, notExists } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { favorites, images } from '../schema';
 import type { Image } from '../schema';
@@ -78,6 +78,21 @@ export function getImage(id: string, client: DbClient = db): Image {
     throw new NotFoundError(`Image not found: ${id}`);
   }
   return row;
+}
+
+export function listFavoriteImageIds(
+  imageIds: string[],
+  client: DbClient = db,
+): Set<string> {
+  if (imageIds.length === 0) return new Set();
+  return new Set(
+    client
+      .select({ imageId: favorites.imageId })
+      .from(favorites)
+      .where(inArray(favorites.imageId, imageIds))
+      .all()
+      .map((row) => row.imageId),
+  );
 }
 
 export function listStoragePaths(client: DbClient = db): string[] {

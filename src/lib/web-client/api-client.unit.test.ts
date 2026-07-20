@@ -184,4 +184,36 @@ describe('web API client', () => {
     );
     expect(fetcher).toHaveBeenNthCalledWith(5, '/api/provider-configurations', undefined);
   });
+
+  it('forwards AbortSignal through every page-level read', async () => {
+    const fetcher = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const client = createApiClient(fetcher as typeof fetch);
+    const signal = new AbortController().signal;
+
+    await client.getAuthSession({ signal });
+    await client.getHealth({ signal });
+    await client.listProviders({ signal });
+    await client.getGeneration('/api/generations/gen-1', { signal });
+    await client.getGenerationById('gen/1', { signal });
+    await client.listGenerations({ projectId: 'project one' }, { signal });
+    await client.listProjects({ signal });
+    await client.listProjectSummaries({ signal });
+    await client.getProject('project/one', { signal });
+    await client.listSessions('project/one', { signal });
+    await client.getSession('session/one', { signal });
+    await client.getProjectHistory('project/one', {}, { signal });
+    await client.listFavorites({}, { signal });
+    await client.listModelPreferences({ signal });
+    await client.listProviderConfigurations({ signal });
+
+    expect(fetcher).toHaveBeenCalledTimes(15);
+    for (const [, init] of fetcher.mock.calls) {
+      expect(init).toEqual({ signal });
+    }
+  });
 });

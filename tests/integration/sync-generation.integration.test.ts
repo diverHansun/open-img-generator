@@ -13,6 +13,7 @@ const { tempDir, cleanup: cleanupStorage } = createStorageDir();
 const { POST: postGeneration } = await import('../../src/app/api/generations/route');
 const { GET: getGeneration } = await import('../../src/app/api/generations/[id]/route');
 const { GET: getImage } = await import('../../src/app/api/images/[id]/route');
+const { POST: postFavorite } = await import('../../src/app/api/favorites/route');
 
 registerMswLifecycle();
 
@@ -64,9 +65,29 @@ describe('sync generation end-to-end (zenmux)', () => {
     const getBody = await getResponse.json();
     expect(getBody.status).toBe('completed');
     expect(getBody.images).toHaveLength(1);
+    expect(getBody.images[0].favorited).toBe(false);
 
     const imageUrl = getBody.images[0].url;
     const imageId = imageUrl.replace('/api/images/', '');
+    const favoriteResponse = await postFavorite(
+      new Request('http://localhost:3000/api/favorites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageId }),
+      }),
+    );
+    expect(favoriteResponse.status).toBe(200);
+
+    const favoriteAwareResponse = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    const favoriteAwareBody = await favoriteAwareResponse.json();
+    expect(favoriteAwareBody.images[0]).toMatchObject({
+      id: imageId,
+      favorited: true,
+    });
+
     const imageResponse = await getImage(
       new Request(`http://localhost:3000/api/images/${imageId}`),
       { params: Promise.resolve({ id: imageId }) },

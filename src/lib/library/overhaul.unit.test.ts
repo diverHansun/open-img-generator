@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, type TestDb } from '../../../tests/helpers/db';
 import {
   addFavorite,
@@ -7,6 +7,7 @@ import {
   ensureInitialSession,
   getProjectHistory,
   listFavorites,
+  listGenerations,
   listProjectSummaries,
 } from './index';
 
@@ -84,8 +85,13 @@ describe('frontend-overhaul read models', () => {
       }
     }
 
+    const selectSpy = vi.spyOn(testDb.db, 'select');
     const firstPage = getProjectHistory({ projectId: project.id }, testDb.db);
+    expect(selectSpy).toHaveBeenCalledTimes(7);
+    selectSpy.mockClear();
     const secondPage = getProjectHistory({ projectId: project.id, page: 2 }, testDb.db);
+    expect(selectSpy).toHaveBeenCalledTimes(7);
+    selectSpy.mockRestore();
     const longGroup = [...firstPage.groups, ...secondPage.groups].find(
       (group) => group.generationCount === 11,
     )!;
@@ -94,8 +100,29 @@ describe('frontend-overhaul read models', () => {
     expect(firstPage.totalPages).toBe(2);
     expect(firstPage.groups).toHaveLength(5);
     expect(secondPage.groups).toHaveLength(1);
+    expect(firstPage.groups.map((group) => group.session.title)).toEqual([
+      'S6',
+      'S5',
+      'S4',
+      'S3',
+      'S2',
+    ]);
+    expect(secondPage.groups[0]?.session.title).toBe('S1');
     expect(longGroup.items).toHaveLength(10);
+    expect(longGroup.items.map((item) => item.id)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `history-0-${10 - index}`),
+    );
     expect(longGroup.nextCursor).toEqual(expect.any(String));
+    expect(
+      listGenerations(
+        {
+          sessionId: longGroup.session.id,
+          cursor: longGroup.nextCursor!,
+          limit: 10,
+        },
+        testDb.db,
+      ).items.map((item) => item.id),
+    ).toEqual(['history-0-0']);
   });
 
   it('filters global favorites by project and provider before cursor pagination', () => {

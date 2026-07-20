@@ -1,8 +1,9 @@
 export * from './types';
 export * from './api-client';
 export * from './capabilities';
-export * from './polling';
+export { areAllJobsTerminal } from './polling';
 export * from './poll-registry';
+export * from './browser-runtime';
 export * from './auth-gate';
 export * from './gallery-query';
 export * from './provider-credential';

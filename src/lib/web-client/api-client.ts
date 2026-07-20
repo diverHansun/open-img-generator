@@ -110,15 +110,30 @@ async function requestEmpty(
 
 export function createApiClient(fetcher: FetchLike = fetch) {
   return {
-    getAuthSession: () => requestJson<{ authenticated: boolean }>(fetcher, '/api/auth/session'),
+    getAuthSession: (options?: ApiRequestOptions) =>
+      requestJson<{ authenticated: boolean }>(
+        fetcher,
+        '/api/auth/session',
+        requestInitWithSignal(options),
+      ),
     login: (token: string) =>
       requestJson<{ authenticated: boolean }>(
         fetcher,
         '/api/auth/session',
         jsonInit('POST', { token }),
       ),
-    getHealth: () => requestJson<HealthView>(fetcher, '/api/health'),
-    listProviders: () => requestJson<ProviderInfo[]>(fetcher, '/api/providers'),
+    getHealth: (options?: ApiRequestOptions) =>
+      requestJson<HealthView>(
+        fetcher,
+        '/api/health',
+        requestInitWithSignal(options),
+      ),
+    listProviders: (options?: ApiRequestOptions) =>
+      requestJson<ProviderInfo[]>(
+        fetcher,
+        '/api/providers',
+        requestInitWithSignal(options),
+      ),
     submitGeneration: (payload: SubmitGenerationRequest) =>
       requestJson<SubmitGenerationResponse>(
         fetcher,
@@ -139,17 +154,26 @@ export function createApiClient(fetcher: FetchLike = fetch) {
         `/api/generations/${encodeURIComponent(id)}/cancel`,
         jsonInit('POST', {}),
       ),
-    listGenerations: (query: {
-      limit?: number;
-      cursor?: string;
-      sessionId?: string;
-      projectId?: string;
-    } = {}) =>
+    listGenerations: (
+      query: {
+        limit?: number;
+        cursor?: string;
+        sessionId?: string;
+        projectId?: string;
+      } = {},
+      options?: ApiRequestOptions,
+    ) =>
       requestJson<Page<GenerationSummary>>(
         fetcher,
         listUrl('/api/generations', query),
+        requestInitWithSignal(options),
       ),
-    listProjects: () => requestJson<Project[]>(fetcher, '/api/projects'),
+    listProjects: (options?: ApiRequestOptions) =>
+      requestJson<Project[]>(
+        fetcher,
+        '/api/projects',
+        requestInitWithSignal(options),
+      ),
     listProjectSummaries: (options?: ApiRequestOptions) =>
       requestJson<ProjectSummary[]>(
         fetcher,
@@ -158,8 +182,12 @@ export function createApiClient(fetcher: FetchLike = fetch) {
       ),
     createProject: (title: string) =>
       requestJson<Project>(fetcher, '/api/projects', jsonInit('POST', { title })),
-    getProject: (id: string) =>
-      requestJson<Project>(fetcher, `/api/projects/${encodeURIComponent(id)}`),
+    getProject: (id: string, options?: ApiRequestOptions) =>
+      requestJson<Project>(
+        fetcher,
+        `/api/projects/${encodeURIComponent(id)}`,
+        requestInitWithSignal(options),
+      ),
     updateProject: (id: string, title: string) =>
       requestJson<Project>(
         fetcher,
@@ -170,10 +198,11 @@ export function createApiClient(fetcher: FetchLike = fetch) {
       requestEmpty(fetcher, `/api/projects/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       }),
-    listSessions: (projectId: string) =>
+    listSessions: (projectId: string, options?: ApiRequestOptions) =>
       requestJson<Session[]>(
         fetcher,
         `/api/projects/${encodeURIComponent(projectId)}/sessions`,
+        requestInitWithSignal(options),
       ),
     ensureInitialSession: (projectId: string) =>
       requestJson<Session>(
@@ -187,8 +216,12 @@ export function createApiClient(fetcher: FetchLike = fetch) {
         `/api/projects/${encodeURIComponent(projectId)}/sessions`,
         jsonInit('POST', { title }),
       ),
-    getSession: (id: string) =>
-      requestJson<Session>(fetcher, `/api/sessions/${encodeURIComponent(id)}`),
+    getSession: (id: string, options?: ApiRequestOptions) =>
+      requestJson<Session>(
+        fetcher,
+        `/api/sessions/${encodeURIComponent(id)}`,
+        requestInitWithSignal(options),
+      ),
     updateSession: (id: string, title: string) =>
       requestJson<Session>(
         fetcher,
@@ -239,10 +272,11 @@ export function createApiClient(fetcher: FetchLike = fetch) {
       requestEmpty(fetcher, `/api/favorites/${encodeURIComponent(imageId)}`, {
         method: 'DELETE',
       }),
-    listModelPreferences: () =>
+    listModelPreferences: (options?: ApiRequestOptions) =>
       requestJson<{ items: ModelPreference[] }>(
         fetcher,
         '/api/model-preferences',
+        requestInitWithSignal(options),
       ),
     upsertModelPreference: (input: {
       provider: string;
