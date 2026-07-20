@@ -33,6 +33,18 @@ import * as jobEngine from '../../src/lib/job-engine';
 import * as library from '../../src/lib/library';
 import * as database from '../../src/lib/db';
 
+const CLIENT_REQUEST_ID = '15a6fecc-4f40-4ed2-8f51-353423be9af1';
+
+function submissionBody(overrides: Record<string, unknown> = {}) {
+  return {
+    clientRequestId: CLIENT_REQUEST_ID,
+    targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
+    prompt: 'A cat',
+    sessionId: 'session-1',
+    ...overrides,
+  };
+}
+
 describe('GET /api/generations', () => {
   it('delegates to the read-only list query without advancing jobs', async () => {
     vi.mocked(library.listGenerations).mockReturnValue({
@@ -70,6 +82,7 @@ describe('POST /api/generations', () => {
     vi.mocked(jobEngine.submitGeneration).mockResolvedValue({
       generationId: 'gen-1',
       status: 'pending',
+      replayed: false,
     });
 
     const response = await postGeneration(
@@ -78,17 +91,96 @@ describe('POST /api/generations', () => {
         headers: {
           'Content-Type': 'application/json',
           'X-Request-Id': 'submit-request-1',
+          'Idempotency-Key': CLIENT_REQUEST_ID,
         },
-        body: JSON.stringify({ targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }], prompt: 'A cat', sessionId: 'session-1' }),
+        body: JSON.stringify(submissionBody()),
       }),
     );
 
     expect(response.status).toBe(201);
     expect(response.headers.get('X-Request-Id')).toBe('submit-request-1');
+    expect(response.headers.get('Location')).toBe('/api/generations/gen-1');
     const body = await response.json();
     expect(body.id).toBe('gen-1');
     expect(body.status).toBe('pending');
+    expect(body.replayed).toBe(false);
     expect(body.links.self).toBe('/api/generations/gen-1');
+    expect(jobEngine.submitGeneration).toHaveBeenCalledWith(
+      submissionBody(),
+      expect.anything(),
+    );
+  });
+
+  it('returns a replay marker without changing the original generation id', async () => {
+    vi.mocked(jobEngine.submitGeneration).mockResolvedValue({
+      generationId: 'gen-original',
+      status: 'completed',
+      replayed: true,
+    });
+
+    const response = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': CLIENT_REQUEST_ID,
+        },
+        body: JSON.stringify(submissionBody()),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(response.headers.get('Location')).toBe('/api/generations/gen-original');
+    await expect(response.json()).resolves.toMatchObject({
+      id: 'gen-original',
+      status: 'completed',
+      replayed: true,
+    });
+  });
+
+  it('rejects a missing or mismatched request identity before worker dispatch', async () => {
+    const missing = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submissionBody({ clientRequestId: undefined })),
+      }),
+    );
+    expect(missing.status).toBe(400);
+    await expect(missing.json()).resolves.toMatchObject({
+      error: { code: 'VALIDATION_ERROR', retryable: false },
+    });
+
+    const mismatch = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+        },
+        body: JSON.stringify(submissionBody()),
+      }),
+    );
+    expect(mismatch.status).toBe(400);
+    await expect(mismatch.json()).resolves.toMatchObject({
+      error: { code: 'VALIDATION_ERROR', retryable: false },
+    });
+
+    const caseMismatch = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': CLIENT_REQUEST_ID,
+        },
+        body: JSON.stringify(
+          submissionBody({ clientRequestId: CLIENT_REQUEST_ID.toUpperCase() }),
+        ),
+      }),
+    );
+    expect(caseMismatch.status).toBe(400);
+    expect(jobEngine.ensureWorkerStarted).not.toHaveBeenCalled();
+    expect(jobEngine.submitGeneration).not.toHaveBeenCalled();
   });
 
   it('returns 400 for validation errors', async () => {
@@ -98,7 +190,7 @@ describe('POST /api/generations', () => {
       new Request('http://localhost:3000/api/generations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }], prompt: 'A cat', sessionId: 'session-1' }),
+        body: JSON.stringify(submissionBody()),
       }),
     );
 
@@ -122,10 +214,7 @@ describe('POST /api/generations', () => {
       new Request('http://localhost:3000/api/generations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
-          prompt: 'A cat',
-        }),
+        body: JSON.stringify(submissionBody({ sessionId: undefined })),
       }),
     );
 
@@ -152,11 +241,7 @@ describe('POST /api/generations', () => {
           'Content-Type': 'application/json',
           'X-Request-Id': 'rate-request-1',
         },
-        body: JSON.stringify({
-          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
-          prompt: 'A cat',
-          sessionId: 'session-1',
-        }),
+        body: JSON.stringify(submissionBody()),
       }),
     );
 
@@ -187,11 +272,7 @@ describe('POST /api/generations', () => {
           'Content-Type': 'application/json',
           'X-Request-Id': 'config-request-1',
         },
-        body: JSON.stringify({
-          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
-          prompt: 'A cat',
-          sessionId: 'session-1',
-        }),
+        body: JSON.stringify(submissionBody()),
       }),
     );
     const bodyText = await response.text();
@@ -217,11 +298,9 @@ describe('POST /api/generations', () => {
             'Content-Type': 'application/json',
             'X-Request-Id': 'internal-request-1',
           },
-          body: JSON.stringify({
-            targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
-            prompt: 'another secret prompt',
-            sessionId: 'session-1',
-          }),
+          body: JSON.stringify(
+            submissionBody({ prompt: 'another secret prompt' }),
+          ),
         }),
       );
       const bodyText = await response.text();
@@ -257,11 +336,7 @@ describe('POST /api/generations', () => {
       new Request('http://localhost:3000/api/generations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
-          prompt: 'A cat',
-          sessionId: 'session-1',
-        }),
+        body: JSON.stringify(submissionBody()),
       }),
     );
 

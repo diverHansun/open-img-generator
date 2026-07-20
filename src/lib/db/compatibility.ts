@@ -14,6 +14,7 @@ type SchemaManifest = {
     columns: string[];
     unique: boolean;
     partial: boolean;
+    where?: string;
   }>;
 };
 
@@ -34,7 +35,7 @@ export type DatabaseCompatibilityReport = {
 type PragmaVersionRow = { user_version: number };
 type PragmaForeignKeysRow = { foreign_keys: number };
 type NamedObjectRow = { name: string };
-type IndexObjectRow = { name: string; tbl_name: string };
+type IndexObjectRow = { name: string; tbl_name: string; sql: string | null };
 type IndexListRow = { name: string; unique: number; partial: number };
 
 function quoteIdentifier(identifier: string): string {
@@ -56,7 +57,7 @@ export function inspectDatabaseCompatibility(
   const indexObjects = new Map(
     client
       .all<IndexObjectRow>(
-        "SELECT name, tbl_name FROM sqlite_master WHERE type = 'index'",
+        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index'",
       )
       .map((row) => [row.name, row] as const),
   );
@@ -102,9 +103,17 @@ export function inspectDatabaseCompatibility(
           `PRAGMA index_info(${quoteIdentifier(requiredIndex.name)})`,
         )
         .map((row) => row.name);
+      const whereMatch = object.sql?.match(/\bWHERE\b([\s\S]*)$/i);
+      const normalizeWhere = (value: string | undefined) =>
+        value
+          ?.replace(/["`\[\]]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
       return (
         columns.length !== requiredIndex.columns.length ||
-        columns.some((column, index) => column !== requiredIndex.columns[index])
+        columns.some((column, index) => column !== requiredIndex.columns[index]) ||
+        normalizeWhere(whereMatch?.[1]) !== normalizeWhere(requiredIndex.where)
       );
     })
     .map((index) => index.name);

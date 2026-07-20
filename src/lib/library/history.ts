@@ -27,6 +27,10 @@ import { NotFoundError, ValidationError } from '../errors';
 import type { GenerationSummary, HistoryPage, Page } from './types';
 
 type Cursor = { createdAt: string; id: string };
+type GenerationSummaryRow = Pick<
+  Generation,
+  'id' | 'sessionId' | 'prompt' | 'status' | 'createdAt' | 'updatedAt'
+>;
 
 function encodeCursor(cursor: Cursor): string {
   return Buffer.from(JSON.stringify(cursor)).toString('base64url');
@@ -69,7 +73,7 @@ function appendToMap<T>(map: Map<string, T[]>, key: string, value: T): void {
 }
 
 function toSummaries(
-  generationRows: Generation[],
+  generationRows: GenerationSummaryRow[],
   client: DbClient,
 ): GenerationSummary[] {
   if (generationRows.length === 0) return [];
@@ -163,7 +167,7 @@ export function listGenerations(
   const afterCondition = cursorCondition(after);
   if (afterCondition) predicates.push(afterCondition);
 
-  let rows: Generation[];
+  let rows: GenerationSummaryRow[];
   if (input.projectId) {
     predicates.push(eq(sessions.projectId, input.projectId));
     rows = client
@@ -278,7 +282,7 @@ export function getProjectHistory(
     }));
 
   const sessionIds = pageGroups.map((group) => group.session.id);
-  let generationRows: Generation[] = [];
+  let generationRows: GenerationSummaryRow[] = [];
   if (sessionIds.length > 0) {
     const rankedGenerations = client
       .select({
@@ -315,13 +319,13 @@ export function getProjectHistory(
       .all();
   }
 
-  const generationsBySession = new Map<string, Generation[]>();
+  const generationsBySession = new Map<string, GenerationSummaryRow[]>();
   for (const generation of generationRows) {
     appendToMap(generationsBySession, generation.sessionId, generation);
   }
 
-  const visibleGenerationsBySession = new Map<string, Generation[]>();
-  const visibleGenerationRows: Generation[] = [];
+  const visibleGenerationsBySession = new Map<string, GenerationSummaryRow[]>();
+  const visibleGenerationRows: GenerationSummaryRow[] = [];
   for (const group of pageGroups) {
     const visible = (generationsBySession.get(group.session.id) ?? []).slice(
       0,

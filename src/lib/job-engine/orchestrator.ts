@@ -3,12 +3,12 @@ import { eq } from 'drizzle-orm';
 import { validate } from './validator';
 import * as prompt from '../prompt';
 import {
-  createGenerationWithJobs,
+  admitGenerationWithJobs,
   getGenerationWithJobsAndImages,
+  getGenerationByClientRequestId,
   getGenerationJob,
   listFavoriteImageIds,
   sessions,
-  touchSession,
   requestGenerationJobCancellation,
   type DbClient,
 } from '../db';
@@ -21,7 +21,7 @@ import {
   updateJobAndGenerationIfNotCancelled,
   syncGenerationStatus,
 } from './lifecycle';
-import { NotFoundError } from '../errors';
+import { IdempotencyKeyReusedError, NotFoundError } from '../errors';
 import type { GenerationWithJobsAndImages } from '../db';
 import type {
   SubmitGenerationParams,
@@ -32,10 +32,12 @@ import type {
 import { acquireGenerationSlot } from './admission';
 import { withProviderLimit } from '../providers/limiter';
 import { toSafeJobError } from './job-error';
+import { prepareGenerationIdempotency } from './idempotency';
 
 export type SubmitResult = {
   generationId: string;
   status: GenerationStatus;
+  replayed: boolean;
 };
 
 export type OrchestratorContext = {
@@ -221,7 +223,30 @@ export async function submitGeneration(
   params: SubmitGenerationParams,
   ctx: OrchestratorContext,
 ): Promise<SubmitResult> {
+  const { clientRequestId, requestHash } = prepareGenerationIdempotency(params);
+
+  // A replay must remain available even while another synchronous submission
+  // holds the legacy in-flight slot. The transaction below remains the
+  // correctness boundary for a concurrent first admission.
+  const existing = getGenerationByClientRequestId(clientRequestId, ctx.db);
+  if (existing) {
+    if (existing.requestHash !== requestHash) {
+      throw new IdempotencyKeyReusedError(
+        'clientRequestId was already used for a different generation payload',
+      );
+    }
+    return {
+      generationId: existing.id,
+      status: existing.status as GenerationStatus,
+      replayed: true,
+    };
+  }
+
+  // Only a new admission needs the current provider/session capability checks.
+  // A response replay must remain recoverable if configuration changes after
+  // the original durable Generation was created.
   validate(params, { db: ctx.db });
+
   const releaseAdmission = acquireGenerationSlot();
   try {
     const processedPrompt = prompt.process(params.prompt);
@@ -237,20 +262,32 @@ export async function submitGeneration(
       updatedAt: now,
     }));
 
-    createGenerationWithJobs(
+    const admission = admitGenerationWithJobs(
       {
         id: generationId,
         sessionId: params.sessionId,
         prompt: processedPrompt,
         status: 'pending',
+        clientRequestId,
+        requestHash,
         createdAt: now,
         updatedAt: now,
       },
       jobs,
       ctx.db,
     );
-
-    touchSession(params.sessionId, now, ctx.db);
+    if (admission.kind === 'conflict') {
+      throw new IdempotencyKeyReusedError(
+        'clientRequestId was already used for a different generation payload',
+      );
+    }
+    if (admission.kind === 'replayed') {
+      return {
+        generationId: admission.generation.id,
+        status: admission.generation.status as GenerationStatus,
+        replayed: true,
+      };
+    }
 
     await Promise.allSettled(
       jobs.map((job, index) =>
@@ -272,6 +309,7 @@ export async function submitGeneration(
     return {
       generationId,
       status: finalGeneration.status as GenerationStatus,
+      replayed: false,
     };
   } finally {
     releaseAdmission();

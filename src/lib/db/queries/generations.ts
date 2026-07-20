@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, isNotNull, lte, or } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
-import { generations, generationJobs, images } from '../schema';
+import { generations, generationJobs, images, sessions } from '../schema';
 import type { Generation, GenerationJob, Image } from '../schema';
 
 export type GenerationStatus =
@@ -51,6 +51,17 @@ export type JobWithImages = GenerationJob & { images: Image[] };
 export type GenerationWithJobsAndImages = Generation & {
   jobs: JobWithImages[];
   images: Image[];
+};
+
+export type IdempotentCreateGenerationParams = CreateGenerationParams & {
+  clientRequestId: string;
+  requestHash: string;
+};
+
+export type GenerationAdmissionResult = {
+  kind: 'created' | 'replayed' | 'conflict';
+  generation: Generation;
+  jobs: GenerationJob[];
 };
 
 export function createGenerationWithJobs(
@@ -107,6 +118,106 @@ export function createGenerationWithJobs(
   });
 }
 
+/**
+ * Atomically admits a generation intent or returns the row already associated
+ * with its client request id. Provider work must only start for `created`.
+ *
+ * `conflict` means the key exists with a different canonical request hash.
+ * The IMMEDIATE transaction serializes admission across SQLite connections;
+ * the partial unique index remains the final duplicate-prevention boundary.
+ */
+export function admitGenerationWithJobs(
+  genParams: IdempotentCreateGenerationParams,
+  jobParams: CreateGenerationJobParams[],
+  client: DbClient = db,
+): GenerationAdmissionResult {
+  if (jobParams.length === 0) {
+    throw new Error('A generation requires at least one job');
+  }
+  if (jobParams.some((job) => job.generationId !== genParams.id)) {
+    throw new Error('Every job must belong to the admitted generation');
+  }
+
+  return client.transaction(
+    (tx) => {
+      const inserted = tx
+        .insert(generations)
+        .values({
+          id: genParams.id,
+          sessionId: genParams.sessionId,
+          prompt: genParams.prompt,
+          status: genParams.status,
+          clientRequestId: genParams.clientRequestId,
+          requestHash: genParams.requestHash,
+          createdAt: genParams.createdAt,
+          updatedAt: genParams.updatedAt,
+        })
+        .onConflictDoNothing()
+        .run();
+
+      if (inserted.changes === 0) {
+        const existing = tx
+          .select()
+          .from(generations)
+          .where(eq(generations.clientRequestId, genParams.clientRequestId))
+          .get();
+        if (!existing) {
+          throw new Error('Generation admission conflict could not be resolved');
+        }
+        const existingJobs = tx
+          .select()
+          .from(generationJobs)
+          .where(eq(generationJobs.generationId, existing.id))
+          .all();
+        return {
+          kind:
+            existing.requestHash === genParams.requestHash
+              ? 'replayed'
+              : 'conflict',
+          generation: existing,
+          jobs: existingJobs,
+        };
+      }
+
+      tx.insert(generationJobs)
+        .values(
+          jobParams.map((job) => ({
+            id: job.id,
+            generationId: job.generationId,
+            provider: job.provider,
+            model: job.model,
+            status: job.status,
+            providerHandle: null,
+            error: null,
+            pollLeaseUntil: job.pollLeaseUntil ?? null,
+            nextPollAt: job.nextPollAt ?? null,
+            cancelRequestedAt: job.cancelRequestedAt ?? null,
+            createdAt: job.createdAt,
+            updatedAt: job.updatedAt,
+          })),
+        )
+        .run();
+      tx.update(sessions)
+        .set({ updatedAt: genParams.updatedAt })
+        .where(eq(sessions.id, genParams.sessionId))
+        .run();
+
+      const generation = tx
+        .select()
+        .from(generations)
+        .where(eq(generations.id, genParams.id))
+        .get()!;
+      const jobs = tx
+        .select()
+        .from(generationJobs)
+        .where(eq(generationJobs.generationId, genParams.id))
+        .all();
+      return { kind: 'created', generation, jobs };
+    },
+    { behavior: 'immediate' },
+  );
+}
+
 export function createGenerationAndJob(
   genParams: CreateGenerationParams,
   jobParams: CreateGenerationJobParams,
@@ -114,6 +225,17 @@ export function createGenerationAndJob(
 ): { generation: Generation; job: GenerationJob } {
   const { generation, jobs } = createGenerationWithJobs(genParams, [jobParams], client);
   return { generation, job: jobs[0]! };
+}
+
+export function getGenerationByClientRequestId(
+  clientRequestId: string,
+  client: DbClient = db,
+): Generation | undefined {
+  return client
+    .select()
+    .from(generations)
+    .where(eq(generations.clientRequestId, clientRequestId))
+    .get();
 }
 
 export function updateGeneration(

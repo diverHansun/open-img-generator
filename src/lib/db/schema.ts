@@ -6,6 +6,7 @@ import {
   text,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 
 export const projects = sqliteTable(
   'projects',
@@ -48,6 +49,8 @@ export const generations = sqliteTable(
       .references(() => sessions.id),
     prompt: text('prompt').notNull(),
     status: text('status').notNull(),
+    clientRequestId: text('client_request_id'),
+    requestHash: text('request_hash'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
@@ -57,6 +60,11 @@ export const generations = sqliteTable(
       table.createdAt,
     ),
     createdAtIndex: index('generations_created_at_idx').on(table.createdAt),
+    clientRequestIdUnique: uniqueIndex(
+      'generations_client_request_id_unique',
+    )
+      .on(table.clientRequestId)
+      .where(sql`${table.clientRequestId} IS NOT NULL`),
   }),
 );
 

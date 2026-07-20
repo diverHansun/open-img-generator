@@ -28,11 +28,16 @@ export function initializeTestSchema(sqlite: Database.Database): void {
       session_id TEXT NOT NULL REFERENCES sessions(id),
       prompt TEXT NOT NULL,
       status TEXT NOT NULL,
+      client_request_id TEXT,
+      request_hash TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
     CREATE INDEX generations_session_created_at_idx ON generations(session_id, created_at);
     CREATE INDEX generations_created_at_idx ON generations(created_at);
+    CREATE UNIQUE INDEX generations_client_request_id_unique
+      ON generations(client_request_id)
+      WHERE client_request_id IS NOT NULL;
     CREATE TABLE generation_jobs (
       id TEXT PRIMARY KEY,
       generation_id TEXT NOT NULL REFERENCES generations(id) ON DELETE CASCADE,

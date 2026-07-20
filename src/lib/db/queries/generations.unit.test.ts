@@ -1,12 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { createTestDb } from '../../../../tests/helpers/db';
+import { generations, generationJobs } from '../schema';
 import {
   createGenerationAndJob,
   createGenerationWithJobs,
+  admitGenerationWithJobs,
   updateGeneration,
   updateGenerationJob,
   updateGenerationJobIfLease,
   getGenerationWithJobsAndImages,
+  getGenerationByClientRequestId,
   aggregateGenerationStatus,
   tryClaimPollLease,
 } from './generations';
@@ -60,6 +63,147 @@ describe('generations queries', () => {
       db,
     );
     expect(jobs.map((job) => job.id)).toEqual(['job-fal', 'job-zenmux']);
+  });
+
+  it('atomically creates an idempotent admission and touches its session', () => {
+    const { db, sqlite } = createTestDb();
+    const result = admitGenerationWithJobs(
+      {
+        ...makeGenParams(),
+        clientRequestId: '018f6f4d-5c3a-7b8c-9d0e-123456789abc',
+        requestHash: 'a'.repeat(64),
+      },
+      [makeJobParams()],
+      db,
+    );
+
+    expect(result.kind).toBe('created');
+    expect(result.generation).toMatchObject({
+      id: 'gen-1',
+      clientRequestId: '018f6f4d-5c3a-7b8c-9d0e-123456789abc',
+      requestHash: 'a'.repeat(64),
+    });
+    expect(result.jobs.map((job) => job.id)).toEqual(['job-1']);
+    expect(
+      sqlite
+        .prepare('SELECT updated_at FROM sessions WHERE id = ?')
+        .get('default-session'),
+    ).toEqual({ updated_at: now });
+  });
+
+  it('rolls back generation and jobs when the admission session touch fails', () => {
+    const { db, sqlite } = createTestDb();
+    sqlite.exec(`
+      CREATE TRIGGER reject_generation_session_touch
+      BEFORE UPDATE ON sessions
+      WHEN NEW.id = 'default-session'
+      BEGIN
+        SELECT RAISE(ABORT, 'session touch rejected');
+      END;
+    `);
+
+    expect(() =>
+      admitGenerationWithJobs(
+        {
+          ...makeGenParams(),
+          clientRequestId: '018f6f4d-5c3a-7b8c-9d0e-123456789abc',
+          requestHash: 'a'.repeat(64),
+        },
+        [makeJobParams()],
+        db,
+      ),
+    ).toThrow('session touch rejected');
+    expect(db.select().from(generations).all()).toHaveLength(0);
+    expect(db.select().from(generationJobs).all()).toHaveLength(0);
+  });
+
+  it('replays the existing generation for the same key and request hash', () => {
+    const { db } = createTestDb();
+    const clientRequestId = '018f6f4d-5c3a-7b8c-9d0e-123456789abc';
+    const requestHash = 'a'.repeat(64);
+    const first = admitGenerationWithJobs(
+      { ...makeGenParams(), clientRequestId, requestHash },
+      [makeJobParams()],
+      db,
+    );
+    const replay = admitGenerationWithJobs(
+      {
+        ...makeGenParams({ id: 'gen-replay-loser' }),
+        clientRequestId,
+        requestHash,
+      },
+      [
+        makeJobParams({
+          id: 'job-replay-loser',
+          generationId: 'gen-replay-loser',
+        }),
+      ],
+      db,
+    );
+
+    expect(first.kind).toBe('created');
+    expect(replay.kind).toBe('replayed');
+    expect(replay.generation.id).toBe('gen-1');
+    expect(replay.jobs.map((job) => job.id)).toEqual(['job-1']);
+    expect(
+      db.select().from(generations).all().map((generation) => generation.id),
+    ).toEqual(['gen-1']);
+    expect(getGenerationByClientRequestId(clientRequestId, db)).toMatchObject({
+      id: 'gen-1',
+      requestHash,
+    });
+  });
+
+  it('reports a hash conflict without creating a second generation or job', () => {
+    const { db } = createTestDb();
+    const clientRequestId = '018f6f4d-5c3a-7b8c-9d0e-123456789abc';
+    admitGenerationWithJobs(
+      {
+        ...makeGenParams(),
+        clientRequestId,
+        requestHash: 'a'.repeat(64),
+      },
+      [makeJobParams()],
+      db,
+    );
+
+    const conflict = admitGenerationWithJobs(
+      {
+        ...makeGenParams({ id: 'gen-conflict-loser' }),
+        clientRequestId,
+        requestHash: 'b'.repeat(64),
+      },
+      [
+        makeJobParams({
+          id: 'job-conflict-loser',
+          generationId: 'gen-conflict-loser',
+        }),
+      ],
+      db,
+    );
+
+    expect(conflict.kind).toBe('conflict');
+    expect(conflict.generation.id).toBe('gen-1');
+    expect(db.select().from(generations).all()).toHaveLength(1);
+    expect(db.select().from(generationJobs).all()).toHaveLength(1);
+  });
+
+  it('keeps legacy null request ids outside the partial uniqueness boundary', () => {
+    const { db } = createTestDb();
+    createGenerationWithJobs(makeGenParams(), [makeJobParams()], db);
+    createGenerationWithJobs(
+      makeGenParams({ id: 'gen-2' }),
+      [makeJobParams({ id: 'job-2', generationId: 'gen-2' })],
+      db,
+    );
+
+    expect(
+      db
+        .select()
+        .from(generations)
+        .all()
+        .map((generation) => generation.clientRequestId),
+    ).toEqual([null, null]);
   });
 
   it('returns undefined for missing generation', () => {

@@ -80,7 +80,7 @@ try {
   function indexMatches(requiredIndex) {
     const object = sqlite
       .prepare(
-        "SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?",
+        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND name = ?",
       )
       .get(requiredIndex.name);
     if (!object || object.tbl_name !== requiredIndex.table) return false;
@@ -97,9 +97,21 @@ try {
     const columns = sqlite
       .pragma(`index_info(${quoteIdentifier(requiredIndex.name)})`)
       .map((item) => item.name);
+    const whereMatch = object.sql?.match(/\bWHERE\b([\s\S]*)$/i);
+    const actualWhere = whereMatch?.[1]
+      ?.replace(/["`\[\]]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    const requiredWhere = requiredIndex.where
+      ?.replace(/["`\[\]]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
     return (
       columns.length === requiredIndex.columns.length &&
-      columns.every((column, index) => column === requiredIndex.columns[index])
+      columns.every((column, index) => column === requiredIndex.columns[index]) &&
+      actualWhere === requiredWhere
     );
   }
 
@@ -165,6 +177,8 @@ try {
         session_id TEXT NOT NULL REFERENCES sessions(id),
         prompt TEXT NOT NULL,
         status TEXT NOT NULL,
+        client_request_id TEXT,
+        request_hash TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -379,6 +393,27 @@ try {
               addedColumns.push(`generation_jobs.${column}`);
             }
           }
+        },
+      },
+    ],
+    [
+      1,
+      {
+        to: 2,
+        up() {
+          for (const column of ['client_request_id', 'request_hash']) {
+            if (!columnInfo('generations', column)) {
+              sqlite.exec(
+                `ALTER TABLE generations ADD COLUMN ${quoteIdentifier(column)} TEXT`,
+              );
+              addedColumns.push(`generations.${column}`);
+            }
+          }
+          sqlite.exec(`
+            CREATE UNIQUE INDEX IF NOT EXISTS generations_client_request_id_unique
+              ON generations(client_request_id)
+              WHERE client_request_id IS NOT NULL
+          `);
         },
       },
     ],

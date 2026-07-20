@@ -96,6 +96,7 @@ describe('quickstart vertical slice', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          clientRequestId: '550e8400-e29b-41d4-a716-446655440000',
           targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
           prompt: 'A cat wearing a space helmet',
           aspectRatio: '1:1',
@@ -168,6 +169,7 @@ describe('quickstart vertical slice', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          clientRequestId: '018f6f4d-5c3a-4b8c-9d0e-123456789abc',
           targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
           prompt: 'A dog',
           seed: 42,
@@ -210,6 +212,7 @@ describe('quickstart vertical slice', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          clientRequestId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
           provider: 'fal',
           model: 'fal-ai/flux/schnell',
           prompt: 'A cat',

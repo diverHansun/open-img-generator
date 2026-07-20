@@ -20,6 +20,7 @@ describe('validator', () => {
 
   function makeParams(overrides: Partial<SubmitGenerationParams> = {}): SubmitGenerationParams {
     return {
+      clientRequestId: '15a6fecc-4f40-4ed2-8f51-353423be9af1',
       targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
       prompt: 'A cat',
       sessionId: 'default-session',
@@ -29,6 +30,12 @@ describe('validator', () => {
 
   it('passes for a valid Fal request', () => {
     expect(() => validate(makeParams(), { db })).not.toThrow();
+  });
+
+  it('requires a valid client request id for durable admission', () => {
+    expect(() => validate(makeParams({ clientRequestId: '' }), { db })).toThrow(
+      'clientRequestId',
+    );
   });
 
   it('rejects an empty target list', () => {

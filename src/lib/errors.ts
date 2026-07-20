@@ -8,6 +8,13 @@ export class AppError extends Error {
 export class ValidationError extends AppError {}
 export class NotFoundError extends AppError {}
 export class ConflictError extends AppError {}
+/**
+ * A client request identity may only describe one canonical generation payload.
+ * Keeping this distinct from a generic conflict lets callers preserve the
+ * original intent instead of blindly creating (and potentially charging for)
+ * a second generation.
+ */
+export class IdempotencyKeyReusedError extends ConflictError {}
 export class RateLimitError extends AppError {}
 export class AuthenticationError extends AppError {}
 export class InitialSessionUnavailableError extends AppError {}

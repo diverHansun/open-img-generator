@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  IdempotencyKeyReusedError,
   SchemaNotReadyError,
   ValidationError,
 } from '../../lib/errors';
@@ -100,6 +101,23 @@ describe('API error handler', () => {
         message: 'Internal server error',
         retryable: false,
         requestId: 'request-write-1',
+      },
+    });
+  });
+
+  it('exposes a stable non-retryable conflict for a reused idempotency key', async () => {
+    const response = handleApiError(
+      new IdempotencyKeyReusedError('raw original request content'),
+      { structured: true, requestId: 'request-idempotency-1' },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Idempotency key was already used for a different request',
+        retryable: false,
+        requestId: 'request-idempotency-1',
       },
     });
   });

@@ -7,7 +7,10 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { inspectDatabaseCompatibility } from '../../src/lib/db/compatibility';
 import * as schema from '../../src/lib/db/schema';
+import schemaManifest from '../../src/lib/db/schema-manifest.json';
 import { initializeTestSchema } from '../helpers/db-schema';
+
+const targetVersion = schemaManifest.version;
 
 function removeSqliteFiles(file: string) {
   for (const suffix of ['', '-shm', '-wal']) {
@@ -16,6 +19,10 @@ function removeSqliteFiles(file: string) {
   fs.rmSync(`${file}.pre-migrate-v0-to-v1.bak`, { force: true });
   fs.rmSync(`${file}.pre-migrate-v0-to-v1.bak.1`, { force: true });
   fs.rmSync(`${file}.pre-migrate-v1-to-v1.bak`, { force: true });
+  fs.rmSync(`${file}.pre-migrate-v0-to-v2.bak`, { force: true });
+  fs.rmSync(`${file}.pre-migrate-v0-to-v2.bak.1`, { force: true });
+  fs.rmSync(`${file}.pre-migrate-v1-to-v2.bak`, { force: true });
+  fs.rmSync(`${file}.pre-migrate-v2-to-v2.bak`, { force: true });
   fs.rmSync(`${file}.migrate.lock`, { force: true });
   for (const suffix of ['', '-journal', '-shm', '-wal']) {
     fs.rmSync(`${file}.migrate-lock.sqlite${suffix}`, { force: true });
@@ -167,17 +174,19 @@ describe('db:migrate', () => {
       const first = runMigration(root, file);
       expect(first).toMatchObject({
         fromVersion: 0,
-        toVersion: 1,
+        toVersion: targetVersion,
         deletedOrphanGenerations: 7,
         generations: 1,
       });
-      expect(first.backupPath).toBe(`${file}.pre-migrate-v0-to-v1.bak`);
+      expect(first.backupPath).toBe(
+        `${file}.pre-migrate-v0-to-v${targetVersion}.bak`,
+      );
       expect(fs.existsSync(first.backupPath!)).toBe(true);
 
       const second = runMigration(root, file);
       expect(second).toMatchObject({
-        fromVersion: 1,
-        toVersion: 1,
+        fromVersion: targetVersion,
+        toVersion: targetVersion,
         backupPath: null,
         deletedOrphanGenerations: 0,
         generations: 1,
@@ -185,7 +194,9 @@ describe('db:migrate', () => {
 
       const migrated = new Database(file);
       migrated.pragma('foreign_keys = ON');
-      expect(migrated.pragma('user_version', { simple: true })).toBe(1);
+      expect(migrated.pragma('user_version', { simple: true })).toBe(
+        targetVersion,
+      );
       expect(migrated.pragma('foreign_key_check')).toEqual([]);
       expect(inspectDatabaseCompatibility(drizzle(migrated, { schema }))).toMatchObject({
         ready: true,
@@ -286,19 +297,25 @@ describe('db:migrate', () => {
 
       expect(first).toMatchObject({
         fromVersion: 0,
-        toVersion: 1,
+        toVersion: targetVersion,
         addedColumns: [
           'generation_jobs.next_poll_at',
           'generation_jobs.cancel_requested_at',
+          'generations.client_request_id',
+          'generations.request_hash',
         ],
         deletedOrphanGenerations: 0,
         generations: 1,
       });
-      expect(first.backupPath).toBe(`${file}.pre-migrate-v0-to-v1.bak`);
+      expect(first.backupPath).toBe(
+        `${file}.pre-migrate-v0-to-v${targetVersion}.bak`,
+      );
       expect(fs.existsSync(first.backupPath!)).toBe(true);
 
       const migrated = new Database(file);
-      expect(migrated.pragma('user_version', { simple: true })).toBe(1);
+      expect(migrated.pragma('user_version', { simple: true })).toBe(
+        targetVersion,
+      );
       expect(migrated.pragma('foreign_key_check')).toEqual([]);
       expect(
         migrated.prepare('SELECT id, prompt, status FROM generations').all(),
@@ -318,8 +335,116 @@ describe('db:migrate', () => {
 
       const second = runMigration(root, file);
       expect(second).toMatchObject({
+        fromVersion: targetVersion,
+        toVersion: targetVersion,
+        backupPath: null,
+        addedColumns: [],
+        generations: 1,
+      });
+    } finally {
+      removeSqliteFiles(file);
+    }
+  });
+
+  it('upgrades a version 1 database additively and preserves existing rows', () => {
+    const root = path.resolve(__dirname, '../..');
+    const file = path.join(
+      os.tmpdir(),
+      `ai-image-v1-idempotency-migrate-${Date.now()}.db`,
+    );
+    const previous = new Database(file);
+    initializeTestSchema(previous);
+    previous.exec(`
+      DROP INDEX generations_client_request_id_unique;
+      ALTER TABLE generations DROP COLUMN client_request_id;
+      ALTER TABLE generations DROP COLUMN request_hash;
+      PRAGMA user_version = 1;
+      INSERT INTO generations
+        (id, session_id, prompt, status, created_at, updated_at)
+      VALUES
+        ('generation-v1', 'default-session', 'Preserve v1 generation', 'pending', 'before', 'before');
+      INSERT INTO generation_jobs
+        (id, generation_id, provider, model, status, provider_handle, error,
+         poll_lease_until, next_poll_at, cancel_requested_at, created_at, updated_at)
+      VALUES
+        ('job-v1', 'generation-v1', 'fal', 'fal-ai/flux/schnell', 'pending',
+         NULL, NULL, NULL, NULL, NULL, 'before', 'before');
+    `);
+    previous.close();
+
+    try {
+      const report = runMigration(root, file);
+      expect(report).toMatchObject({
         fromVersion: 1,
-        toVersion: 1,
+        toVersion: targetVersion,
+        backupPath: `${file}.pre-migrate-v1-to-v${targetVersion}.bak`,
+        addedColumns: [
+          'generations.client_request_id',
+          'generations.request_hash',
+        ],
+        generations: 1,
+      });
+
+      const migrated = new Database(file);
+      migrated.pragma('foreign_keys = ON');
+      expect(migrated.pragma('user_version', { simple: true })).toBe(
+        targetVersion,
+      );
+      expect(migrated.pragma('foreign_key_check')).toEqual([]);
+      expect(
+        migrated
+          .prepare(
+            `SELECT id, prompt, client_request_id, request_hash
+             FROM generations WHERE id = 'generation-v1'`,
+          )
+          .get(),
+      ).toEqual({
+        id: 'generation-v1',
+        prompt: 'Preserve v1 generation',
+        client_request_id: null,
+        request_hash: null,
+      });
+      expect(
+        migrated
+          .prepare('SELECT id, generation_id FROM generation_jobs')
+          .all(),
+      ).toEqual([{ id: 'job-v1', generation_id: 'generation-v1' }]);
+
+      const index = migrated
+        .prepare(
+          `SELECT sql FROM sqlite_master
+           WHERE type = 'index' AND name = 'generations_client_request_id_unique'`,
+        )
+        .get() as { sql: string };
+      expect(index.sql).toMatch(
+        /UNIQUE INDEX[\s\S]+client_request_id[\s\S]+WHERE client_request_id IS NOT NULL/i,
+      );
+      const insertIdempotent = migrated.prepare(`
+        INSERT INTO generations
+          (id, session_id, prompt, status, client_request_id, request_hash, created_at, updated_at)
+        VALUES (?, 'default-session', 'New intent', 'pending', ?, ?, 'after', 'after')
+      `);
+      insertIdempotent.run(
+        'generation-v2-first',
+        '018f6f4d-5c3a-7b8c-9d0e-123456789abc',
+        'a'.repeat(64),
+      );
+      expect(() =>
+        insertIdempotent.run(
+          'generation-v2-duplicate',
+          '018f6f4d-5c3a-7b8c-9d0e-123456789abc',
+          'a'.repeat(64),
+        ),
+      ).toThrow(/UNIQUE constraint failed/);
+      migrated
+        .prepare("DELETE FROM generations WHERE id = 'generation-v2-first'")
+        .run();
+      migrated.close();
+
+      const second = runMigration(root, file);
+      expect(second).toMatchObject({
+        fromVersion: targetVersion,
+        toVersion: targetVersion,
         backupPath: null,
         addedColumns: [],
         generations: 1,
@@ -349,7 +474,7 @@ describe('db:migrate', () => {
       expect(result.status).not.toBe(0);
       expect(result.stdout).toBe('');
 
-      const backupPath = `${file}.pre-migrate-v0-to-v1.bak`;
+      const backupPath = `${file}.pre-migrate-v0-to-v${targetVersion}.bak`;
       expect(fs.existsSync(backupPath)).toBe(true);
       const firstBackup = fs.readFileSync(backupPath);
 
@@ -391,10 +516,16 @@ describe('db:migrate', () => {
       const result = runFailedMigration(root, file);
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain('does not match required schema');
-      expect(fs.existsSync(`${file}.pre-migrate-v1-to-v1.bak`)).toBe(false);
+      expect(
+        fs.existsSync(
+          `${file}.pre-migrate-v${targetVersion}-to-v${targetVersion}.bak`,
+        ),
+      ).toBe(false);
 
       const unchanged = new Database(file, { readonly: true });
-      expect(unchanged.pragma('user_version', { simple: true })).toBe(1);
+      expect(unchanged.pragma('user_version', { simple: true })).toBe(
+        targetVersion,
+      );
       const index = (
         unchanged.pragma('index_info(unique_job_index)') as Array<{
           name: string;
@@ -422,12 +553,19 @@ describe('db:migrate', () => {
       ]);
       expect(results.map((result) => result.status)).toEqual([0, 0]);
       const reports = results.map((result) => JSON.parse(result.stdout));
-      expect(reports.map((report) => report.fromVersion).sort()).toEqual([0, 1]);
+      expect(reports.map((report) => report.fromVersion).sort()).toEqual([
+        0,
+        targetVersion,
+      ]);
       expect(
         reports.filter((report) => report.backupPath !== null),
       ).toHaveLength(1);
-      expect(fs.existsSync(`${file}.pre-migrate-v0-to-v1.bak`)).toBe(true);
-      expect(fs.existsSync(`${file}.pre-migrate-v0-to-v1.bak.1`)).toBe(false);
+      expect(
+        fs.existsSync(`${file}.pre-migrate-v0-to-v${targetVersion}.bak`),
+      ).toBe(true);
+      expect(
+        fs.existsSync(`${file}.pre-migrate-v0-to-v${targetVersion}.bak.1`),
+      ).toBe(false);
       expect(fs.existsSync(`${file}.migrate.lock`)).toBe(false);
       expect(fs.existsSync(`${file}.migrate-lock.sqlite`)).toBe(true);
 
@@ -469,8 +607,13 @@ describe('db:migrate', () => {
       holder = undefined;
 
       const report = runMigration(root, file);
-      expect(report).toMatchObject({ fromVersion: 0, toVersion: 1 });
-      expect(report.backupPath).toBe(`${file}.pre-migrate-v0-to-v1.bak`);
+      expect(report).toMatchObject({
+        fromVersion: 0,
+        toVersion: targetVersion,
+      });
+      expect(report.backupPath).toBe(
+        `${file}.pre-migrate-v0-to-v${targetVersion}.bak`,
+      );
 
       const migrated = new Database(file);
       migrated.pragma('foreign_keys = ON');

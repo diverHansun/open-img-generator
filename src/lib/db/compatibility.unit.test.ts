@@ -55,6 +55,22 @@ describe('database schema compatibility', () => {
     });
   });
 
+  it('rejects a partial unique index with the wrong predicate', () => {
+    testDb = createTestDb();
+    testDb.sqlite.exec(`
+      DROP INDEX generations_client_request_id_unique;
+      CREATE UNIQUE INDEX generations_client_request_id_unique
+        ON generations(client_request_id)
+        WHERE client_request_id = 'only-this-key';
+    `);
+
+    expect(inspectDatabaseCompatibility(testDb.db)).toMatchObject({
+      ready: false,
+      currentVersion: REQUIRED_DATABASE_SCHEMA_VERSION,
+      missingIndexes: ['generations_client_request_id_unique'],
+    });
+  });
+
   it('rejects a current version whose required column is missing', () => {
     testDb = createTestDb();
     testDb.sqlite.exec('ALTER TABLE generation_jobs DROP COLUMN next_poll_at');

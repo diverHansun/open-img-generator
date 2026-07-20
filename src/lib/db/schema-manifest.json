@@ -1,9 +1,18 @@
 {
-  "version": 1,
+  "version": 2,
   "tables": {
     "projects": ["id", "title", "created_at", "updated_at"],
     "sessions": ["id", "project_id", "title", "created_at", "updated_at"],
-    "generations": ["id", "session_id", "prompt", "status", "created_at", "updated_at"],
+    "generations": [
+      "id",
+      "session_id",
+      "prompt",
+      "status",
+      "client_request_id",
+      "request_hash",
+      "created_at",
+      "updated_at"
+    ],
     "generation_jobs": [
       "id",
       "generation_id",
@@ -60,6 +69,14 @@
       "columns": ["created_at"],
       "unique": false,
       "partial": false
+    },
+    {
+      "name": "generations_client_request_id_unique",
+      "table": "generations",
+      "columns": ["client_request_id"],
+      "unique": true,
+      "partial": true,
+      "where": "client_request_id IS NOT NULL"
     },
     {
       "name": "generation_jobs_generation_idx",

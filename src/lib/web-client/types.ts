@@ -65,7 +65,8 @@ export type GenerationTarget = {
   model: string;
 };
 
-export type SubmitGenerationRequest = {
+/** The content of a user generation intention before it receives a stable key. */
+export type SubmitGenerationPayload = {
   prompt: string;
   targets: GenerationTarget[];
   sessionId: string;
@@ -80,9 +81,15 @@ export type SubmitGenerationRequest = {
   providerOptions?: Record<string, unknown> | null;
 };
 
+export type SubmitGenerationRequest = SubmitGenerationPayload & {
+  /** Stable UUID reused after a lost response; must match Idempotency-Key. */
+  clientRequestId: string;
+};
+
 export type SubmitGenerationResponse = {
   id: string;
   status: GenerationStatus;
+  replayed: boolean;
   links: { self: string };
 };
 

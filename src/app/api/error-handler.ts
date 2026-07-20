@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   ConflictError,
+  IdempotencyKeyReusedError,
   ValidationError,
   NotFoundError,
   RateLimitError,
@@ -137,6 +138,15 @@ function classifyApiError(err: unknown): StructuredApiError {
     };
   }
   if (err instanceof ConflictError) {
+    if (err instanceof IdempotencyKeyReusedError) {
+      return {
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: err.message,
+        safeMessage: 'Idempotency key was already used for a different request',
+        retryable: false,
+        status: 409,
+      };
+    }
     return {
       code: 'CONFLICT',
       message: err.message,

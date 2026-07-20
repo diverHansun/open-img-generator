@@ -7,5 +7,6 @@ export * from './browser-runtime';
 export * from './auth-gate';
 export * from './gallery-query';
 export * from './provider-credential';
+export * from './submission-intent';
 export * from './request-state';
 export * from './workspace-session';

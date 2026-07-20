@@ -2,7 +2,7 @@ import type {
   GenerationTarget,
   ProviderCapabilities,
   ProviderInfo,
-  SubmitGenerationRequest,
+  SubmitGenerationPayload,
 } from './types';
 import { MAX_GENERATION_TARGETS } from '../generation-constraints';
 
@@ -65,9 +65,9 @@ export function deriveGenerationControls(
 }
 
 export function buildSubmitGenerationRequest(
-  request: SubmitGenerationRequest,
+  request: SubmitGenerationPayload,
   providers: ProviderInfo[],
-): SubmitGenerationRequest {
+): SubmitGenerationPayload {
   if (request.targets.length === 0) {
     throw new Error('At least one target must be selected');
   }

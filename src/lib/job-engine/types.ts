@@ -6,6 +6,8 @@ export type GenerationTarget = {
 };
 
 export type SubmitGenerationParams = {
+  /** Stable browser/user intent identity used for durable admission replay. */
+  clientRequestId: string;
   targets: GenerationTarget[];
   prompt: string;
   sessionId: string;

@@ -5,6 +5,22 @@ import { handleApiError } from '../error-handler';
 import { listGenerations } from '../../../lib/library';
 import { readJsonObject } from '../request-body';
 import { getRequestId, withRequestId } from '../../../lib/request-id';
+import { normalizeClientRequestId } from '../../../lib/job-engine/idempotency';
+import { ValidationError } from '../../../lib/errors';
+
+function normalizeSubmissionIntent(
+  payload: Record<string, unknown>,
+  idempotencyHeader: string | null,
+): Parameters<typeof submitGeneration>[0] {
+  if (
+    idempotencyHeader !== null &&
+    idempotencyHeader !== payload.clientRequestId
+  ) {
+    throw new ValidationError('Idempotency-Key must match clientRequestId');
+  }
+  const clientRequestId = normalizeClientRequestId(payload.clientRequestId);
+  return { ...payload, clientRequestId } as Parameters<typeof submitGeneration>[0];
+}
 
 function parseLimit(value: string | null): number | undefined {
   if (value === null) return undefined;
@@ -35,17 +51,22 @@ export async function POST(request: Request) {
   const requestId = getRequestId(request);
   try {
     assertDatabaseReady(db);
+    const body = normalizeSubmissionIntent(
+      await readJsonObject(request),
+      request.headers.get('Idempotency-Key'),
+    );
     ensureWorkerStarted();
-    const body = (await readJsonObject(request)) as Parameters<typeof submitGeneration>[0];
     const result = await submitGeneration(body, { db });
+    const self = `/api/generations/${result.generationId}`;
     return withRequestId(
       NextResponse.json(
         {
           id: result.generationId,
           status: result.status,
-          links: { self: `/api/generations/${result.generationId}` },
+          replayed: result.replayed,
+          links: { self },
         },
-        { status: 201 },
+        { status: 201, headers: { Location: self } },
       ),
       requestId,
     );

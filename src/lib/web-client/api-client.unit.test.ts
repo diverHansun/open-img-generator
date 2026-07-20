@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { ApiClientError, createApiClient } from './api-client';
 
+const CLIENT_REQUEST_ID = '15a6fecc-4f40-4ed2-8f51-353423be9af1';
+
 describe('web API client', () => {
   it('reads backend health through the same typed client as generation calls', async () => {
     const fetcher = vi.fn().mockResolvedValue(
@@ -30,7 +32,12 @@ describe('web API client', () => {
     );
     const client = createApiClient(fetcher as typeof fetch);
 
-    await expect(client.submitGeneration({ prompt: 'A cat', targets: [], sessionId: 'session-1' })).rejects.toEqual(
+    await expect(client.submitGeneration({
+      clientRequestId: CLIENT_REQUEST_ID,
+      prompt: 'A cat',
+      targets: [],
+      sessionId: 'session-1',
+    })).rejects.toEqual(
       new ApiClientError('Unsupported aspect ratio', 400),
     );
   });
@@ -84,6 +91,7 @@ describe('web API client', () => {
 
     await expect(
       client.submitGeneration({
+        clientRequestId: CLIENT_REQUEST_ID,
         prompt: 'A cat',
         targets: [],
         sessionId: 'session-1',
@@ -93,6 +101,44 @@ describe('web API client', () => {
       retryable: true,
       requestId: 'body-request-1',
       retryAfterMs: 9_000,
+    });
+  });
+
+  it('sends the durable client request id in both body and Idempotency-Key', async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'generation-1',
+          status: 'pending',
+          replayed: false,
+          links: { self: '/api/generations/generation-1' },
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(
+      client.submitGeneration({
+        clientRequestId: CLIENT_REQUEST_ID,
+        prompt: 'A cat',
+        targets: [],
+        sessionId: 'session-1',
+      }),
+    ).resolves.toMatchObject({ id: 'generation-1', replayed: false });
+
+    expect(fetcher).toHaveBeenCalledWith('/api/generations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': CLIENT_REQUEST_ID,
+      },
+      body: JSON.stringify({
+        clientRequestId: CLIENT_REQUEST_ID,
+        prompt: 'A cat',
+        targets: [],
+        sessionId: 'session-1',
+      }),
     });
   });
 

@@ -123,6 +123,11 @@ export function mapGenerateError(
       };
       break;
     case 'IDEMPOTENCY_KEY_REUSED':
+      presentation = {
+        messageKey: 'generate.error.idempotencyConflict',
+        action: 'back-to-compose',
+      };
+      break;
     case 'INTERNAL_ERROR':
       presentation = unknownPresentation(operation);
       break;

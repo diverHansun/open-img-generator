@@ -3,6 +3,7 @@ import { sessionExists, type DbClient } from '../db';
 import { getById } from '../providers';
 import { MAX_GENERATION_TARGETS } from '../generation-constraints';
 import type { SubmitGenerationParams } from './types';
+import { normalizeClientRequestId } from './idempotency';
 
 export type ValidationContext = {
   db: DbClient;
@@ -15,6 +16,7 @@ export function validate(
   if (!params || typeof params !== 'object') {
     throw new ValidationError('Request body must be an object');
   }
+  normalizeClientRequestId(params.clientRequestId);
   if (typeof params.prompt !== 'string' || params.prompt.trim().length === 0) {
     throw new ValidationError('Prompt is required');
   }

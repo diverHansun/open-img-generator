@@ -150,6 +150,7 @@ describe('cancelGeneration', () => {
 
     const submitting = submitGeneration(
       {
+        clientRequestId: '15a6fecc-4f40-4ed2-8f51-353423be9af1',
         prompt: 'race test',
         sessionId: 'default-session',
         targets: [{ provider: 'kling', model: 'kling-v3' }],

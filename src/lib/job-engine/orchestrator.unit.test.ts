@@ -2,8 +2,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createTestDb } from '../../../tests/helpers/db';
 import { createSession } from '../db/queries/sessions';
-import { favorites, sessions, getGenerationWithJobsAndImages } from '../db';
+import {
+  favorites,
+  generations,
+  sessions,
+  getGenerationWithJobsAndImages,
+} from '../db';
 import { submitGeneration, getGeneration } from './orchestrator';
+import { IdempotencyKeyReusedError } from '../errors';
 import * as providers from '../providers';
 import * as storage from '../storage';
 import type { ImageProvider, SubmitResult as ProviderSubmitResult, PollResult } from '../providers';
@@ -70,6 +76,7 @@ describe('orchestrator', () => {
     overrides: Partial<Parameters<typeof submitGeneration>[0]> = {},
   ): Parameters<typeof submitGeneration>[0] {
     return {
+      clientRequestId: '15a6fecc-4f40-4ed2-8f51-353423be9af1',
       targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
       prompt: 'A cat',
       sessionId: 'default-session',
@@ -78,6 +85,93 @@ describe('orchestrator', () => {
   }
 
   describe('submitGeneration', () => {
+    it('replays an admitted request without a second provider dispatch', async () => {
+      const submit = vi.fn().mockResolvedValue({
+        kind: 'failed',
+        error: {
+          code: 'PROVIDER_ERROR',
+          message: 'first attempt failed',
+          retryable: false,
+        },
+      } as ProviderSubmitResult);
+      vi.mocked(providers.getById).mockReturnValue(makeProvider({ submit }));
+
+      const first = await submitGeneration(makeParams(), { db });
+      const replay = await submitGeneration(makeParams(), { db });
+
+      expect(first.replayed).toBe(false);
+      expect(replay).toEqual({
+        generationId: first.generationId,
+        status: 'failed',
+        replayed: true,
+      });
+      expect(submit).toHaveBeenCalledOnce();
+      expect(db.select().from(generations).all()).toHaveLength(1);
+    });
+
+    it('replays a durable request even when its provider is no longer enabled', async () => {
+      const submit = vi.fn().mockResolvedValue({
+        kind: 'failed',
+        error: {
+          code: 'PROVIDER_ERROR',
+          message: 'first attempt failed',
+          retryable: false,
+        },
+      } as ProviderSubmitResult);
+      vi.mocked(providers.getById).mockReturnValue(makeProvider({ submit }));
+
+      const first = await submitGeneration(makeParams(), { db });
+      vi.mocked(providers.getById).mockReturnValue(undefined);
+
+      await expect(submitGeneration(makeParams(), { db })).resolves.toEqual({
+        generationId: first.generationId,
+        status: 'failed',
+        replayed: true,
+      });
+      expect(submit).toHaveBeenCalledOnce();
+    });
+
+    it('rejects a reused intent key when the canonical payload changed', async () => {
+      const submit = vi.fn().mockResolvedValue({
+        kind: 'failed',
+        error: {
+          code: 'PROVIDER_ERROR',
+          message: 'first attempt failed',
+          retryable: false,
+        },
+      } as ProviderSubmitResult);
+      vi.mocked(providers.getById).mockReturnValue(makeProvider({ submit }));
+
+      await submitGeneration(makeParams(), { db });
+      await expect(
+        submitGeneration(makeParams({ prompt: 'A different cat' }), { db }),
+      ).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
+
+      expect(submit).toHaveBeenCalledOnce();
+      expect(db.select().from(generations).all()).toHaveLength(1);
+    });
+
+    it('admits concurrent equivalent calls only once', async () => {
+      const submit = vi.fn().mockResolvedValue({
+        kind: 'failed',
+        error: {
+          code: 'PROVIDER_ERROR',
+          message: 'first attempt failed',
+          retryable: false,
+        },
+      } as ProviderSubmitResult);
+      vi.mocked(providers.getById).mockReturnValue(makeProvider({ submit }));
+
+      const [first, replay] = await Promise.all([
+        submitGeneration(makeParams(), { db }),
+        submitGeneration(makeParams(), { db }),
+      ]);
+
+      expect(first.generationId).toBe(replay.generationId);
+      expect([first.replayed, replay.replayed].sort()).toEqual([false, true]);
+      expect(submit).toHaveBeenCalledOnce();
+    });
+
     it('returns pending for async provider', async () => {
       vi.mocked(providers.getById).mockReturnValue(
         makeProvider({

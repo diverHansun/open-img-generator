@@ -10,13 +10,16 @@ import type { TranslationKey } from '@/lib/i18n';
 import { workspaceRoute } from '@/lib/routes';
 import {
   buildSubmitGenerationRequest,
+  clearSubmissionIntent,
   deriveGenerationControls,
   getBrowserWebClientRuntime,
+  resolveSubmissionIntent,
   type GenerationView,
   type GenerationTarget,
   type ModelPreference,
   type ProviderInfo,
   type Session,
+  type SubmitGenerationPayload,
 } from '@/lib/web-client';
 
 import { GenerateCompose } from './generate-compose';
@@ -330,9 +333,9 @@ export function GenerateScreen({
       return;
     }
 
-    let request;
+    let payload: SubmitGenerationPayload;
     try {
-      request = buildSubmitGenerationRequest(
+      payload = buildSubmitGenerationRequest(
         {
           prompt: prompt.trim(),
           targets,
@@ -357,7 +360,18 @@ export function GenerateScreen({
     dispatchTask({ type: 'submit-started', sequence });
     setSubmitting(true);
     try {
+      const { intent } = await resolveSubmissionIntent({
+        projectId,
+        sessionId: activeSessionId,
+        payload,
+      });
+      if (!mounted.current || sequence !== submissionSequence.current) return;
+      const request = {
+        ...payload,
+        clientRequestId: intent.clientRequestId,
+      };
       const response = await runtime.client.submitGeneration(request);
+      clearSubmissionIntent(intent.clientRequestId);
       if (!mounted.current || sequence !== submissionSequence.current) return;
       dispatchTask({
         type: 'submit-succeeded',

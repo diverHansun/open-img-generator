@@ -47,6 +47,7 @@ describe('sync generation end-to-end (zenmux)', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          clientRequestId: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
           targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
           prompt: 'A cat',
           sessionId: 'default-session',

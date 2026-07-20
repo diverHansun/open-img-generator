@@ -19,6 +19,11 @@ describe('Generate error presentation', () => {
     ['RATE_LIMITED', 'generate.error.rateLimited', 'wait'],
     ['SCHEMA_NOT_READY', 'generate.error.serviceUnavailable', 'wait'],
     ['AUTHENTICATION_REQUIRED', 'generate.error.authentication', 'reload'],
+    [
+      'IDEMPOTENCY_KEY_REUSED',
+      'generate.error.idempotencyConflict',
+      'back-to-compose',
+    ],
   ] as const)('maps %s without exposing the server message', (code, messageKey, action) => {
     const presentation = mapGenerateError(
       new ApiClientError('secret raw provider response', 503, code, false),

@@ -171,7 +171,13 @@ export function createApiClient(fetcher: FetchLike = fetch) {
       requestJson<SubmitGenerationResponse>(
         fetcher,
         '/api/generations',
-        jsonInit('POST', payload),
+        {
+          ...jsonInit('POST', payload),
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': payload.clientRequestId,
+          },
+        },
       ),
     getGeneration: (selfLink: string, options?: ApiRequestOptions) =>
       requestJson<GenerationView>(fetcher, selfLink, requestInitWithSignal(options)),
