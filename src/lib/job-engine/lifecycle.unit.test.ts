@@ -1,40 +1,57 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
+
 import { createTestDb } from '../../../tests/helpers/db';
 import {
   createGenerationAndJob,
-  getGenerationWithJobsAndImages,
-  requestGenerationJobCancellation,
   getGenerationJob,
-} from '../db/queries/generations';
-import {
-  storeImages,
-  completeSync,
-  advance,
-  updateJobAndGenerationIfNotCancelled,
-} from './lifecycle';
-import type { ProviderImageRef, PollResult } from '../providers';
-
-vi.mock('../storage', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../storage')>();
-  return {
-    ...original,
-    downloadAndStore: vi.fn(),
-  };
-});
-
-vi.mock('../providers', async () => {
-  return {
-    getById: vi.fn(),
-  };
-});
-
-import * as storage from '../storage';
+  getGenerationWithJobsAndImages,
+  generationJobs,
+  updateGenerationJob,
+} from '../db';
+import type { ImageProvider, PollResult } from '../providers';
 import * as providers from '../providers';
+import * as storage from '../storage';
+import { createRequestSnapshot, REQUEST_SNAPSHOT_VERSION } from './request-snapshot';
+import { advance } from './lifecycle';
+import { cancelGeneration } from './orchestrator';
+
+vi.mock('../providers', () => ({ getById: vi.fn() }));
+vi.mock('../storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../storage')>()),
+  downloadAndStore: vi.fn(),
+  removeStoredFile: vi.fn(),
+  stageInlineImage: vi.fn(),
+  removeStagedImage: vi.fn(),
+}));
 
 const now = '2026-07-12T10:00:00.000Z';
 
-function seedGeneration(db: ReturnType<typeof createTestDb>['db'], handle?: object) {
-  const { job } = createGenerationAndJob(
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function provider(overrides: Partial<ImageProvider> = {}): ImageProvider {
+  return {
+    id: 'fal',
+    displayName: 'fal.ai',
+    capabilities: new Map(),
+    submit: vi.fn(),
+    ...overrides,
+  } as ImageProvider;
+}
+
+function seedJob(
+  db: ReturnType<typeof createTestDb>['db'],
+  patch: Record<string, unknown> = {},
+) {
+  createGenerationAndJob(
     {
       id: 'gen-1',
       sessionId: 'default-session',
@@ -49,227 +66,303 @@ function seedGeneration(db: ReturnType<typeof createTestDb>['db'], handle?: obje
       provider: 'fal',
       model: 'fal-ai/flux/schnell',
       status: 'pending',
+      phase: 'queued',
+      requestSnapshot: createRequestSnapshot({ prompt: 'A cat', count: 2 }),
+      requestSnapshotVersion: REQUEST_SNAPSHOT_VERSION,
+      nextPollAt: '2000-01-01T00:00:00.000Z',
       createdAt: now,
       updatedAt: now,
     },
     db,
   );
-  if (handle) {
-    db.update(generationJobs)
-      .set({ providerHandle: JSON.stringify(handle) })
-      .where(eq(generationJobs.id, job.id))
-      .run();
+  if (Object.keys(patch).length > 0) {
+    db.update(generationJobs).set(patch).where(eq(generationJobs.id, 'job-1')).run();
   }
-  return job;
+  return getGenerationJob('job-1', db)!;
 }
 
-import { generationJobs } from '../db';
-import { eq } from 'drizzle-orm';
-
-describe('lifecycle', () => {
+describe('durable lifecycle', () => {
   beforeEach(() => {
-    vi.mocked(storage.downloadAndStore).mockReset();
     vi.mocked(providers.getById).mockReset();
+    vi.mocked(storage.downloadAndStore).mockReset();
+    vi.mocked(storage.removeStoredFile).mockReset();
+    vi.mocked(storage.stageInlineImage).mockReset();
+    vi.mocked(storage.removeStagedImage).mockReset();
   });
 
-  describe('storeImages', () => {
-    it('downloads and creates image records', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db);
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
-
-      const images: ProviderImageRef[] = [
-        { url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 },
-      ];
-      const result = await storeImages(job.id, images, db);
-
-      expect(result.kind).toBe('ok');
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.images).toHaveLength(1);
+  it('claims queued dispatch once and persists the async handle', async () => {
+    const { db } = createTestDb();
+    const submit = vi.fn().mockResolvedValue({
+      kind: 'async',
+      handle: {
+        providerId: 'fal',
+        model: 'fal-ai/flux/schnell',
+        externalId: 'request-1',
+        statusUrl: 'https://status.example.test/request-1',
+        responseUrl: 'https://response.example.test/request-1',
+        cancelUrl: null,
+        submittedAt: now,
+      },
     });
+    vi.mocked(providers.getById).mockReturnValue(provider({ submit }));
+    const job = seedJob(db);
 
-    it('skips already stored images', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db);
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
+    const [first, second] = await Promise.all([advance(job, db), advance(job, db)]);
 
-      const images: ProviderImageRef[] = [
-        { url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 },
-      ];
-      await storeImages(job.id, images, db);
-      const result = await storeImages(job.id, images, db);
-
-      expect(result.kind).toBe('ok');
-      expect(storage.downloadAndStore).toHaveBeenCalledTimes(1);
-    });
-
-    it('returns failed on storage error and keeps previous images', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db);
-      vi.mocked(storage.downloadAndStore)
-        .mockResolvedValueOnce({ storagePath: '2026/07/1.png', contentType: 'image/png', sizeBytes: 1 })
-        .mockRejectedValueOnce(new Error('network down'));
-
-      const images: ProviderImageRef[] = [
-        { url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 },
-        { url: 'https://cdn.example.com/2.png', width: 1024, height: 1024, contentType: 'image/png', index: 1 },
-      ];
-      const result = await storeImages(job.id, images, db);
-
-      expect(result.kind).toBe('failed');
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.images).toHaveLength(1);
+    expect([first, second].sort()).toEqual(['advanced', 'skipped']);
+    expect(submit).toHaveBeenCalledOnce();
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      phase: 'polling',
+      status: 'pending',
+      providerHandle: expect.stringContaining('request-1'),
+      pollLeaseUntil: null,
     });
   });
 
-  describe('completeSync', () => {
-    it('marks job and generation completed after storing images', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db);
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
-
-      await completeSync('gen-1', job.id, [
-        { url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 },
-      ], db);
-
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.status).toBe('completed');
-      expect(gen!.jobs[0].status).toBe('completed');
+  it('turns an expired dispatch lease into outcome_unknown without a second submit', async () => {
+    const { db } = createTestDb();
+    const submit = vi.fn();
+    vi.mocked(providers.getById).mockReturnValue(provider({ submit }));
+    const job = seedJob(db, {
+      phase: 'dispatching',
+      pollLeaseUntil: '2000-01-01T00:00:00.000Z',
     });
 
-    it('does not apply a late submit result after cancellation is requested', () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db);
-      const requestedAt = new Date().toISOString();
-
-      expect(requestGenerationJobCancellation(job.id, requestedAt, db)).toBe(true);
-      updateJobAndGenerationIfNotCancelled(
-        job.id,
-        job.generationId,
-        {
-          status: 'pending',
-          providerHandle: JSON.stringify({ externalId: 'late-submit' }),
-          updatedAt: new Date().toISOString(),
-        },
-        db,
-      );
-
-      expect(getGenerationJob(job.id, db)).toMatchObject({
-        status: 'pending',
-        providerHandle: null,
-        cancelRequestedAt: requestedAt,
-      });
+    await expect(advance(job, db)).resolves.toBe('unknown');
+    expect(submit).not.toHaveBeenCalled();
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      status: 'failed',
+      phase: 'outcome_unknown',
+      error: expect.stringContaining('PROVIDER_OUTCOME_UNKNOWN'),
+      requestSnapshot: null,
+      requestSnapshotVersion: null,
+      resultSnapshot: null,
     });
   });
 
-  describe('advance', () => {
-    it('skips when job is already terminal', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
-      // Simulate another request already advanced the job to completed.
-      db.update(generationJobs).set({ status: 'completed' }).where(eq(generationJobs.id, job.id)).run();
+  it('scrubs snapshots when an in-flight provider submit has an unknown outcome', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db);
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({ submit: vi.fn().mockRejectedValue(new Error('connection reset')) }),
+    );
 
-      const poll = vi.fn();
-      vi.mocked(providers.getById).mockReturnValue({ id: 'fal', poll } as unknown as ReturnType<typeof providers.getById>);
-
-      await advance({ ...job, status: 'pending' }, db);
-      expect(poll).not.toHaveBeenCalled();
+    await expect(advance(job, db)).resolves.toBe('unknown');
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      status: 'failed',
+      phase: 'outcome_unknown',
+      requestSnapshot: null,
+      requestSnapshotVersion: null,
+      resultSnapshot: null,
     });
+  });
 
-    it('polls a running job without overwriting its real status to claim a lock', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
-      db.update(generationJobs).set({ status: 'running' }).where(eq(generationJobs.id, job.id)).run();
-
-      const poll = vi.fn().mockResolvedValue({ status: 'pending' } as PollResult);
-      vi.mocked(providers.getById).mockReturnValue({
-        id: 'fal',
-        poll,
-      } as unknown as ReturnType<typeof providers.getById>);
-
-      await advance({ ...job, status: 'running' }, db);
-
-      expect(poll).toHaveBeenCalledTimes(1);
-      const stored = getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]!;
-      expect(stored.status).toBe('pending');
-      expect(stored.pollLeaseUntil).toBeNull();
+  it('does not regress public running status when a poll returns pending', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db, {
+      phase: 'polling',
+      status: 'running',
+      providerHandle: JSON.stringify({
+        providerId: 'fal',
+        model: 'fal-ai/flux/schnell',
+        externalId: 'request-1',
+        statusUrl: 'https://status.example.test/request-1',
+        responseUrl: 'https://response.example.test/request-1',
+        cancelUrl: null,
+        submittedAt: now,
+      }),
     });
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({ poll: vi.fn().mockResolvedValue({ status: 'pending' } as PollResult) }),
+    );
 
-    it('allows only one concurrent poll while a lease is active', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
-      let finishPoll!: (result: PollResult) => void;
-      const poll = vi.fn().mockImplementation(
-        () => new Promise<PollResult>((resolve) => { finishPoll = resolve; }),
-      );
-      vi.mocked(providers.getById).mockReturnValue({
-        id: 'fal',
-        poll,
-      } as unknown as ReturnType<typeof providers.getById>);
-
-      const first = advance(job, db);
-      const second = advance(job, db);
-      await Promise.resolve();
-      expect(poll).toHaveBeenCalledTimes(1);
-
-      finishPoll({ status: 'pending' });
-      await Promise.all([first, second]);
-      expect(getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]!.pollLeaseUntil).toBeNull();
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      phase: 'polling',
+      status: 'running',
+      pollLeaseUntil: null,
     });
+  });
 
-    it('polls completed and stores images', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
-
-      const pollResult: PollResult = {
-        status: 'completed',
-        images: [{ url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 }],
-      };
-      vi.mocked(providers.getById).mockReturnValue({
-        id: 'fal',
-        poll: vi.fn().mockResolvedValue(pollResult),
-      } as unknown as ReturnType<typeof providers.getById>);
-
-      await advance(job, db);
-
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.status).toBe('completed');
+  it('persists result refs and stores one missing image per lease', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db, {
+      phase: 'polling',
+      providerHandle: JSON.stringify({
+        providerId: 'fal',
+        model: 'fal-ai/flux/schnell',
+        externalId: 'request-1',
+        statusUrl: 'https://status.example.test/request-1',
+        responseUrl: 'https://response.example.test/request-1',
+        cancelUrl: null,
+        submittedAt: now,
+      }),
     });
-
-    it('marks failed when poll returns failed', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
-
-      vi.mocked(providers.getById).mockReturnValue({
-        id: 'fal',
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
         poll: vi.fn().mockResolvedValue({
-          status: 'failed',
-          error: { code: 'PROVIDER_ERROR', message: 'boom', retryable: false },
-        }),
-      } as unknown as ReturnType<typeof providers.getById>);
+          status: 'completed',
+          images: [
+            { url: 'https://cdn.example.test/0.png', width: 1, height: 1, contentType: 'image/png', index: 0 },
+            { url: 'https://cdn.example.test/1.png', width: 1, height: 1, contentType: 'image/png', index: 1 },
+          ],
+        } as PollResult),
+      }),
+    );
+    vi.mocked(storage.downloadAndStore)
+      .mockResolvedValueOnce({ storagePath: '0.png', contentType: 'image/png', sizeBytes: 1 })
+      .mockResolvedValueOnce({ storagePath: '1.png', contentType: 'image/png', sizeBytes: 1 });
 
-      await advance(job, db);
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    expect(getGenerationJob(job.id, db)).toMatchObject({ phase: 'storing', status: 'running' });
 
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.status).toBe('failed');
-      expect(gen!.jobs[0].status).toBe('failed');
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('advanced');
+    expect(getGenerationWithJobsAndImages('gen-1', db)!.images).toHaveLength(1);
+    expect(storage.downloadAndStore).toHaveBeenCalledTimes(1);
+
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('completed');
+    expect(getGenerationWithJobsAndImages('gen-1', db)).toMatchObject({
+      status: 'completed',
+      images: expect.arrayContaining([expect.anything(), expect.anything()]),
     });
+    expect(storage.downloadAndStore).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues polling legacy handle rows that do not have a request snapshot', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db, {
+      phase: 'polling',
+      requestSnapshot: null,
+      requestSnapshotVersion: null,
+      providerHandle: JSON.stringify({
+        providerId: 'fal',
+        model: 'fal-ai/flux/schnell',
+        externalId: 'legacy-request',
+        statusUrl: 'https://status.example.test/legacy-request',
+        responseUrl: 'https://response.example.test/legacy-request',
+        cancelUrl: null,
+        submittedAt: now,
+      }),
+    });
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
+        poll: vi.fn().mockResolvedValue({
+          status: 'completed',
+          images: [{ url: 'https://cdn.example.test/legacy.png', width: 1, height: 1, contentType: 'image/png', index: 0 }],
+        } as PollResult),
+      }),
+    );
+
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    expect(getGenerationJob(job.id, db)?.phase).toBe('storing');
+  });
+
+  it('stages a data URL before persisting an opaque recoverable result snapshot', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db);
+    const stagedReference = 'staging:11111111-1111-4111-8111-111111111111';
+    vi.mocked(storage.stageInlineImage).mockReturnValue({
+      reference: stagedReference,
+      contentType: 'image/png',
+      sizeBytes: 8,
+    });
+    vi.mocked(storage.downloadAndStore).mockResolvedValue({
+      storagePath: '2026/07/staged.png',
+      contentType: 'image/png',
+      sizeBytes: 8,
+    });
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
+        submit: vi.fn().mockResolvedValue({
+          kind: 'sync',
+          images: [{
+            url: 'data:image/png;base64,iVBORw0KGgo=',
+            width: 1,
+            height: 1,
+            contentType: 'image/png',
+            index: 0,
+          }],
+        }),
+      }),
+    );
+
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      phase: 'storing',
+      status: 'running',
+      resultSnapshot: expect.stringContaining(stagedReference),
+    });
+    expect(getGenerationJob(job.id, db)?.resultSnapshot).not.toContain('data:image');
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('completed');
+    expect(storage.downloadAndStore).toHaveBeenCalledWith(stagedReference);
+    expect(storage.removeStagedImage).toHaveBeenCalledWith(stagedReference);
+  });
+
+  it('turns a malformed provider image result into a durable terminal failure', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db);
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
+        submit: vi.fn().mockResolvedValue({
+          kind: 'sync',
+          images: [{
+            url: 'https://cdn.example.test/bad.png',
+            width: 1,
+            height: 1,
+            // Runtime adapter data is untrusted even though the TypeScript
+            // type requires this field. It must not leave the job pending.
+            contentType: undefined,
+            index: 0,
+          }],
+        }),
+      }),
+    );
+
+    await expect(advance(job, db)).resolves.toBe('failed');
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      status: 'failed',
+      phase: 'terminal',
+      error: expect.stringContaining('STORAGE_RESPONSE_INVALID'),
+    });
+  });
+
+  it('cleans a downloaded image when cancellation wins during storage', async () => {
+    const { db } = createTestDb();
+    const stagedReference = 'staging:22222222-2222-4222-8222-222222222222';
+    const job = seedJob(db, {
+      phase: 'storing',
+      status: 'running',
+      resultSnapshot: JSON.stringify([{
+        url: stagedReference,
+        width: 1,
+        height: 1,
+        contentType: 'image/png',
+        index: 0,
+      }]),
+    });
+    const download = deferred<{
+      storagePath: string;
+      contentType: string;
+      sizeBytes: number;
+    }>();
+    vi.mocked(storage.downloadAndStore).mockReturnValue(download.promise);
+
+    const storing = advance(job, db);
+    await Promise.resolve();
+    await cancelGeneration('gen-1', { db });
+    download.resolve({
+      storagePath: '2026/07/cancel-race.png',
+      contentType: 'image/png',
+      sizeBytes: 1,
+    });
+
+    await expect(storing).resolves.toBe('skipped');
+    expect(getGenerationWithJobsAndImages('gen-1', db)).toMatchObject({
+      images: [],
+      jobs: [expect.objectContaining({ status: 'cancelled', resultSnapshot: null })],
+    });
+    expect(storage.removeStoredFile).toHaveBeenCalledWith('2026/07/cancel-race.png');
+    expect(storage.removeStagedImage).toHaveBeenCalledWith(stagedReference);
   });
 });

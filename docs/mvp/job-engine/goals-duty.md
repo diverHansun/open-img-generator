@@ -5,22 +5,25 @@
 > 修订说明: 2026-07-15 启用扇出（1 generation + N jobs）；原「MVP 不扇出」作废
 > 修订说明: 2026-07-16 `sessionId` **必填**；不负责 Project/History/Gallery（归 library）
 > 修订说明: 2026-07-16 本地取消、next_poll_at worker、provider/generation 限流已实现
+> 修订说明: 2026-07-20 improve-1 D1：POST 改为 durable admission `202`；按 phase/lease 恢复推进；请求快照与内联图片 opaque staging 落库边界已收紧
 
 ---
 
 ## 1. Design Goals（设计目标）
 
-1. **让"一次图片生成"从开始到可下载成为一条可追踪的流水线**
-   - 上层（API 层）只需调用 `submitGeneration()` 和 `getGeneration()`，不感知 sync/async 协议差异、不直接调 provider、不直接写文件。
-   - 衡量标准: API route handler 不超过 20 行逻辑。
+1. **让一次用户意图先成为可恢复的任务，再开始外部副作用**
+   - 上层只调用 `submitGeneration()` 和 `getGeneration()`，不感知 sync/async 协议差异、不直接调 provider、不直接写文件。
+   - `POST` 的成功仅表示 Generation、N 个 Job、每 Job 请求快照与 Session touch 已原子持久化；返回 `202 Accepted`，不表示 Provider 已受理或图片已生成。
 
-2. **统一 sync 与 async 两种生成路径的状态语义**
+2. **统一 sync 与 async 两种生成路径的状态与恢复语义**
    - 无论底层厂商是当场返回还是异步队列，上层看到的 generation / job 状态统一为: `pending` → `running` → `completed` / `failed` / `cancelled`。
-   - async 厂商的惰性 poll 推进对 API 层透明: `GET /api/generations/:id` 触发推进，调用方无需区分协议。
+   - 内部以 `queued` / `dispatching` / `polling` / `storing` / `cancelling` / `terminal` / `outcome_unknown` phase 和 lease 记录可恢复执行点；这些细节不扩散为 API 状态。
+   - in-process worker 默认启用（仅 `JOB_WORKER_ENABLED=false` 显式关闭）。详情 GET 只在 job 已 due 且 lease 可取得时辅助推进，不能绕过调度时间或并发租约强制重放。
 
-3. **确保厂商临时 URL 在过期前被转存**
+3. **确保厂商临时结果在过期前可安全转存**
    - 任一 job 进入 `completed` 时，该 job 的 ProviderImageRef 已下载并由 storage 持久化。
    - 衡量标准: `GET /api/images/:id` 返回的是本地存储路径，不是厂商 CDN URL。
+   - Provider 返回 Base64/data URL 时，D1 先以 25 MiB 上限写入私有 staging，再在 DB 只保存 `staging:<uuid>`；不得把原始 data URL/Base64 写入 SQLite、日志或 API DTO。
 
 4. **一次请求可扇出到多个 (provider, model)，结果可按 job 独立追踪**
    - 一个 generation 对应 N 个 `generation_jobs`（N ≥ 1）；共享 prompt 与共享运行时参数，各 job 独立 submit / poll / 转存 / 失败。
@@ -37,13 +40,14 @@
 
 ## 2. Duties（职责）
 
-1. **接收扇出生成请求并创建任务记录**: 接收归一化参数（`targets[]`、prompt、**必填 sessionId**、共享运行时参数），经 prompt 模块处理 prompt，在同一事务内写入 db（1 generation + N generation_jobs），再逐 target 调用 provider.submit。
+1. **接收并 durable admission 扇出请求**: 接收参数（`clientRequestId`、`targets[]`、prompt、**必填 sessionId**、共享运行时参数），经 prompt 模块处理后，为每个 target 构造 capability 裁剪后的、版本化 `NormalizedRequest` snapshot；在同一事务内写入 1 条 generation、N 条 `phase=queued` jobs、snapshot 和 Session touch。Provider 调用只能发生在该事务 commit 之后的生命周期推进中。
 2. **按 target 校验与请求裁剪**: 每个 `(provider, model)` 必须已启用且存在于 capabilities；校验 mode、count（含 sync `count=1` MVP 限制）、尺寸/公开宽高比、negativePrompt。`image-to-image` 必须带 `referenceImages`。seed 若有值：仅写入 `supportsSeed===true` 的 target 的 NormalizedRequest，其余 target 省略（不因此整单 400）。
-3. **推进所有未终结的 async job**: 在 `getGeneration()` 时，对 generation 下每个 `pending`/`running` 的 async job 调用 lifecycle.advance（含乐观锁），互不阻塞对方终态。
-4. **下载并转存图片**: 当某 job 的 provider 返回 completed（sync 当场或 async poll 完成），调用 storage 下载并写入本地，在 db 创建属于该 job 的 image 记录。
+3. **按 durable phase/lease 推进任务**: worker 扫描 due 且无有效 lease 的 jobs；`getGeneration()` 可调用同一 `lifecycle.advance()` 作恢复辅助，但仍受 phase、due 和 lease CAS 约束。dispatch lease 过期而未记录 Provider 结果时，保守进入 `outcome_unknown`，不盲目重投。
+4. **下载、staging 与原子转存图片**: Provider completed 后先持久化有界 result snapshot，逐图下载/物化；图片 row 的插入、lease 校验、job phase/status 与 Generation 聚合在短事务内 checkpoint。取消先赢时不得留下可见 image row；已成功 checkpoint 的图片可保留。
 5. **统一状态查询与聚合**: 对外提供 `getGeneration(id)` 返回 `GenerationView`（含全部 jobs 与 images）；generation.status 由全部 job 状态聚合（见 `api/constraints.md` §8）。
 6. **session 关联（必填）**: 校验 session 存在；写入 `generations.session_id`；关联成功后 `db.touchSession(sessionId)`。缺少 sessionId → 校验失败（400）。
-7. **部分失败隔离**: 某一 target 的 submit/poll/转存失败只将该 job 标为 failed，不回滚已成功的其他 jobs 及其 images；generation 聚合状态按 §8 规则更新。
+7. **取消本地原子、远端尽力**: cancel 在一个短事务内批量标记全部 active jobs 并重聚合 generation，立即返回本地状态；worker 对有 durable handle 的 `cancelling` job 再尽力调用 provider.cancel。晚到 submit handle 只能用于远端取消，绝不复活公开状态。
+8. **部分失败隔离**: 某一 target 的 submit/poll/转存失败只将该 job 标为 failed，不回滚已成功的其他 jobs 及其 images；generation 聚合状态按 §8 规则更新。
 
 ---
 
@@ -56,18 +60,19 @@
 5. **不处理 HTTP 路由**: API 层负责解析 HTTP 请求和返回 JSON。job-engine 不感知 Request/Response 对象。
 6. **不计算「前端交集」**: 多模型宽高比交集是 web-ui 的职责。服务端只校验「每个 target 是否支持提交的 aspectRatio」。
 7. **不重试失败的 provider 调用（MVP）**: 单次 submit/poll 失败即标记该 job failed，不做自动重试。
-8. **不做跨进程限流/熔断**: 当前提供单进程 generation admission 与 per-provider semaphore；多实例共享限流仍不在 MVP 范围。
+8. **不做跨进程限流/熔断或外部队列**: 当前依赖单进程 worker、SQLite lease 和 per-provider semaphore；多实例共享限流仍不在 MVP 范围。
 9. **不优化 prompt**: prompt 预处理是 prompt 模块的职责。
-10. **不负责厂商取消协议**: 取消入口由 orchestrator/API 提供，providers 仅在官方支持时实现 `cancel(handle)`；不支持时 job-engine 采用本地取消标记停止 poll。
-11. **不持久化运行时参数**: width/height/aspectRatio/count/seed/referenceImages/providerOptions 仅运行时使用，不写入 db（与既有约定一致）。
-12. **不渲染 UI、不声明前端控件显隐**: capabilities 驱动的参数面板属于 web-ui。
-13. **不管理 Project / History 列表 / Gallery 收藏 / 模型启用偏好**: 归属 library。
-14. **不创建 Session**: Session 由 library/API 先创建；job-engine 只引用。
+10. **不定义厂商取消协议**: 取消入口与本地状态机归 job-engine；providers 只负责在官方支持时实现 `cancel(handle)`。不支持时 job-engine 仍完成本地取消，不能承诺远端停止或不计费。
+11. **不持久化原始 API body 或 Provider 原始响应**: 为恢复派发，job-engine 仅短期持久化每 target 的已校验、版本化 `NormalizedRequest` snapshot 与转存中的 result snapshot；snapshot 不暴露给 API/UI，并在终态清理。不会存 credential、任意对象或 raw Base64/data URL。
+12. **不在 D1 声称完成远端图片安全校验**: inline staging 已具备 25 MiB 边界和 Provider metadata 一致性；magic-byte 校验、远端 URL/redirect/私网防护、流式解码与总预算属于 E3。
+13. **不渲染 UI、不声明前端控件显隐**: capabilities 驱动的参数面板属于 web-ui。
+14. **不管理 Project / History 列表 / Gallery 收藏 / 模型启用偏好**: 归属 library。
+15. **不创建 Session**: Session 由 library/API 先创建；job-engine 只引用。
 
 ---
 
 ## 自检（提交前）
 
-- **一句话存在意义**: job-engine 把「一次 prompt、多个模型」编排为可追踪的流水线，屏蔽 sync/async 差异，确保每张图被持久化。
+- **一句话存在意义**: job-engine 把「一次 prompt、多个模型」先接纳为可恢复的持久化意图，再按 phase/lease 编排为可追踪流水线，屏蔽 sync/async 差异并确保图片被持久化。
 - **不该做什么**: 不翻译协议、不直接 HTTP、不定义 schema、不算 UI 交集、不做跨进程调度、不管 Project/Gallery。
 - **职责重叠风险**: 与 providers——编排 vs 单次调用；与 web-ui——校验单 target vs 交集 UX；与 library——写 generation vs 组织资产；与 storage——触发转存 vs 执行写入。无重叠。

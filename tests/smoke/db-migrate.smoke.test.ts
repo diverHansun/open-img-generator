@@ -23,6 +23,11 @@ function removeSqliteFiles(file: string) {
   fs.rmSync(`${file}.pre-migrate-v0-to-v2.bak.1`, { force: true });
   fs.rmSync(`${file}.pre-migrate-v1-to-v2.bak`, { force: true });
   fs.rmSync(`${file}.pre-migrate-v2-to-v2.bak`, { force: true });
+  fs.rmSync(`${file}.pre-migrate-v0-to-v3.bak`, { force: true });
+  fs.rmSync(`${file}.pre-migrate-v0-to-v3.bak.1`, { force: true });
+  fs.rmSync(`${file}.pre-migrate-v1-to-v3.bak`, { force: true });
+  fs.rmSync(`${file}.pre-migrate-v2-to-v3.bak`, { force: true });
+  fs.rmSync(`${file}.pre-migrate-v3-to-v3.bak`, { force: true });
   fs.rmSync(`${file}.migrate.lock`, { force: true });
   for (const suffix of ['', '-journal', '-shm', '-wal']) {
     fs.rmSync(`${file}.migrate-lock.sqlite${suffix}`, { force: true });
@@ -42,6 +47,12 @@ function runMigration(root: string, file: string) {
     backupPath: string | null;
     addedColumns: string[];
     deletedOrphanGenerations: number;
+    jobPhaseBackfill: {
+      terminal: number;
+      polling: number;
+      cancelling: number;
+      outcomeUnknown: number;
+    };
     generations: number;
   };
 }
@@ -303,6 +314,12 @@ describe('db:migrate', () => {
           'generation_jobs.cancel_requested_at',
           'generations.client_request_id',
           'generations.request_hash',
+          'generation_jobs.phase',
+          'generation_jobs.request_snapshot',
+          'generation_jobs.request_snapshot_version',
+          'generation_jobs.result_snapshot',
+          'generation_jobs.attempt_count',
+          'generation_jobs.retry_started_at',
         ],
         deletedOrphanGenerations: 0,
         generations: 1,
@@ -320,16 +337,31 @@ describe('db:migrate', () => {
       expect(
         migrated.prepare('SELECT id, prompt, status FROM generations').all(),
       ).toEqual([
-        { id: 'generation-1', prompt: 'Preserve me', status: 'pending' },
+        { id: 'generation-1', prompt: 'Preserve me', status: 'failed' },
       ]);
       expect(
-        migrated.prepare('SELECT id, generation_id, provider_handle FROM generation_jobs').all(),
+        migrated.prepare('SELECT id, generation_id, provider_handle, phase, status FROM generation_jobs').all(),
       ).toEqual([
-        { id: 'job-1', generation_id: 'generation-1', provider_handle: null },
+        {
+          id: 'job-1',
+          generation_id: 'generation-1',
+          provider_handle: null,
+          phase: 'outcome_unknown',
+          status: 'failed',
+        },
       ]);
       const jobColumns = migrated.pragma('table_info(generation_jobs)') as Array<{ name: string }>;
       expect(jobColumns.map((column) => column.name)).toEqual(
-        expect.arrayContaining(['next_poll_at', 'cancel_requested_at']),
+        expect.arrayContaining([
+          'next_poll_at',
+          'cancel_requested_at',
+          'phase',
+          'request_snapshot',
+          'request_snapshot_version',
+          'result_snapshot',
+          'attempt_count',
+          'retry_started_at',
+        ]),
       );
       migrated.close();
 
@@ -356,8 +388,15 @@ describe('db:migrate', () => {
     initializeTestSchema(previous);
     previous.exec(`
       DROP INDEX generations_client_request_id_unique;
+      DROP INDEX generation_jobs_due_idx;
       ALTER TABLE generations DROP COLUMN client_request_id;
       ALTER TABLE generations DROP COLUMN request_hash;
+      ALTER TABLE generation_jobs DROP COLUMN retry_started_at;
+      ALTER TABLE generation_jobs DROP COLUMN attempt_count;
+      ALTER TABLE generation_jobs DROP COLUMN result_snapshot;
+      ALTER TABLE generation_jobs DROP COLUMN request_snapshot_version;
+      ALTER TABLE generation_jobs DROP COLUMN request_snapshot;
+      ALTER TABLE generation_jobs DROP COLUMN phase;
       PRAGMA user_version = 1;
       INSERT INTO generations
         (id, session_id, prompt, status, created_at, updated_at)
@@ -381,6 +420,12 @@ describe('db:migrate', () => {
         addedColumns: [
           'generations.client_request_id',
           'generations.request_hash',
+          'generation_jobs.phase',
+          'generation_jobs.request_snapshot',
+          'generation_jobs.request_snapshot_version',
+          'generation_jobs.result_snapshot',
+          'generation_jobs.attempt_count',
+          'generation_jobs.retry_started_at',
         ],
         generations: 1,
       });
@@ -448,6 +493,99 @@ describe('db:migrate', () => {
         backupPath: null,
         addedColumns: [],
         generations: 1,
+      });
+    } finally {
+      removeSqliteFiles(file);
+    }
+  });
+
+  it('backfills v2 jobs into durable phases without guessing a missing dispatch outcome', () => {
+    const root = path.resolve(__dirname, '../..');
+    const file = path.join(os.tmpdir(), `ai-image-v2-lifecycle-migrate-${Date.now()}.db`);
+    const previous = new Database(file);
+    initializeTestSchema(previous);
+    previous.exec(`
+      DROP INDEX generation_jobs_due_idx;
+      ALTER TABLE generation_jobs DROP COLUMN retry_started_at;
+      ALTER TABLE generation_jobs DROP COLUMN attempt_count;
+      ALTER TABLE generation_jobs DROP COLUMN result_snapshot;
+      ALTER TABLE generation_jobs DROP COLUMN request_snapshot_version;
+      ALTER TABLE generation_jobs DROP COLUMN request_snapshot;
+      ALTER TABLE generation_jobs DROP COLUMN phase;
+      PRAGMA user_version = 2;
+      INSERT INTO generations
+        (id, session_id, prompt, status, created_at, updated_at)
+      VALUES
+        ('gen-terminal', 'default-session', 'done', 'completed', 'before', 'before'),
+        ('gen-polling', 'default-session', 'polling', 'pending', 'before', 'before'),
+        ('gen-unknown', 'default-session', 'unknown', 'pending', 'before', 'before'),
+        ('gen-cancelling', 'default-session', 'cancel', 'running', 'before', 'before');
+      INSERT INTO generation_jobs
+        (id, generation_id, provider, model, status, provider_handle, error,
+         poll_lease_until, next_poll_at, cancel_requested_at, created_at, updated_at)
+      VALUES
+        ('job-terminal', 'gen-terminal', 'fal', 'model', 'completed', NULL, NULL,
+         NULL, NULL, NULL, 'before', 'before'),
+        ('job-polling', 'gen-polling', 'fal', 'model', 'pending', '{"externalId":"p"}', NULL,
+         NULL, NULL, NULL, 'before', 'before'),
+        ('job-unknown', 'gen-unknown', 'fal', 'model', 'pending', NULL, NULL,
+         NULL, NULL, NULL, 'before', 'before'),
+        ('job-cancelling', 'gen-cancelling', 'fal', 'model', 'running', '{"externalId":"c"}', NULL,
+         NULL, NULL, 'before', 'before', 'before');
+    `);
+    previous.close();
+
+    try {
+      const report = runMigration(root, file);
+      expect(report).toMatchObject({
+        fromVersion: 2,
+        toVersion: targetVersion,
+        backupPath: `${file}.pre-migrate-v2-to-v${targetVersion}.bak`,
+        addedColumns: [
+          'generation_jobs.phase',
+          'generation_jobs.request_snapshot',
+          'generation_jobs.request_snapshot_version',
+          'generation_jobs.result_snapshot',
+          'generation_jobs.attempt_count',
+          'generation_jobs.retry_started_at',
+        ],
+        jobPhaseBackfill: {
+          terminal: 1,
+          polling: 1,
+          cancelling: 1,
+          outcomeUnknown: 1,
+        },
+      });
+
+      const migrated = new Database(file);
+      expect(
+        migrated
+          .prepare('SELECT id, status, phase, error, attempt_count FROM generation_jobs ORDER BY id')
+          .all(),
+      ).toEqual([
+        expect.objectContaining({ id: 'job-cancelling', status: 'cancelled', phase: 'cancelling', attempt_count: 0 }),
+        expect.objectContaining({ id: 'job-polling', status: 'pending', phase: 'polling', attempt_count: 0 }),
+        expect.objectContaining({ id: 'job-terminal', status: 'completed', phase: 'terminal', attempt_count: 0 }),
+        expect.objectContaining({
+          id: 'job-unknown',
+          status: 'failed',
+          phase: 'outcome_unknown',
+          error: expect.stringContaining('LEGACY_DISPATCH_STATE_UNKNOWN'),
+          attempt_count: 0,
+        }),
+      ]);
+      expect(
+        migrated
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'generation_jobs_due_idx'")
+          .get(),
+      ).toEqual({ name: 'generation_jobs_due_idx' });
+      migrated.close();
+
+      expect(runMigration(root, file)).toMatchObject({
+        fromVersion: targetVersion,
+        toVersion: targetVersion,
+        backupPath: null,
+        addedColumns: [],
       });
     } finally {
       removeSqliteFiles(file);

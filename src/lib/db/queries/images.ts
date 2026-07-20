@@ -59,6 +59,23 @@ export function createImageIfAbsent(
   return result.changes > 0;
 }
 
+/**
+ * Removes exactly one image inserted by a losing lifecycle attempt. This is
+ * intentionally keyed by both image and job so cancellation cleanup can never
+ * remove a row belonging to another job; favorites cascade with the image.
+ */
+export function deleteImageForJob(
+  id: string,
+  jobId: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .delete(images)
+    .where(and(eq(images.id, id), eq(images.generationJobId, jobId)))
+    .run();
+  return result.changes > 0;
+}
+
 export function imageExists(
   jobId: string,
   index: number,

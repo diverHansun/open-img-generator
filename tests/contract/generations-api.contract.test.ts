@@ -78,7 +78,7 @@ describe('POST /api/generations', () => {
     vi.mocked(database.assertDatabaseReady).mockReset();
   });
 
-  it('returns 201 with id, status and self link', async () => {
+  it('returns 202 after durable admission with id, status and self link', async () => {
     vi.mocked(jobEngine.submitGeneration).mockResolvedValue({
       generationId: 'gen-1',
       status: 'pending',
@@ -97,7 +97,7 @@ describe('POST /api/generations', () => {
       }),
     );
 
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(202);
     expect(response.headers.get('X-Request-Id')).toBe('submit-request-1');
     expect(response.headers.get('Location')).toBe('/api/generations/gen-1');
     const body = await response.json();
@@ -109,6 +109,7 @@ describe('POST /api/generations', () => {
       submissionBody(),
       expect.anything(),
     );
+    expect(jobEngine.ensureWorkerStarted).toHaveBeenCalledOnce();
   });
 
   it('returns a replay marker without changing the original generation id', async () => {
@@ -129,7 +130,7 @@ describe('POST /api/generations', () => {
       }),
     );
 
-    expect(response.status).toBe(201);
+    expect(response.status).toBe(202);
     expect(response.headers.get('Location')).toBe('/api/generations/gen-original');
     await expect(response.json()).resolves.toMatchObject({
       id: 'gen-original',
@@ -227,6 +228,26 @@ describe('POST /api/generations', () => {
         requestId: response.headers.get('X-Request-Id'),
       },
     });
+  });
+
+  it('rejects an oversized generation payload before engine or worker dispatch', async () => {
+    const response = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...submissionBody(),
+          prompt: 'x'.repeat(512 * 1_024),
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'PAYLOAD_TOO_LARGE', retryable: false },
+    });
+    expect(jobEngine.ensureWorkerStarted).not.toHaveBeenCalled();
+    expect(jobEngine.submitGeneration).not.toHaveBeenCalled();
   });
 
   it('returns an actionable correlated rate-limit error', async () => {

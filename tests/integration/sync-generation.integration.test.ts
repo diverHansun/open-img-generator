@@ -5,7 +5,9 @@ import { registerMswLifecycle } from '../msw/lifecycle';
 import { server } from '../msw/server';
 
 const originalZenmuxApiKey = process.env.ZENMUX_API_KEY;
+const originalWorkerEnabled = process.env.JOB_WORKER_ENABLED;
 process.env.ZENMUX_API_KEY = 'test-zenmux-key';
+process.env.JOB_WORKER_ENABLED = 'false';
 
 const { tempFile, cleanup: cleanupDb } = createIntegrationDb();
 const { tempDir, cleanup: cleanupStorage } = createStorageDir();
@@ -14,6 +16,7 @@ const { POST: postGeneration } = await import('../../src/app/api/generations/rou
 const { GET: getGeneration } = await import('../../src/app/api/generations/[id]/route');
 const { GET: getImage } = await import('../../src/app/api/images/[id]/route');
 const { POST: postFavorite } = await import('../../src/app/api/favorites/route');
+const { db, getGenerationWithJobsAndImages } = await import('../../src/lib/db');
 
 registerMswLifecycle();
 
@@ -23,9 +26,11 @@ describe('sync generation end-to-end (zenmux)', () => {
     cleanupStorage();
     if (originalZenmuxApiKey === undefined) delete process.env.ZENMUX_API_KEY;
     else process.env.ZENMUX_API_KEY = originalZenmuxApiKey;
+    if (originalWorkerEnabled === undefined) delete process.env.JOB_WORKER_ENABLED;
+    else process.env.JOB_WORKER_ENABLED = originalWorkerEnabled;
   });
 
-  it('creates, completes and serves image in one POST', async () => {
+  it('durably admits first, then completes through detail-driven lifecycle checkpoints', async () => {
     const imageBuffer = Buffer.from('fake-image-bytes');
     server.use(
       http.post('https://zenmux.ai/api/v1/images/generations', () =>
@@ -55,9 +60,15 @@ describe('sync generation end-to-end (zenmux)', () => {
       }),
     );
 
-    expect(postResponse.status).toBe(201);
+    expect(postResponse.status).toBe(202);
     const postBody = await postResponse.json();
-    expect(postBody.status).toBe('completed');
+    expect(postBody.status).toBe('pending');
+
+    const dispatchResponse = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    expect((await dispatchResponse.json()).status).toBe('running');
 
     const getResponse = await getGeneration(
       new Request(`http://localhost:3000/api/generations/${postBody.id}`),
@@ -94,5 +105,49 @@ describe('sync generation end-to-end (zenmux)', () => {
       { params: Promise.resolve({ id: imageId }) },
     );
     expect(imageResponse.status).toBe(200);
+  });
+
+  it('stages ZenMux b64_json without persisting the data URL in SQLite', async () => {
+    const imageBuffer = Buffer.from('base64-zenmux-image');
+    server.use(
+      http.post('https://zenmux.ai/api/v1/images/generations', () =>
+        HttpResponse.json({
+          created: 456,
+          output_format: 'png',
+          data: [{ b64_json: imageBuffer.toString('base64') }],
+        }),
+      ),
+    );
+
+    const postResponse = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientRequestId: '15bca6c7-7c6f-4c9a-aa61-111111111111',
+          targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
+          prompt: 'A staged image',
+          sessionId: 'default-session',
+        }),
+      }),
+    );
+    const postBody = await postResponse.json();
+
+    await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    const durable = getGenerationWithJobsAndImages(postBody.id, db)!;
+    expect(durable.jobs[0]?.resultSnapshot).toContain('staging:');
+    expect(durable.jobs[0]?.resultSnapshot).not.toContain('data:image');
+    expect(durable.jobs[0]?.resultSnapshot).not.toContain(imageBuffer.toString('base64'));
+
+    const completedResponse = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    const completed = await completedResponse.json();
+    expect(completed.status).toBe('completed');
+    expect(completed.images).toHaveLength(1);
   });
 });

@@ -58,7 +58,7 @@ describe('generation idempotent admission', () => {
     else process.env.JOB_WORKER_ENABLED = originalWorkerEnabled;
   });
 
-  it('returns the same generation for a response replay and dispatches Fal once', async () => {
+  it('returns the same durable generation for a response replay without dispatching in POST', async () => {
     const fetch = installAsyncFalSubmit();
     const clientRequestId = '6ba7b810-9dad-41d1-80b4-00c04fd430c8';
 
@@ -67,15 +67,15 @@ describe('generation idempotent admission', () => {
     const replay = await postGeneration(request(clientRequestId));
     const replayBody = await replay.json();
 
-    expect(first.status).toBe(201);
+    expect(first.status).toBe(202);
     expect(firstBody).toMatchObject({ replayed: false, status: 'pending' });
-    expect(replay.status).toBe(201);
+    expect(replay.status).toBe(202);
     expect(replayBody).toMatchObject({
       id: firstBody.id,
       replayed: true,
       status: 'pending',
     });
-    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('returns a safe conflict for a same-key changed payload without redispatching', async () => {
@@ -85,7 +85,7 @@ describe('generation idempotent admission', () => {
     const first = await postGeneration(request(clientRequestId, 'A first scene'));
     const conflict = await postGeneration(request(clientRequestId, 'A second scene'));
 
-    expect(first.status).toBe(201);
+    expect(first.status).toBe(202);
     expect(conflict.status).toBe(409);
     await expect(conflict.json()).resolves.toMatchObject({
       error: {
@@ -93,7 +93,7 @@ describe('generation idempotent admission', () => {
         retryable: false,
       },
     });
-    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('admits concurrent equivalent posts as one generation', async () => {
@@ -107,12 +107,12 @@ describe('generation idempotent admission', () => {
     const firstBody = await first.json();
     const secondBody = await second.json();
 
-    expect([first.status, second.status]).toEqual([201, 201]);
+    expect([first.status, second.status]).toEqual([202, 202]);
     expect(firstBody.id).toBe(secondBody.id);
     expect([firstBody.replayed, secondBody.replayed].sort()).toEqual([
       false,
       true,
     ]);
-    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

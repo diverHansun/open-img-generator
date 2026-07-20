@@ -6,6 +6,7 @@
 > 修订说明: 2026-07-16 sessionId 必填；Project/Favorite/ModelPrefs 路由；取消零散 Session
 > 修订说明: 2026-07-16 §14–§16 页面矩阵、DTO、prefs 默认全开、迁移（后端契约锁定）
 > 修订说明: 2026-07-16 Kling 独立 adapter、加密 user-config、取消/worker/限流、可选单用户 auth、图片清理
+> 修订说明: 2026-07-20 durable admission、phase/lease lifecycle、默认 worker、原子取消与 inline-image staging（D1）
 
 本文档闭合并行审查中发现的运行时语义缺口。编码时必须遵守。
 
@@ -15,7 +16,7 @@
 
 | 约束 | 说明 |
 |------|------|
-| **localhost-only（MVP 默认）** | 服务应绑定 `127.0.0.1` 或仅在受信网络内访问。设置 `APP_AUTH_TOKEN` 可开启单用户 Bearer/HttpOnly-cookie 认证；生成 admission 与 provider semaphore 默认启用内存限流。暴露公网仍不建议。 |
+| **localhost-only（MVP 默认）** | 服务应绑定 `127.0.0.1` 或仅在受信网络内访问。设置 `APP_AUTH_TOKEN` 可开启单用户 Bearer/HttpOnly-cookie 认证；durable admission 由 SQLite 事务保证，Provider 调用仍使用进程内并发 limiter。暴露公网仍不建议。 |
 | 启动诊断 | 若 `registry.listEnabled()` 返回空数组，启动时打印 `WARNING: no providers enabled`。`GET /api/health` 返回 `enabledProviders: []`。 |
 | API key | 优先级为 `env > USER_CONFIG_DIR/credentials.enc.json`；user-config 使用 AES-256-GCM + scrypt，永不通过 API 响应返回明文。 |
 
@@ -23,15 +24,15 @@
 
 ## 2. 客户端 poll 契约（含扇出）
 
-async job **不会**在 POST 后同步等待完成。用户可见的手动推进只发生在详情 `GET /api/generations/:id`（一次 GET 推进该 generation 下**全部**未终结 async jobs）；History/Session/Generation 列表全部只读。显式开启 `JOB_WORKER_ENABLED=true` 后，后台 worker 会按 `next_poll_at` 推进 due jobs。
+**所有** target（包含 sync Provider）均不会在 POST 后同步等待完成。POST 只在同一 transaction 内完成 durable admission，返回 `202 Accepted`；Provider submit、poll、图片转存和远端 cancel 由 phase/lease lifecycle 推进。详情 `GET /api/generations/:id` 是 worker 被明确关闭时的恢复触发器，但仍严格遵守已持久化的 due time 与 lease；History/Session/Generation 列表全部只读。后台 worker 默认启动，只有 `JOB_WORKER_ENABLED=false` 才关闭。
 
 | 项 | 建议值 |
 |----|--------|
-| 首次 poll | POST 返回非终态后立即或 2s 内第一次 GET |
-| 轮询间隔 | 2s → 5s 退避（最多 5s 间隔） |
+| 首次推进 | POST 返回 `202` 后 worker 尽快扫描；worker 关闭时 Stage 可立即请求一次详情 |
+| 轮询间隔 | 当前 lifecycle 对 Provider `pending/running` 使用 5s due；D2/E 将替换为有预算的退避与 jitter |
 | 放弃条件 | 连续 poll 超过 10 分钟仍有 pending/running → 客户端停止；服务端状态保留，稍后 GET 可继续推进 |
 | 厂商 URL 过期 | 必须在过期前完成 poll + 转存 |
-| POST 响应 | 含 `links.self` → `GET /api/generations/:id` |
+| POST 响应 | `202`、`Location`、`X-Request-Id` 与 `links.self` → `GET /api/generations/:id` |
 | 终态判断 | `view.status ∈ {completed, failed, cancelled}` **或**（更稳妥）所有 `jobs[].status` 均已终态 |
 
 ```
@@ -44,31 +45,31 @@ loop:
 
 ---
 
-## 3. Sync 路径阻塞与 count 限制
+## 3. Sync Provider 验证与 count 限制
 
-含 sync target 时，POST 线程内完成该 target 的 provider HTTP + 转存。
+sync Provider 与 async Provider 共享 admission → dispatch → storing 生命周期；差异仅是 submit 结果直接进入 `storing`，而非先持久化 async handle 再 `polling`。它不再延长 POST。
 
 | 约束 | 值 |
 |------|-----|
 | MVP sync target count 上限 | **1**（该 target 的 count>1 → 400） |
-| provider submit 超时 | 30s |
-| 单张 storage 下载超时 | 60s |
-| 多 sync target | 当前实现并行 dispatch；POST 仍受最慢 target + 转存限制，MVP 假定 localhost long-running 进程 |
+| provider submit 超时 | 当前 adapter 语义不变；统一 deadline/retry 分类由 Batch E 收口 |
+| 单张 storage 下载超时 | 当前 storage 默认 60s；完整流式/remote URL 安全由 Batch E 收口 |
+| 多 sync target | 各 job 独立排队/claim；POST 始终只等待 admission transaction |
 | async target | 不受 sync count=1 限制，仍受 capabilities.maxCount |
 
 ---
 
-## 4. 并发 GET 与幂等（独立 poll lease）
+## 4. 并发推进与幂等（独立 lifecycle lease）
 
-多个客户端同时对同一 generation 发 GET 时:
+多个 worker 或客户端详情 GET 同时推进同一 generation 时:
 
 | 机制 | 说明 |
 |------|------|
-| poll lease claim | `UPDATE generation_jobs SET poll_lease_until=?, next_poll_at=NULL, updated_at=? WHERE id=? AND status IN ('pending','running') AND provider_handle IS NOT NULL AND cancel_requested_at IS NULL AND (next_poll_at IS NULL OR next_poll_at<=?) AND (poll_lease_until IS NULL OR poll_lease_until<=?)`；影响行数 0 则跳过该 job 的 poll |
-| 租约时长 | 300 秒；覆盖 Fal status/response + 最多 4 张图片转存的完整最坏路径。进程崩溃后，下一次 GET 在租约到期后可恢复推进 |
-| 状态与锁 | claim **不修改 status**。`pending` / `running` 始终表示厂商真实进度；结果写回带原 lease 时间戳条件，失去租约的旧 worker 不能覆盖新结果；成功写入后清空 `poll_lease_until` |
-| 转存幂等 | `db.imageExists(jobId, index)` 为 true 则跳过该张 downloadAndStore |
-| 已终态 | job 已 `completed`/`failed`/`cancelled` 时不再 poll；generation 全部 job 终态时 GET 不触发 advance |
+| phase claim | phase 是 `queued / dispatching / polling / storing / cancelling / terminal / outcome_unknown`；每个外部动作以 `phase + next_poll_at + poll_lease_until + cancel marker` 的条件 UPDATE claim，影响行数 0 则跳过 |
+| 租约时长 | 300 秒；覆盖单次 dispatch/poll/store/cancel。dispatch lease 过期且无结果/handle 时转 `outcome_unknown`，绝不重投 |
+| 状态与锁 | claim 只改内部 phase/lease，不把公开 status 从 running 回退为 pending；外部结果写回带原 lease + phase CAS，失去租约的旧 worker 不能覆盖新结果 |
+| 转存幂等 | `(jobId,index)` 唯一；下载后的 image row、phase 和 Generation 聚合在一个短 transaction 内提交，取消先线性化时不出现新 image row |
+| 已终态 | `terminal` / `outcome_unknown` 不再 advance；Generation 全部 job 终态时详情 GET 不触发外部动作 |
 
 ---
 
@@ -86,9 +87,9 @@ loop:
 
 | 操作 | 事务要求 |
 |------|----------|
-| createGeneration + **全部** createGenerationJob | **同一** SQLite transaction |
-| 单次 updateJob + 随后的 updateGeneration（聚合） | 同一 transaction（推荐） |
-| createImage | 转存成功后单独提交；失败不 rollback 已写文件 |
+| admission: Generation + 全部 Jobs + snapshots + Session touch | **同一** SQLite immediate transaction |
+| 单次 lifecycle Job update + Generation 聚合 | 同一 transaction |
+| 单张转存 checkpoint | 条件 lease/cancel claim → image row → Job/Generation 聚合在同一短 transaction；文件先写入，DB 未接纳时立即清理 |
 
 HTTP dispatch（provider.submit）在创建事务**提交之后**。
 
@@ -182,14 +183,14 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
 | PATCH | `/api/sessions/:id` | 更新 title |
 | POST | `/api/sessions/:id/move` | body `{ "toProjectId": "..." }`；Session **MVP 不提供 DELETE** |
 | GET | `/api/generations` | **列表**；query 见 §14.2；**默认不推进 poll** |
-| GET | `/api/generations/:id` | 详情（完整 GenerationView）+ **推进**未终结 async jobs |
+| GET | `/api/generations/:id` | 详情（完整 GenerationView）+ 尝试推进当前 due 且未被有效 lease 占用的 lifecycle job；worker 关闭时作为恢复触发器 |
 | GET/POST | `/api/favorites` | 列表 / 收藏；形状见 §15 |
 | DELETE | `/api/favorites/:imageId` | 取消收藏 |
 | GET/PUT | `/api/model-preferences` | 启用池；形状与默认策略见 §15.4 |
 | GET | `/api/providers` | 已启用厂商 + capabilities（既有） |
 | GET | `/api/health` | 健康与配置摘要（既有） |
 | GET | `/api/images/:id` | 读图（既有） |
-| POST | `/api/generations/:id/cancel` | 请求取消；先写 `cancel_requested_at`，再调用可用的 `provider.cancel`；Kling/Qwen 无远程端点时返回 `cancelled` 与 `CANCEL_UNSUPPORTED` 警告 |
+| POST | `/api/generations/:id/cancel` | 请求取消；单个 transaction 内批量写入本地取消标记/聚合，随后 worker 对已持久化 handle 尽力调用 `provider.cancel`；Kling/Qwen 无远程端点时保留 `CANCEL_UNSUPPORTED` 警告 |
 | POST/DELETE | `/api/auth/session` | `APP_AUTH_TOKEN` 配置时建立/清除 HttpOnly cookie；未配置时 POST 直接返回 authenticated |
 
 **废弃**: `POST /api/sessions`（无 project）→ **400**，并提示改用 `POST /api/projects/:id/sessions`。
@@ -241,7 +242,7 @@ POST 只校验 **session 存在**（`sessionExists`）；**不要求** body 带 
 | Session 层 | GET/POST | `/api/projects/:id/sessions` |
 | Session 改名 / 搬家 | PATCH / POST move | `/api/sessions/:id`、`/api/sessions/:id/move` |
 | Generation 列表 | GET | `/api/generations?sessionId=` 或 `?projectId=`（**不 poll**） |
-| 单条详情（唯一推进入口） | GET | `/api/generations/:id` |
+| 单条详情（worker 关闭时的恢复入口） | GET | `/api/generations/:id` |
 | Session 聚合列表（只读） | GET | `/api/sessions/:id?include=generations` |
 | 看图 / 收藏 | GET images；POST/DELETE favorites | 同 Generate |
 
@@ -340,7 +341,7 @@ POST 只校验 **session 存在**（`sessionExists`）；**不要求** body 带 
 { items: GenerationSummary[], nextCursor: string | null }
 ```
 
-**`GET /api/generations/:id`** — 完整既有 `GenerationView`（含 links 等）+ **推进** poll；形状以 job-engine dfd 为准。
+**`GET /api/generations/:id`** — 完整既有 `GenerationView`（含 links 等）+ 尝试推进 due lifecycle job；形状以 job-engine dfd 为准。
 
 ### 15.3 Favorites / GalleryItem
 
@@ -437,9 +438,9 @@ pool = registry.enabledModels
 
 ## 17. 运行时控制（2026-07-16）
 
-- `POST /api/generations/:id/cancel` 是幂等的本地取消入口。先写取消标记并停止后续 poll；provider 有 `cancel` 时尽力调用，Kling 标准图片 API 没有远程取消端点，因此保留 `CANCEL_UNSUPPORTED` 诊断而不伪造成功。
-- `MAX_INFLIGHT_GENERATIONS` 限制同时提交的 generation 数；`MAX_INFLIGHT_PER_PROVIDER` 限制同一 provider 的 submit/poll/cancel 并发。触发 admission 限制时 API 返回 429 与 `Retry-After: 5`。
-- `JOB_WORKER_ENABLED=true` 才启动 Node worker；它在 health 或 generation **POST** 首次进入 Node 进程时 bootstrap（不依赖 Next instrumentation 的 Edge bundle），generation/session/history 列表 GET 不因读取而启动 worker。`WORKER_INTERVAL_MS`、`WORKER_BATCH_SIZE` 控制扫描，`IMAGE_CLEANUP_INTERVAL_MS` 触发清理。关闭 worker 时仍可由详情 GET 手动推进。
+- `POST /api/generations/:id/cancel` 是幂等的本地取消入口。一个短 transaction 批量写取消标记、phase 与 Generation 聚合；worker 之后才对已有 handle 尽力调用 provider cancel。Kling 标准图片 API 没有远程取消端点，因此保留 `CANCEL_UNSUPPORTED` 诊断而不伪造成功。
+- `MAX_INFLIGHT_PER_PROVIDER` 限制同一 provider 的 submit/poll/cancel 并发。`MAX_INFLIGHT_GENERATIONS` 的旧内存 admission helper 已不在 durable POST 路径使用；队列上限、deadline 与 admission backpressure 由后续 Batch E 统一收口，不能把当前实现误表述为已提供 429 队列保护。
+- Node worker 默认启动；只有 `JOB_WORKER_ENABLED=false` 才关闭。它在 generation **POST** durable admission 后首次进入 Node 进程时 bootstrap（不依赖 Next instrumentation 的 Edge bundle），generation/session/history 列表 GET 不因读取而启动 worker。`WORKER_INTERVAL_MS`、`WORKER_BATCH_SIZE` 控制扫描，`IMAGE_CLEANUP_INTERVAL_MS` 触发清理。关闭 worker 时仍可由详情 GET 按 due/lease 规则辅助推进。
 - `IMAGE_RETENTION_DAYS=30`（设为 `0` 禁用）删除过期且未收藏图片；文件缺失会被视为已清理。孤儿文件需超过 `IMAGE_ORPHAN_GRACE_MS` 才删除，收藏永不因保留期被删除。
 - `APP_AUTH_TOKEN` 未配置时保持本地开发兼容；配置后 API middleware 要求 Bearer 或 `/api/auth/session` 建立的 HttpOnly cookie，health 与 session bootstrap 路由公开。
 

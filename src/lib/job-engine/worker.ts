@@ -1,10 +1,22 @@
 import { db, listDueGenerationJobs, type DbClient } from '../db';
 import { advance } from './lifecycle';
+import type { AdvanceOutcome } from './state-machine';
 import { cleanupStoredImages } from '../storage';
 
 export type WorkerOptions = {
   db?: DbClient;
   batchSize?: number;
+};
+
+export type WorkerRunResult = {
+  scanned: number;
+  advanced: number;
+  retried: number;
+  completed: number;
+  failed: number;
+  unknown: number;
+  cancelled: number;
+  skipped: number;
 };
 
 /**
@@ -14,18 +26,35 @@ export type WorkerOptions = {
  * this bootstrap instead once the Node server is handling requests.
  */
 export function ensureWorkerStarted(): void {
-  if (process.env.JOB_WORKER_ENABLED !== 'true') return;
+  if (process.env.JOB_WORKER_ENABLED === 'false') return;
   const globalState = globalThis as typeof globalThis & {
     __openImageGeneratorWorkerStop?: () => void;
   };
   if (globalState.__openImageGeneratorWorkerStop) return;
-  globalState.__openImageGeneratorWorkerStop = startWorker();
+  const stop = startWorker();
+  globalState.__openImageGeneratorWorkerStop = () => {
+    stop();
+    delete globalState.__openImageGeneratorWorkerStop;
+  };
+}
+
+/** Lets integration tests and controlled shutdowns release the singleton timer. */
+export function stopWorker(): void {
+  const globalState = globalThis as typeof globalThis & {
+    __openImageGeneratorWorkerStop?: () => void;
+  };
+  globalState.__openImageGeneratorWorkerStop?.();
 }
 
 export async function runWorkerOnce(options: WorkerOptions = {}): Promise<{
   scanned: number;
-  succeeded: number;
+  advanced: number;
+  retried: number;
+  completed: number;
   failed: number;
+  unknown: number;
+  cancelled: number;
+  skipped: number;
 }> {
   const client = options.db ?? db;
   const jobs = listDueGenerationJobs(
@@ -33,12 +62,29 @@ export async function runWorkerOnce(options: WorkerOptions = {}): Promise<{
     options.batchSize ?? Number(process.env.WORKER_BATCH_SIZE ?? 16),
     client,
   );
-  const results = await Promise.allSettled(jobs.map((job) => advance(job, client)));
-  return {
+  const outcomes = await Promise.all(
+    jobs.map(async (job): Promise<AdvanceOutcome> => {
+      try {
+        return await advance(job, client);
+      } catch {
+        // advance is expected to persist a safe domain failure. A truly
+        // unexpected throw is still a failed worker result, never success.
+        return 'failed';
+      }
+    }),
+  );
+  const result: WorkerRunResult = {
     scanned: jobs.length,
-    succeeded: results.filter((result) => result.status === 'fulfilled').length,
-    failed: results.filter((result) => result.status === 'rejected').length,
+    advanced: 0,
+    retried: 0,
+    completed: 0,
+    failed: 0,
+    unknown: 0,
+    cancelled: 0,
+    skipped: 0,
   };
+  for (const outcome of outcomes) result[outcome] += 1;
+  return result;
 }
 
 export function startWorker(options: WorkerOptions = {}): () => void {

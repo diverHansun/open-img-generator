@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, isNotNull, lte, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { generations, generationJobs, images, sessions } from '../schema';
 import type { Generation, GenerationJob, Image } from '../schema';
@@ -9,6 +9,15 @@ export type GenerationStatus =
   | 'completed'
   | 'failed'
   | 'cancelled';
+
+export type GenerationJobPhase =
+  | 'queued'
+  | 'dispatching'
+  | 'polling'
+  | 'storing'
+  | 'cancelling'
+  | 'terminal'
+  | 'outcome_unknown';
 
 export type CreateGenerationParams = {
   id: string;
@@ -30,6 +39,12 @@ export type CreateGenerationJobParams = {
   provider: string;
   model: string;
   status: GenerationStatus;
+  phase?: GenerationJobPhase;
+  requestSnapshot?: string | null;
+  requestSnapshotVersion?: number | null;
+  resultSnapshot?: string | null;
+  attemptCount?: number;
+  retryStartedAt?: string | null;
   pollLeaseUntil?: string | null;
   nextPollAt?: string | null;
   cancelRequestedAt?: string | null;
@@ -41,6 +56,12 @@ export type UpdateGenerationJobPatch = {
   status?: GenerationStatus;
   providerHandle?: string | null;
   error?: string | null;
+  phase?: GenerationJobPhase;
+  requestSnapshot?: string | null;
+  requestSnapshotVersion?: number | null;
+  resultSnapshot?: string | null;
+  attemptCount?: number;
+  retryStartedAt?: string | null;
   pollLeaseUntil?: string | null;
   nextPollAt?: string | null;
   cancelRequestedAt?: string | null;
@@ -63,6 +84,53 @@ export type GenerationAdmissionResult = {
   generation: Generation;
   jobs: GenerationJob[];
 };
+
+function defaultJobPhase(status: GenerationStatus): GenerationJobPhase {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
+    ? 'terminal'
+    : 'queued';
+}
+
+function jobInsertValues(job: CreateGenerationJobParams) {
+  return {
+    id: job.id,
+    generationId: job.generationId,
+    provider: job.provider,
+    model: job.model,
+    status: job.status,
+    providerHandle: null,
+    error: null,
+    phase: job.phase ?? defaultJobPhase(job.status),
+    requestSnapshot: job.requestSnapshot ?? null,
+    requestSnapshotVersion: job.requestSnapshotVersion ?? null,
+    resultSnapshot: job.resultSnapshot ?? null,
+    attemptCount: job.attemptCount ?? 0,
+    retryStartedAt: job.retryStartedAt ?? null,
+    pollLeaseUntil: job.pollLeaseUntil ?? null,
+    nextPollAt: job.nextPollAt ?? null,
+    cancelRequestedAt: job.cancelRequestedAt ?? null,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
+}
+
+function jobPatchValues(patch: UpdateGenerationJobPatch) {
+  return {
+    status: patch.status,
+    providerHandle: patch.providerHandle,
+    error: patch.error,
+    phase: patch.phase,
+    requestSnapshot: patch.requestSnapshot,
+    requestSnapshotVersion: patch.requestSnapshotVersion,
+    resultSnapshot: patch.resultSnapshot,
+    attemptCount: patch.attemptCount,
+    retryStartedAt: patch.retryStartedAt,
+    pollLeaseUntil: patch.pollLeaseUntil,
+    nextPollAt: patch.nextPollAt,
+    cancelRequestedAt: patch.cancelRequestedAt,
+    updatedAt: patch.updatedAt,
+  };
+}
 
 export function createGenerationWithJobs(
   genParams: CreateGenerationParams,
@@ -87,20 +155,7 @@ export function createGenerationWithJobs(
 
     tx.insert(generationJobs)
       .values(
-        jobParams.map((job) => ({
-          id: job.id,
-          generationId: job.generationId,
-          provider: job.provider,
-          model: job.model,
-          status: job.status,
-          providerHandle: null,
-          error: null,
-          pollLeaseUntil: job.pollLeaseUntil ?? null,
-          nextPollAt: job.nextPollAt ?? null,
-          cancelRequestedAt: job.cancelRequestedAt ?? null,
-          createdAt: job.createdAt,
-          updatedAt: job.updatedAt,
-        })),
+        jobParams.map(jobInsertValues),
       )
       .run();
 
@@ -181,20 +236,7 @@ export function admitGenerationWithJobs(
 
       tx.insert(generationJobs)
         .values(
-          jobParams.map((job) => ({
-            id: job.id,
-            generationId: job.generationId,
-            provider: job.provider,
-            model: job.model,
-            status: job.status,
-            providerHandle: null,
-            error: null,
-            pollLeaseUntil: job.pollLeaseUntil ?? null,
-            nextPollAt: job.nextPollAt ?? null,
-            cancelRequestedAt: job.cancelRequestedAt ?? null,
-            createdAt: job.createdAt,
-            updatedAt: job.updatedAt,
-          })),
+          jobParams.map(jobInsertValues),
         )
         .run();
       tx.update(sessions)
@@ -265,15 +307,7 @@ export function updateGenerationJob(
 ): GenerationJob {
   client
     .update(generationJobs)
-    .set({
-      status: patch.status,
-      providerHandle: patch.providerHandle,
-      error: patch.error,
-      pollLeaseUntil: patch.pollLeaseUntil,
-      nextPollAt: patch.nextPollAt,
-      cancelRequestedAt: patch.cancelRequestedAt,
-      updatedAt: patch.updatedAt,
-    })
+    .set(jobPatchValues(patch))
     .where(eq(generationJobs.id, id))
     .run();
   return client
@@ -295,15 +329,7 @@ export function updateGenerationJobIfNotCancelled(
 ): boolean {
   const result = client
     .update(generationJobs)
-    .set({
-      status: patch.status,
-      providerHandle: patch.providerHandle,
-      error: patch.error,
-      pollLeaseUntil: patch.pollLeaseUntil,
-      nextPollAt: patch.nextPollAt,
-      cancelRequestedAt: patch.cancelRequestedAt,
-      updatedAt: patch.updatedAt,
-    })
+    .set(jobPatchValues(patch))
     .where(
       and(
         eq(generationJobs.id, id),
@@ -337,23 +363,69 @@ export function updateGenerationJobIfLease(
   expectedPollLeaseUntil: string,
   patch: UpdateGenerationJobPatch,
   client: DbClient = db,
+  options: {
+    expectedPhase?: GenerationJobPhase;
+    allowCancellation?: boolean;
+  } = {},
 ): boolean {
   const result = client
     .update(generationJobs)
-    .set({
-      status: patch.status,
-      providerHandle: patch.providerHandle,
-      error: patch.error,
-      pollLeaseUntil: patch.pollLeaseUntil,
-      nextPollAt: patch.nextPollAt,
-      cancelRequestedAt: patch.cancelRequestedAt,
-      updatedAt: patch.updatedAt,
-    })
+    .set(jobPatchValues(patch))
     .where(
       and(
         eq(generationJobs.id, id),
         eq(generationJobs.pollLeaseUntil, expectedPollLeaseUntil),
+        ...(options.expectedPhase
+          ? [eq(generationJobs.phase, options.expectedPhase)]
+          : []),
+        ...(options.allowCancellation
+          ? []
+          : [isNull(generationJobs.cancelRequestedAt)]),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
+function isDueAndUnleased(now: string, force: boolean) {
+  return [
+    ...(force
+      ? []
+      : [
+          or(
+            isNull(generationJobs.nextPollAt),
+            lte(generationJobs.nextPollAt, now),
+          ),
+        ]),
+    or(
+      isNull(generationJobs.pollLeaseUntil),
+      lte(generationJobs.pollLeaseUntil, now),
+    ),
+  ];
+}
+
+/** Claims a queued job and records the dangerous dispatching checkpoint first. */
+export function tryClaimQueuedJobForDispatch(
+  id: string,
+  now: string,
+  leaseUntil: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set({
+      phase: 'dispatching',
+      pollLeaseUntil: leaseUntil,
+      nextPollAt: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(generationJobs.id, id),
+        eq(generationJobs.phase, 'queued'),
+        eq(generationJobs.status, 'pending'),
         isNull(generationJobs.cancelRequestedAt),
+        ...isDueAndUnleased(now, false),
       ),
     )
     .run();
@@ -369,20 +441,102 @@ export function tryClaimPollLease(
 ): boolean {
   const result = client
     .update(generationJobs)
-    .set({ pollLeaseUntil: leaseUntil, nextPollAt: null, updatedAt: now })
+    .set({
+      phase: 'polling',
+      pollLeaseUntil: leaseUntil,
+      nextPollAt: null,
+      updatedAt: now,
+    })
     .where(
       and(
         eq(generationJobs.id, id),
         inArray(generationJobs.status, ['pending', 'running']),
         isNull(generationJobs.cancelRequestedAt),
-        ...(force
-          ? []
-          : [
-              or(
-                isNull(generationJobs.nextPollAt),
-                lte(generationJobs.nextPollAt, now),
-              ),
-            ]),
+        isNotNull(generationJobs.providerHandle),
+        // Queued+handle is accepted only as a compatibility bridge for rows
+        // created before the phase checkpoint was introduced.
+        inArray(generationJobs.phase, ['queued', 'polling']),
+        ...isDueAndUnleased(now, force),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
+export function tryClaimStoringLease(
+  id: string,
+  now: string,
+  leaseUntil: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set({ pollLeaseUntil: leaseUntil, nextPollAt: null, updatedAt: now })
+    .where(
+      and(
+        eq(generationJobs.id, id),
+        eq(generationJobs.phase, 'storing'),
+        eq(generationJobs.status, 'running'),
+        isNull(generationJobs.cancelRequestedAt),
+        ...isDueAndUnleased(now, false),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
+export function tryClaimCancellingLease(
+  id: string,
+  now: string,
+  leaseUntil: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set({ pollLeaseUntil: leaseUntil, nextPollAt: null, updatedAt: now })
+    .where(
+      and(
+        eq(generationJobs.id, id),
+        eq(generationJobs.phase, 'cancelling'),
+        eq(generationJobs.status, 'cancelled'),
+        isNotNull(generationJobs.cancelRequestedAt),
+        ...isDueAndUnleased(now, false),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
+/**
+ * A lease expired while an external submit might have been in flight. Since no
+ * handle/result was durably recorded, replaying can create a second billable
+ * provider job; preserve the uncertainty instead.
+ */
+export function markExpiredDispatchingJobOutcomeUnknown(
+  id: string,
+  now: string,
+  error: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set({
+      status: 'failed',
+      phase: 'outcome_unknown',
+      error,
+      pollLeaseUntil: null,
+      nextPollAt: null,
+      requestSnapshot: null,
+      requestSnapshotVersion: null,
+      resultSnapshot: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(generationJobs.id, id),
+        eq(generationJobs.phase, 'dispatching'),
+        inArray(generationJobs.status, ['pending', 'running']),
+        isNull(generationJobs.cancelRequestedAt),
         or(
           isNull(generationJobs.pollLeaseUntil),
           lte(generationJobs.pollLeaseUntil, now),
@@ -393,6 +547,39 @@ export function tryClaimPollLease(
   return result.changes > 0;
 }
 
+function cancellationPatch(requestedAt: string) {
+  // A queued row has not crossed the durable dispatch checkpoint and can end
+  // immediately. A dispatching row may already have an HTTP submit in flight,
+  // even though its handle has not returned yet: retain that dispatch lease so
+  // a late async handle can be persisted and cancelled instead of being lost.
+  const hasNoHandle = sql`${generationJobs.providerHandle} IS NULL`;
+  const untouchedQueued = sql`${generationJobs.phase} = 'queued' AND ${hasNoHandle}`;
+  const inFlightPhase = sql`${generationJobs.phase} IN ('dispatching', 'storing') AND ${generationJobs.pollLeaseUntil} IS NOT NULL`;
+  return {
+    status: 'cancelled' as const,
+    cancelRequestedAt: requestedAt,
+    phase: sql`CASE
+      WHEN ${untouchedQueued} THEN 'terminal'
+      ELSE 'cancelling'
+    END`,
+    pollLeaseUntil: sql`CASE
+      WHEN ${inFlightPhase} THEN ${generationJobs.pollLeaseUntil}
+      ELSE NULL
+    END`,
+    nextPollAt: sql`CASE
+      WHEN ${untouchedQueued} THEN NULL
+      WHEN ${inFlightPhase} THEN ${generationJobs.nextPollAt}
+      ELSE ${requestedAt}
+    END`,
+    // No cancellation recovery path needs the request or result payload. In
+    // particular, do not retain reference URLs while waiting for a late handle.
+    requestSnapshot: null,
+    requestSnapshotVersion: null,
+    resultSnapshot: null,
+    updatedAt: requestedAt,
+  };
+}
+
 export function requestGenerationJobCancellation(
   id: string,
   requestedAt: string,
@@ -400,12 +587,86 @@ export function requestGenerationJobCancellation(
 ): boolean {
   const result = client
     .update(generationJobs)
-    .set({ cancelRequestedAt: requestedAt, updatedAt: requestedAt })
+    .set(cancellationPatch(requestedAt))
     .where(
       and(
         eq(generationJobs.id, id),
         inArray(generationJobs.status, ['pending', 'running']),
         isNull(generationJobs.cancelRequestedAt),
+      ),
+    )
+    .run();
+  return result.changes > 0;
+}
+
+/**
+ * Cancels every active job and re-aggregates the Generation in the caller's
+ * transaction. Keeping this as one SQL update prevents a fan-out cancellation
+ * from becoming a partially applied sequence when a process or DB fails.
+ */
+export function requestGenerationCancellation(
+  generationId: string,
+  requestedAt: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set(cancellationPatch(requestedAt))
+    .where(
+      and(
+        eq(generationJobs.generationId, generationId),
+        inArray(generationJobs.status, ['pending', 'running']),
+        isNull(generationJobs.cancelRequestedAt),
+      ),
+    )
+    .run();
+  if (result.changes === 0) return false;
+
+  const jobs = client
+    .select({ status: generationJobs.status })
+    .from(generationJobs)
+    .where(eq(generationJobs.generationId, generationId))
+    .all();
+  client
+    .update(generations)
+    .set({ status: aggregateGenerationStatus(jobs), updatedAt: requestedAt })
+    .where(eq(generations.id, generationId))
+    .run();
+  return true;
+}
+
+/**
+ * A provider may return an async handle after local cancellation won the
+ * dispatch race. Persist it under the cancellation marker so the worker can
+ * still make the remote cancellation attempt; do not resurrect public status.
+ */
+export function persistLateProviderHandleForCancellation(
+  id: string,
+  providerHandle: string,
+  expectedDispatchLeaseUntil: string,
+  now: string,
+  client: DbClient = db,
+): boolean {
+  const result = client
+    .update(generationJobs)
+    .set({
+      providerHandle,
+      phase: 'cancelling',
+      pollLeaseUntil: null,
+      nextPollAt: now,
+      requestSnapshot: null,
+      requestSnapshotVersion: null,
+      resultSnapshot: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(generationJobs.id, id),
+        eq(generationJobs.status, 'cancelled'),
+        eq(generationJobs.phase, 'cancelling'),
+        isNotNull(generationJobs.cancelRequestedAt),
+        isNull(generationJobs.providerHandle),
+        eq(generationJobs.pollLeaseUntil, expectedDispatchLeaseUntil),
       ),
     )
     .run();
@@ -422,14 +683,46 @@ export function listDueGenerationJobs(
     .from(generationJobs)
     .where(
       and(
-        inArray(generationJobs.status, ['pending', 'running']),
-        isNotNull(generationJobs.providerHandle),
-        isNull(generationJobs.cancelRequestedAt),
+        inArray(generationJobs.phase, [
+          'queued',
+          'dispatching',
+          'polling',
+          'storing',
+          'cancelling',
+        ]),
+        or(
+          inArray(generationJobs.status, ['pending', 'running']),
+          and(
+            eq(generationJobs.status, 'cancelled'),
+            eq(generationJobs.phase, 'cancelling'),
+          ),
+        ),
         or(isNull(generationJobs.nextPollAt), lte(generationJobs.nextPollAt, now)),
+        or(
+          isNull(generationJobs.pollLeaseUntil),
+          lte(generationJobs.pollLeaseUntil, now),
+        ),
       ),
+    )
+    .orderBy(
+      asc(generationJobs.nextPollAt),
+      asc(generationJobs.updatedAt),
+      asc(generationJobs.id),
     )
     .limit(limit)
     .all();
+}
+
+/** Opaque result snapshots may keep a staged inline image recoverable. */
+export function listGenerationJobResultSnapshots(
+  client: DbClient = db,
+): string[] {
+  return client
+    .select({ resultSnapshot: generationJobs.resultSnapshot })
+    .from(generationJobs)
+    .where(isNotNull(generationJobs.resultSnapshot))
+    .all()
+    .map((row) => row.resultSnapshot!);
 }
 
 export function getGenerationWithJobsAndImages(

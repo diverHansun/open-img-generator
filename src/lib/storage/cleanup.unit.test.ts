@@ -122,4 +122,47 @@ describe('stored image cleanup', () => {
     expect(fs.existsSync(oldOrphan)).toBe(false);
     expect(fs.existsSync(freshOrphan)).toBe(true);
   });
+
+  it('keeps an aged staged file while a durable result snapshot references it', () => {
+    const { db } = createTestDb();
+    const stagingId = '33333333-3333-4333-8333-333333333333';
+    const stagedPath = writeFile(`.staging/${stagingId}.png`);
+    const stalePath = writeFile('.staging/44444444-4444-4444-8444-444444444444.png');
+    const oldTimestamp = new Date(Date.now() - 86_400_000);
+    fs.utimesSync(stagedPath, oldTimestamp, oldTimestamp);
+    fs.utimesSync(stalePath, oldTimestamp, oldTimestamp);
+    createGenerationAndJob(
+      {
+        id: 'gen-staged',
+        sessionId: 'default-session',
+        prompt: 'staged cleanup test',
+        status: 'running',
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      },
+      {
+        id: 'job-staged',
+        generationId: 'gen-staged',
+        provider: 'zenmux',
+        model: 'openai/gpt-image-2',
+        status: 'running',
+        phase: 'storing',
+        resultSnapshot: JSON.stringify([{
+          url: `staging:${stagingId}`,
+          width: null,
+          height: null,
+          contentType: 'image/png',
+          index: 0,
+        }]),
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      },
+      db,
+    );
+
+    const result = cleanupStoredImages({ db, retentionDays: 0, orphanGraceMs: 0 });
+    expect(result.deletedOrphans).toBe(1);
+    expect(fs.existsSync(stagedPath)).toBe(true);
+    expect(fs.existsSync(stalePath)).toBe(false);
+  });
 });

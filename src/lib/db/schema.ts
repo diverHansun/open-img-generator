@@ -80,6 +80,15 @@ export const generationJobs = sqliteTable(
     status: text('status').notNull(),
     providerHandle: text('provider_handle'),
     error: text('error'),
+    /** Internal recoverable lifecycle; public status remains the five user states. */
+    phase: text('phase').notNull().default('queued'),
+    /** Validated, versioned NormalizedRequest; never exposed through API DTOs. */
+    requestSnapshot: text('request_snapshot'),
+    requestSnapshotVersion: integer('request_snapshot_version'),
+    /** Short-lived remote image references while the job is being stored. */
+    resultSnapshot: text('result_snapshot'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    retryStartedAt: text('retry_started_at'),
     pollLeaseUntil: text('poll_lease_until'),
     nextPollAt: text('next_poll_at'),
     cancelRequestedAt: text('cancel_requested_at'),
@@ -89,6 +98,13 @@ export const generationJobs = sqliteTable(
   (table) => ({
     generationIndex: index('generation_jobs_generation_idx').on(
       table.generationId,
+    ),
+    dueIndex: index('generation_jobs_due_idx').on(
+      table.phase,
+      table.nextPollAt,
+      table.pollLeaseUntil,
+      table.updatedAt,
+      table.id,
     ),
   }),
 );

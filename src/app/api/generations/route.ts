@@ -55,8 +55,11 @@ export async function POST(request: Request) {
       await readJsonObject(request),
       request.headers.get('Idempotency-Key'),
     );
-    ensureWorkerStarted();
     const result = await submitGeneration(body, { db });
+    // Bootstrap only after durable admission. The worker is intentionally not
+    // awaited: a successful POST means the intent is recoverable, not that a
+    // Provider has already finished or even accepted it.
+    ensureWorkerStarted();
     const self = `/api/generations/${result.generationId}`;
     return withRequestId(
       NextResponse.json(
@@ -66,7 +69,7 @@ export async function POST(request: Request) {
           replayed: result.replayed,
           links: { self },
         },
-        { status: 201, headers: { Location: self } },
+        { status: 202, headers: { Location: self } },
       ),
       requestId,
     );

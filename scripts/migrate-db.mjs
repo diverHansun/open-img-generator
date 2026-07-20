@@ -190,6 +190,12 @@ try {
         status TEXT NOT NULL,
         provider_handle TEXT,
         error TEXT,
+        phase TEXT NOT NULL DEFAULT 'queued',
+        request_snapshot TEXT,
+        request_snapshot_version INTEGER,
+        result_snapshot TEXT,
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        retry_started_at TEXT,
         poll_lease_until TEXT,
         next_poll_at TEXT,
         cancel_requested_at TEXT,
@@ -233,6 +239,13 @@ try {
       CREATE UNIQUE INDEX IF NOT EXISTS unique_job_index ON images(generation_job_id, "index");
       CREATE UNIQUE INDEX IF NOT EXISTS favorites_image_unique ON favorites(image_id);
       CREATE INDEX IF NOT EXISTS favorites_created_at_idx ON favorites(created_at);
+    `);
+  }
+
+  function createLifecycleIndexes() {
+    sqlite.exec(`
+      CREATE INDEX IF NOT EXISTS generation_jobs_due_idx
+        ON generation_jobs(phase, next_poll_at, poll_lease_until, updated_at, id);
     `);
   }
 
@@ -358,6 +371,12 @@ try {
 
   let deletedOrphanGenerations = 0;
   const addedColumns = [];
+  const jobPhaseBackfill = {
+    terminal: 0,
+    polling: 0,
+    cancelling: 0,
+    outcomeUnknown: 0,
+  };
   const migrations = new Map([
     [
       0,
@@ -414,6 +433,149 @@ try {
               ON generations(client_request_id)
               WHERE client_request_id IS NOT NULL
           `);
+        },
+      },
+    ],
+    [
+      2,
+      {
+        to: 3,
+        up() {
+          const lifecycleColumns = [
+            ['phase', "TEXT NOT NULL DEFAULT 'queued'"],
+            ['request_snapshot', 'TEXT'],
+            ['request_snapshot_version', 'INTEGER'],
+            ['result_snapshot', 'TEXT'],
+            ['attempt_count', 'INTEGER NOT NULL DEFAULT 0'],
+            ['retry_started_at', 'TEXT'],
+          ];
+          for (const [column, definition] of lifecycleColumns) {
+            if (!columnInfo('generation_jobs', column)) {
+              sqlite.exec(
+                `ALTER TABLE generation_jobs ADD COLUMN ${quoteIdentifier(column)} ${definition}`,
+              );
+              addedColumns.push(`generation_jobs.${column}`);
+            }
+          }
+
+          const terminalStatuses = "'completed', 'failed', 'cancelled'";
+          jobPhaseBackfill.terminal = sqlite
+            .prepare(
+              `SELECT COUNT(*) AS count FROM generation_jobs
+               WHERE status IN (${terminalStatuses})`,
+            )
+            .get().count;
+          sqlite.exec(`
+            UPDATE generation_jobs
+            SET phase = 'terminal',
+                poll_lease_until = NULL,
+                next_poll_at = NULL
+            WHERE status IN (${terminalStatuses});
+          `);
+
+          // A legacy cancel marker is already the user's durable decision. Do
+          // not resume polling it after upgrade; a known handle can still be
+          // handed to the cancelling phase by the worker.
+          jobPhaseBackfill.cancelling = sqlite
+            .prepare(
+              `SELECT COUNT(*) AS count FROM generation_jobs
+               WHERE status IN ('pending', 'running')
+                 AND cancel_requested_at IS NOT NULL`,
+            )
+            .get().count;
+          const migrationNow = new Date().toISOString();
+          sqlite.prepare(`
+            UPDATE generation_jobs
+            SET status = 'cancelled',
+                phase = CASE
+                  WHEN provider_handle IS NULL THEN 'terminal'
+                  ELSE 'cancelling'
+                END,
+                poll_lease_until = NULL,
+                next_poll_at = CASE
+                  WHEN provider_handle IS NULL THEN NULL
+                  ELSE ?
+                END,
+                updated_at = ?
+            WHERE status IN ('pending', 'running')
+              AND cancel_requested_at IS NOT NULL
+          `).run(migrationNow, migrationNow);
+
+          jobPhaseBackfill.polling = sqlite
+            .prepare(
+              `SELECT COUNT(*) AS count FROM generation_jobs
+               WHERE status IN ('pending', 'running')
+                 AND cancel_requested_at IS NULL
+                 AND provider_handle IS NOT NULL`,
+            )
+            .get().count;
+          sqlite.exec(`
+            UPDATE generation_jobs
+            SET phase = 'polling'
+            WHERE status IN ('pending', 'running')
+              AND cancel_requested_at IS NULL
+              AND provider_handle IS NOT NULL;
+          `);
+
+          jobPhaseBackfill.outcomeUnknown = sqlite
+            .prepare(
+              `SELECT COUNT(*) AS count FROM generation_jobs
+               WHERE status NOT IN (${terminalStatuses})
+                 AND cancel_requested_at IS NULL
+                 AND provider_handle IS NULL`,
+            )
+            .get().count;
+          sqlite.prepare(`
+            UPDATE generation_jobs
+            SET status = 'failed',
+                phase = 'outcome_unknown',
+                error = ?,
+                poll_lease_until = NULL,
+                next_poll_at = NULL,
+                updated_at = ?
+            WHERE status NOT IN (${terminalStatuses})
+              AND cancel_requested_at IS NULL
+              AND provider_handle IS NULL
+          `).run(
+            JSON.stringify({
+              code: 'LEGACY_DISPATCH_STATE_UNKNOWN',
+              message: 'Legacy job had no recoverable provider handle',
+              retryable: false,
+            }),
+            migrationNow,
+          );
+
+          // Keep public aggregates consistent with backfilled terminal and
+          // unknown jobs. A Generation with no jobs is left untouched because
+          // historical imports may legitimately have no recoverable detail.
+          sqlite.prepare(`
+            UPDATE generations
+            SET status = CASE
+              WHEN EXISTS (
+                SELECT 1 FROM generation_jobs j
+                WHERE j.generation_id = generations.id AND j.status = 'running'
+              ) THEN 'running'
+              WHEN EXISTS (
+                SELECT 1 FROM generation_jobs j
+                WHERE j.generation_id = generations.id AND j.status = 'pending'
+              ) THEN 'pending'
+              WHEN EXISTS (
+                SELECT 1 FROM generation_jobs j
+                WHERE j.generation_id = generations.id AND j.status = 'completed'
+              ) THEN 'completed'
+              WHEN EXISTS (
+                SELECT 1 FROM generation_jobs j
+                WHERE j.generation_id = generations.id AND j.status = 'cancelled'
+              ) THEN 'cancelled'
+              ELSE 'failed'
+            END,
+            updated_at = ?
+            WHERE EXISTS (
+              SELECT 1 FROM generation_jobs j WHERE j.generation_id = generations.id
+            )
+          `).run(migrationNow);
+
+          createLifecycleIndexes();
         },
       },
     ],
@@ -500,6 +662,7 @@ try {
     backupPath,
     addedColumns,
     deletedOrphanGenerations,
+    jobPhaseBackfill,
     projects: sqlite.prepare('SELECT COUNT(*) AS count FROM projects').get().count,
     sessions: sqlite.prepare('SELECT COUNT(*) AS count FROM sessions').get().count,
     generations: sqlite

@@ -3,6 +3,8 @@ import { createIntegrationDb, createStorageDir } from '../helpers/integration';
 
 process.env.FAL_KEY = 'test-fal-key';
 process.env.ZENMUX_API_KEY = 'test-zenmux-key';
+const originalWorkerEnabled = process.env.JOB_WORKER_ENABLED;
+process.env.JOB_WORKER_ENABLED = 'false';
 
 const { tempFile, cleanup: cleanupDb } = createIntegrationDb();
 const { tempDir, cleanup: cleanupStorage } = createStorageDir();
@@ -31,6 +33,8 @@ describe('quickstart vertical slice', () => {
     global.fetch = originalFetch;
     cleanupDb();
     cleanupStorage();
+    if (originalWorkerEnabled === undefined) delete process.env.JOB_WORKER_ENABLED;
+    else process.env.JOB_WORKER_ENABLED = originalWorkerEnabled;
   });
 
   it('matches the quickstart.md flows', async () => {
@@ -104,10 +108,20 @@ describe('quickstart vertical slice', () => {
         }),
       }),
     );
-    expect(syncResponse.status).toBe(201);
+    expect(syncResponse.status).toBe(202);
     const syncBody = await syncResponse.json();
-    expect(syncBody.status).toBe('completed');
+    expect(syncBody.status).toBe('pending');
     expect(syncBody.links.self).toMatch(/^\/api\/generations\//);
+    const syncDispatch = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${syncBody.id}`),
+      { params: Promise.resolve({ id: syncBody.id }) },
+    );
+    expect((await syncDispatch.json()).status).toBe('running');
+    const syncCompleted = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${syncBody.id}`),
+      { params: Promise.resolve({ id: syncBody.id }) },
+    );
+    expect((await syncCompleted.json()).status).toBe('completed');
 
     // 5. Async generation with sessionId (fal)
     let statusCalled = false;
@@ -177,17 +191,27 @@ describe('quickstart vertical slice', () => {
         }),
       }),
     );
-    expect(asyncResponse.status).toBe(201);
+    expect(asyncResponse.status).toBe(202);
     const asyncBody = await asyncResponse.json();
     expect(asyncBody.status).toBe('pending');
     expect(asyncBody.links.self).toMatch(/^\/api\/generations\//);
 
-    // Client poll
+    // Client recovery advances dispatch, then polling, then storage.
+    const dispatched = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${asyncBody.id}`),
+      { params: Promise.resolve({ id: asyncBody.id }) },
+    );
+    expect((await dispatched.json()).status).toBe('pending');
     const polled = await getGeneration(
       new Request(`http://localhost:3000/api/generations/${asyncBody.id}`),
       { params: Promise.resolve({ id: asyncBody.id }) },
     );
-    const polledBody = await polled.json();
+    expect((await polled.json()).status).toBe('running');
+    const stored = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${asyncBody.id}`),
+      { params: Promise.resolve({ id: asyncBody.id }) },
+    );
+    const polledBody = await stored.json();
     expect(polledBody.status).toBe('completed');
     expect(statusCalled).toBe(true);
 

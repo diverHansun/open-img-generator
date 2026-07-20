@@ -3,6 +3,8 @@ import { createIntegrationDb, createStorageDir } from '../helpers/integration';
 
 process.env.FAL_KEY = 'test-fal-key';
 process.env.ZENMUX_API_KEY = 'test-zenmux-key';
+const originalWorkerEnabled = process.env.JOB_WORKER_ENABLED;
+process.env.JOB_WORKER_ENABLED = 'false';
 
 const { cleanup: cleanupDb } = createIntegrationDb();
 const { cleanup: cleanupStorage } = createStorageDir();
@@ -18,6 +20,8 @@ describe('fan-out generation (Fal + ZenMux)', () => {
   afterAll(() => {
     cleanupDb();
     cleanupStorage();
+    if (originalWorkerEnabled === undefined) delete process.env.JOB_WORKER_ENABLED;
+    else process.env.JOB_WORKER_ENABLED = originalWorkerEnabled;
   });
 
   it('submits independent jobs, omits ZenMux seed, and aggregates both results', async () => {
@@ -72,11 +76,25 @@ describe('fan-out generation (Fal + ZenMux)', () => {
       }),
     );
 
-    expect(postResponse.status).toBe(201);
+    expect(postResponse.status).toBe(202);
     const postBody = await postResponse.json();
     expect(postBody.status).toBe('pending');
+    expect(falRequest).toBeUndefined();
+    expect(zenmuxRequest).toBeUndefined();
+
+    const dispatchResponse = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    expect((await dispatchResponse.json()).status).toBe('running');
     expect(falRequest).toMatchObject({ seed: 42, image_size: 'square_hd' });
     expect(zenmuxRequest).not.toHaveProperty('seed');
+
+    const pollResponse = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    expect((await pollResponse.json()).status).toBe('running');
 
     const getResponse = await getGeneration(
       new Request(`http://localhost:3000/api/generations/${postBody.id}`),

@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "tables": {
     "projects": ["id", "title", "created_at", "updated_at"],
     "sessions": ["id", "project_id", "title", "created_at", "updated_at"],
@@ -21,6 +21,12 @@
       "status",
       "provider_handle",
       "error",
+      "phase",
+      "request_snapshot",
+      "request_snapshot_version",
+      "result_snapshot",
+      "attempt_count",
+      "retry_started_at",
       "poll_lease_until",
       "next_poll_at",
       "cancel_requested_at",
@@ -82,6 +88,13 @@
       "name": "generation_jobs_generation_idx",
       "table": "generation_jobs",
       "columns": ["generation_id"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "generation_jobs_due_idx",
+      "table": "generation_jobs",
+      "columns": ["phase", "next_poll_at", "poll_lease_until", "updated_at", "id"],
       "unique": false,
       "partial": false
     },

@@ -12,6 +12,9 @@ import {
   getGenerationByClientRequestId,
   aggregateGenerationStatus,
   tryClaimPollLease,
+  tryClaimQueuedJobForDispatch,
+  listDueGenerationJobs,
+  markExpiredDispatchingJobOutcomeUnknown,
 } from './generations';
 import { createImage } from './images';
 
@@ -271,6 +274,14 @@ describe('generations queries', () => {
     createGenerationAndJob(makeGenParams(), makeJobParams({ status: 'running' }), db);
     const now = '2026-07-12T10:00:00.000Z';
     const leaseUntil = '2026-07-12T10:00:35.000Z';
+    updateGenerationJob(
+      'job-1',
+      {
+        providerHandle: JSON.stringify({ requestId: 'r1' }),
+        updatedAt: now,
+      },
+      db,
+    );
 
     expect(tryClaimPollLease('job-1', now, leaseUntil, db)).toBe(true);
     expect(tryClaimPollLease('job-1', now, leaseUntil, db)).toBe(false);
@@ -281,9 +292,26 @@ describe('generations queries', () => {
     expect(job.pollLeaseUntil).toBe('2026-07-12T10:01:11.000Z');
   });
 
+  it('does not turn a handle-less queued row into a polling lease', () => {
+    const { db } = createTestDb();
+    createGenerationAndJob(makeGenParams(), makeJobParams({ status: 'running' }), db);
+
+    expect(
+      tryClaimPollLease('job-1', now, '2026-07-12T10:00:35.000Z', db),
+    ).toBe(false);
+  });
+
   it('rejects a stale lease owner from updating a job', () => {
     const { db } = createTestDb();
     createGenerationAndJob(makeGenParams(), makeJobParams({ status: 'running' }), db);
+    updateGenerationJob(
+      'job-1',
+      {
+        providerHandle: JSON.stringify({ requestId: 'r1' }),
+        updatedAt: now,
+      },
+      db,
+    );
     expect(tryClaimPollLease('job-1', now, '2026-07-12T10:00:35.000Z', db)).toBe(true);
     expect(
       updateGenerationJobIfLease(
@@ -296,6 +324,81 @@ describe('generations queries', () => {
     expect(getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]!.status).toBe(
       'running',
     );
+  });
+
+  it('claims a due queued job by durably recording dispatching before provider work', () => {
+    const { db } = createTestDb();
+    createGenerationAndJob(makeGenParams(), makeJobParams(), db);
+
+    expect(
+      tryClaimQueuedJobForDispatch(
+        'job-1',
+        now,
+        '2026-07-12T10:00:35.000Z',
+        db,
+      ),
+    ).toBe(true);
+    expect(getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]).toMatchObject({
+      phase: 'dispatching',
+      pollLeaseUntil: '2026-07-12T10:00:35.000Z',
+      nextPollAt: null,
+    });
+  });
+
+  it('lists only due unleased lifecycle jobs in stable order', () => {
+    const { db } = createTestDb();
+    createGenerationWithJobs(
+      makeGenParams(),
+      [
+        {
+          ...makeJobParams({ id: 'job-later' }),
+          phase: 'queued',
+          nextPollAt: '2026-07-12T10:00:10.000Z',
+        },
+        {
+          ...makeJobParams({ id: 'job-first' }),
+          phase: 'queued',
+          nextPollAt: '2026-07-12T10:00:00.000Z',
+        },
+        {
+          ...makeJobParams({ id: 'job-leased' }),
+          phase: 'queued',
+          nextPollAt: '2026-07-12T10:00:00.000Z',
+          pollLeaseUntil: '2026-07-12T10:10:00.000Z',
+        },
+      ],
+      db,
+    );
+
+    expect(
+      listDueGenerationJobs('2026-07-12T10:00:10.000Z', 10, db).map((job) => job.id),
+    ).toEqual(['job-first', 'job-later']);
+  });
+
+  it('marks an expired dispatch checkpoint as unknown instead of reopening queued work', () => {
+    const { db } = createTestDb();
+    createGenerationAndJob(
+      makeGenParams(),
+      {
+        ...makeJobParams(),
+        phase: 'dispatching',
+        pollLeaseUntil: '2026-07-12T10:00:00.000Z',
+      },
+      db,
+    );
+
+    expect(
+      markExpiredDispatchingJobOutcomeUnknown(
+        'job-1',
+        '2026-07-12T10:00:01.000Z',
+        JSON.stringify({ code: 'PROVIDER_OUTCOME_UNKNOWN' }),
+        db,
+      ),
+    ).toBe(true);
+    expect(getGenerationWithJobsAndImages('gen-1', db)!.jobs[0]).toMatchObject({
+      status: 'failed',
+      phase: 'outcome_unknown',
+    });
   });
 
   describe('aggregateGenerationStatus', () => {

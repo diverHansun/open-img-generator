@@ -113,7 +113,7 @@ describe('web API client', () => {
           replayed: false,
           links: { self: '/api/generations/generation-1' },
         }),
-        { status: 201, headers: { 'Content-Type': 'application/json' } },
+        { status: 202, headers: { 'Content-Type': 'application/json' } },
       ),
     );
     const client = createApiClient(fetcher as typeof fetch);

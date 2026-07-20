@@ -1,6 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { countRetainedFavorites, deleteImageIfUnfavorited, listRetentionCandidates, listStoragePaths, type DbClient } from '../db';
+import {
+  countRetainedFavorites,
+  deleteImageIfUnfavorited,
+  listGenerationJobResultSnapshots,
+  listRetentionCandidates,
+  listStoragePaths,
+  type DbClient,
+} from '../db';
 import { db } from '../db';
 import { getStorageRoot, removeStoredFile } from './index';
 
@@ -30,6 +37,26 @@ function walkFiles(root: string): string[] {
   };
   visit(root);
   return files;
+}
+
+function stagedIdsFromSnapshots(snapshots: string[]): Set<string> {
+  const ids = new Set<string>();
+  for (const snapshot of snapshots) {
+    try {
+      const parsed = JSON.parse(snapshot) as unknown;
+      if (!Array.isArray(parsed)) continue;
+      for (const value of parsed) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const reference = (value as Record<string, unknown>).url;
+        if (typeof reference !== 'string') continue;
+        const match = /^staging:([0-9a-f-]{36})$/i.exec(reference);
+        if (match) ids.add(match[1]!);
+      }
+    } catch {
+      // Invalid snapshots are handled by lifecycle; cleanup never logs content.
+    }
+  }
+  return ids;
 }
 
 export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult {
@@ -75,8 +102,29 @@ export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult
   }
 
   const referenced = new Set(listStoragePaths(client));
+  const referencedStagingIds = stagedIdsFromSnapshots(
+    listGenerationJobResultSnapshots(client),
+  );
   for (const absolute of walkFiles(getStorageRoot())) {
     const relative = path.relative(getStorageRoot(), absolute);
+    const stagingPrefix = `.staging${path.sep}`;
+    if (relative.startsWith(stagingPrefix)) {
+      const match = /^([0-9a-f-]{36})\.[a-z0-9]+$/i.exec(path.basename(relative));
+      if (match && referencedStagingIds.has(match[1]!)) continue;
+      const stat = fs.statSync(absolute);
+      if (now - stat.mtimeMs < orphanGraceMs) continue;
+      if (options.dryRun) {
+        result.deletedOrphans += 1;
+        continue;
+      }
+      try {
+        fs.rmSync(absolute, { force: true });
+        result.deletedOrphans += 1;
+      } catch {
+        result.failures += 1;
+      }
+      continue;
+    }
     if (referenced.has(relative)) continue;
     const stat = fs.statSync(absolute);
     if (now - stat.mtimeMs < orphanGraceMs) continue;

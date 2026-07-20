@@ -5,6 +5,7 @@
 > 文档顺序: ④ dfd-interface(本文) → ⑤ use-case → ⑦ test
 > 运行时约束: 见 `docs/mvp/api/constraints.md`
 > 修订说明: 2026-07-15 `targets[]` 扇出；共享 aspectRatio；按 target 构造 NormalizedRequest
+> 修订说明: 2026-07-20 improve-1 D1：POST 仅 durable admission 并返回 `202`；执行改由 phase/lease worker 推进，内联结果使用 opaque staging
 
 ---
 
@@ -32,14 +33,14 @@
 
 ## 2. Data Flow Description（数据流描述）
 
-### 2.1 Submit 流程（POST /api/generations）
+### 2.1 Durable admission 流程（POST /api/generations）
 
 ```
 API 层: POST /api/generations
   → 解析 body → SubmitGenerationParams
   → job-engine.submitGeneration(params)
 
-  orchestrator:
+  orchestrator（本步骤不调用 Provider）:
     1. validator.validate(params)
        → targets 非空；每个 (provider, model) 唯一
        → 对每个 target:
@@ -56,16 +57,7 @@ API 层: POST /api/generations
 
     2. prompt.process(prompt) → processedPrompt
 
-    3. db.transaction(() => {
-         createGeneration({ sessionId, prompt: processedPrompt, status: "pending" })
-         for target in targets:
-           createGenerationJob({ generationId, provider, model, status: "pending" })
-       })
-
-    4. touchSession(sessionId)
-
-    5. 对每个 job（顺序或有限并行）:
-         caps = capabilities(model)
+    3. 每个 target 构造 capability 裁剪后的 NormalizedRequest：
          normalized = {
            prompt: processedPrompt,
            mode, width, height, aspectRatio, count,
@@ -73,96 +65,104 @@ API 层: POST /api/generations
            seed: caps.supportsSeed ? seed : undefined,
            referenceImages,
            providerOptions
-         }  // 显式 pick，禁止 ...params 扩散；不含 provider/model/sessionId
+         }
+         → createRequestSnapshot(normalized, version=1)
+         → 只允许白名单 JSON、深度/键数/字符串/总字节上限；不得含 session、credential、Provider 原始对象
 
-         result = provider.submit(normalized, model)
+    4. db.transaction(IMMEDIATE, () => {
+         按 clientRequestId + canonical request hash 去重
+         createGeneration({ sessionId, prompt: processedPrompt, status: "pending",
+                            clientRequestId, requestHash })
+         for target in targets:
+           createGenerationJob({ generationId, provider, model, status: "pending",
+                                 phase: "queued", requestSnapshot, requestSnapshotVersion: 1,
+                                 nextPollAt: now })
+         touchSession(sessionId)
+       })
 
-         5a. sync + images → lifecycle.completeSync(jobId, images) → storeImages → job completed
-         5b. failed → job failed + error
-         5c. async + handle → 序列化 providerHandle，job 保持 pending
+       同一 clientRequestId + 同一 hash → 返回既有 generation（replayed）；同 key 异 hash → 409。
 
-    6. aggregateGenerationStatus(all jobs) → updateGeneration.status
-       （若仍有 pending/running → pending/running；规则见 constraints §8）
-
-  → 返回 { generationId, status }
-  → API 201 { id, status, links: { self: "/api/generations/:id" } }
+  → 返回 { generationId, status: "pending", replayed }
+  → API 在 commit 后启动默认 worker（不 await）
+  → API 202 + Location: /api/generations/:id
+     { id, status, replayed, links: { self: "/api/generations/:id" } }
 ```
 
-**201 status 枚举**: `"pending"` | `"running"` | `"completed"` | `"failed"` | `"cancelled"`
+**`202` status 枚举**: `"pending"` | `"running"` | `"completed"` | `"failed"` | `"cancelled"`。
+新接纳任务通常为 `pending`；重放同一 `clientRequestId` 时可返回既有的任一状态。
 
-| 典型扇出结果 | status |
+| 接纳结果 | status / 行为 |
 |--------------|--------|
-| 全 async 且 submit 成功 | `pending` |
-| 全 sync 且均转存成功 | `completed` |
-| 一 sync 成功 + 一 async pending | `pending`（或 `running`，若已有 running） |
-| 全部 target submit/转存失败 | `failed` |
-| 部分 job completed + 部分 failed（均已终态） | `completed`（部分成功；失败 job 仍在 `jobs[]`） |
+| 首次有效 POST | `pending`；所有 job 是 `queued`，尚未调用 Provider |
+| 同 key、同 payload 重放 | 返回相同 generation，`replayed=true`；不创建 job、不重复 dispatch |
+| 同 key、不同 payload | 409 `IDEMPOTENCY_KEY_REUSED` |
+| 后续 worker/详情推进 | 公开状态按 job 结果变为 `running` / 终态；部分成功仍可聚合为 `completed` |
 
 校验失败（步骤 1）→ 400，**不创建** generation。
 
-### 2.2 Get 流程（GET /api/generations/:id）— 多 job 惰性 poll
+### 2.2 Phase/lease 推进与详情读取（worker + GET /api/generations/:id）
 
 ```
-API 层: GET /api/generations/:id
-  → job-engine.getGeneration(id)
+默认 in-process worker:
+  1. listDueGenerationJobs(now, batchSize)
+     → 仅 phase ∈ {queued, dispatching, polling, storing, cancelling}
+       且 due、lease 已过期/为空的 job
+  2. 对每个 job 调用同一个 lifecycle.advance(job)
+     queued      → claim dispatch lease → 从 versioned request snapshot 恢复 → provider.submit
+     dispatching → lease 过期但无 durable result → outcome_unknown（不盲目 replay）
+     polling     → claim lease → provider.poll
+     storing     → claim lease → 每次处理一张 result snapshot 中尚未落库的图片
+     cancelling  → claim lease → 若有 handle 则 provider.cancel（best effort）→ terminal
+  3. 所有外部结果写回均以 phase + lease + cancel marker CAS；再聚合 generation.status
 
-  orchestrator:
-    1. db.getGenerationWithJobsAndImages(id) → 无则 NotFoundError
-
-    2. 若 generation 尚未全部终态:
-       → 收集 status ∈ {pending, running} 的 jobs
-       → Promise.all(jobs.map(job => lifecycle.advance(job)))
-           advance:
-             claim: UPDATE job SET poll_lease_until=?, next_poll_at=NULL WHERE id=?
-                    AND status IN ('pending','running') AND provider_handle IS NOT NULL
-                    AND cancel_requested_at IS NULL
-                    AND (next_poll_at IS NULL OR next_poll_at<=now)
-                    AND (poll_lease_until IS NULL OR poll_lease_until<=now)
-             行数 0 → return（跳过）
-             反序列化 handle → provider.poll
-             按 PollResult 更新真实 status 并清空 lease；completed 则 storeImages
-       → aggregateGenerationStatus → updateGeneration
-
-    3. 重新读取并返回 GenerationView
+详情 GET:
+  1. getGeneration 先读取 generation/jobs/images（无则 404）
+  2. 可对其 jobs 调用同一个 advance，但 claim 条件仍要求 due 且无有效 lease
+  3. 重新读取并返回 GenerationView
 ```
 
-已全部终态的 generation **不触发** poll。
+worker 默认启用；只有 `JOB_WORKER_ENABLED=false` 才关闭。关闭时详情 GET 是恢复辅助入口，**不是**绕过 `next_poll_at` 或有效 lease 的强制 poll。已全部终态的 generation 不触发外部工作。
 
 ### 2.3 Cancel 流程（POST /api/generations/:id/cancel）
 
 ```
 API → orchestrator.cancelGeneration
-  → 对 active jobs CAS 写 cancel_requested_at
-  → 有 provider.cancel 且有 handle 时尽力调用
-  → 统一写 cancelled、清理 lease/next_poll_at、同步 generation 聚合状态
+  → 一个短 DB transaction 批量 CAS 所有 active jobs:
+       status=cancelled, cancel_requested_at=now, phase=cancelling/terminal
+       重新聚合 generation.status
+  → 立即返回本地 GenerationView；不等待 Provider
+  → worker 后续处理 phase=cancelling：有 durable handle 时尽力调用 provider.cancel(handle)
+  → 将 job 收口为 terminal；远端失败/不支持仅记录安全诊断，不复活 public status
 ```
 
-没有远程取消端点的 provider（例如 Kling 标准图片 API）仍立即停止本地 poll，并在 job.error 写入 `CANCEL_UNSUPPORTED`。
+尚未 claim 的 queued job 直接 terminal；dispatch/storing 期间的 lease 与晚到 async handle 受 cancellation CAS 保护，晚到 handle 只可用于远端 cancel。取消先于图片 checkpoint 赢得事务时，不会出现新的 image row；已完成 checkpoint 的图片保持已持久化资产。
 
-### 2.3 Session 关联（必填，2026-07-16）
+### 2.4 Session 关联（必填，2026-07-16）
 
 每次 submit 必须带合法 `sessionId`：校验存在 → 写入 `generations.session_id` → `touchSession`。
 **禁止** `session_id=null` 的独立生成。
 
 Session / Project CRUD 由 **library + API** 负责，不经 job-engine。Session 必属某 Project（db 约束）。
 
-### 2.4 GET session / project 树 — 只读聚合
+### 2.5 GET session / project 树 — 只读聚合
 
-`GET /api/sessions/:id?include=generations` 与 History 列表只经 library 读取已存状态，**不调用** job-engine。只有 `GET /api/generations/:id` 会调用 `getGeneration` 并推进其下全部未终结 jobs。
+`GET /api/sessions/:id?include=generations` 与 History 列表只经 library 读取已存状态，**不调用** job-engine。`GET /api/generations/:id` 可作 due/lease 允许时的恢复辅助，但不推进未 due 或有有效 lease 的 job。
 
-### 2.5 图片访问
+### 2.6 图片访问
 
 仍不经 job-engine：API → db.getImage → storage.getReadStream。
 
-### 2.6 图片转存（lifecycle.storeImages）
+### 2.7 图片转存与 inline staging（lifecycle）
 
-逻辑同前版，**作用域为单个 job**:
+转存作用域为单个 job，使用 `phase=storing` 的 result snapshot 恢复：
 
 - `imageExists(jobId, index)` 幂等
+- 每张图片先物化文件，再以 lease-guarded 短事务插入 image row、更新 phase/status 与 generation 聚合；失败或取消失去 checkpoint 时删除本次尝试文件
 - 单 job 内任一张失败 → 该 job failed；已成功 images 保留
 - **不**将其他 job 标失败
+- data URL/Base64 先经 25 MiB 上限和 Provider metadata content-type 一致性检查写入私有 staging；result snapshot 仅保存 `staging:<uuid>`，不保存 raw data URL/Base64。magic-byte 校验、远端 URL/redirect/私网策略、流式解码和完整 staging reconciliation 是 E3 范围。
 
-### 2.7 Provider 列表
+### 2.8 Provider 列表
 
 `GET /api/providers` 不经 job-engine；API → registry.listEnabled()。web-ui 用其驱动模型多选与参数显隐。
 
@@ -175,8 +175,9 @@ Session / Project CRUD 由 **library + API** 负责，不经 job-engine。Sessio
 | 属性 | 值 |
 |------|-----|
 | 输入 | `SubmitGenerationParams` |
-| 输出 | `{ generationId: string; status: GenerationStatus }` |
-| 失败 | ValidationError → 不落库；单 job provider 失败不抛，写 job failed 后返回聚合 status |
+| 输出 | `{ generationId: string; status: GenerationStatus; replayed: boolean }` |
+| 成功语义 | durable admission 已 commit；不等待 Provider submit / poll / 下载 |
+| 失败 | ValidationError → 不落库；同 key 异 payload → IdempotencyKeyReusedError（409）。Provider/存储失败在后续 JobView.error 中可见，不作为本次 POST 的同步结果 |
 
 ```
 GenerationTarget {
@@ -185,6 +186,7 @@ GenerationTarget {
 }
 
 SubmitGenerationParams {
+  clientRequestId: string         // 必填，RFC 4122 UUID；同一浏览器用户意图的稳定身份
   prompt: string                 // 必填
   targets: GenerationTarget[]    // 必填，长度 ≥ 1，(provider,model) 唯一
   sessionId: string  // 2026-07-16 必填；缺失 → ValidationError
@@ -204,7 +206,7 @@ SubmitGenerationParams {
 
 **Breaking change**: 移除顶层单字段 `provider` / `model`；改由 `targets[]` 表达。单模型请求为 `targets: [{ provider, model }]`。
 
-**持久化边界**: 除 prompt、sessionId、provider/model（在 jobs 行）外，运行时尺寸/count/seed/referenceImages 等**不入库**。
+**持久化边界**: 不是持久化原始 API body。admission 为每个 target 保存 capability 裁剪后的、版本化 `NormalizedRequest` snapshot（含相应的尺寸/count/seed/referenceImages 等白名单字段），仅供重启后安全恢复 dispatch；API/UI 不返回 snapshot，job 终态时清理。`provider`/`model` 仍分别写在 job 行；credential、session、Provider 原始对象和 raw Base64/data URL 不得进入 snapshot。
 
 ### 3.2 getGeneration(id)
 
@@ -215,14 +217,16 @@ SubmitGenerationParams {
 
 ```
 GenerationView {
-  id, sessionId, prompt, status, createdAt, updatedAt,
+  id, sessionId, projectId, prompt, status, createdAt, updatedAt,
   jobs: JobView[],      // 长度 = targets 数
   images: ImageView[]   // 跨 job 扁平列表；用 jobId 归属
 }
 
 JobView { id, provider, model, status, error? }
-ImageView { id, jobId, index, url, width, height }
+ImageView { id, jobId, index, url, width, height, favorited }
 ```
+
+`getGeneration()` 读取后可以辅助调用 `advance()`，但 caller 不可据此假设同步完成：只有该 job 当前 due 且 lease 可 claim 时才可能发生一次生命周期动作。
 
 ### 3.3 API 路由契约（generation 相关）
 
@@ -231,8 +235,11 @@ ImageView { id, jobId, index, url, width, height }
 | 属性 | 值 |
 |------|-----|
 | 请求体 | SubmitGenerationParams（JSON） |
-| 成功 | 201 `{ id, status, links: { self } }` |
+| 请求大小 | 有界 JSON body；超过 API 上限返回 413 `PAYLOAD_TOO_LARGE` |
+| 幂等 | `clientRequestId` 必填；可选 `Idempotency-Key` 若提供必须与 body 完全一致 |
+| 成功 | `202 Accepted` `{ id, status, replayed, links: { self } }`，并带 `Location: /api/generations/:id` |
 | 校验失败 | 400 |
+| 同 key、异 payload | 409 `IDEMPOTENCY_KEY_REUSED` |
 | targets 空 / 重复 | 400 |
 | 某 target 不支持 aspectRatio | 400 |
 | seed 对不支持的 target | 不 400；该 target 请求省略 seed |
@@ -257,7 +264,8 @@ ImageView { id, jobId, index, url, width, height }
 | generation_jobs（N 行） | orchestrator | lifecycle 每 job | db 存，job-engine 编排 |
 | images | lifecycle.storeImages | 不可变 | 归属 jobId |
 | session | API | API + touchSession | job-engine 不 CRUD session |
-| NormalizedRequest | orchestrator 每 target 构造 | 不可变 | 不入库 |
+| request snapshot | orchestrator 每 target 构造 | lifecycle 读取、终态清理 | versioned/validated `NormalizedRequest`，仅供恢复 dispatch，不进入 DTO |
+| result snapshot | lifecycle 收到 completed refs | lifecycle storing、终态/取消清理 | 有界远端 ref 或 opaque `staging:<uuid>`；不存 raw inline data |
 | 能力交集 | — | — | **web-ui**，非本模块 |
 
 ---
@@ -269,7 +277,9 @@ ImageView { id, jobId, index, url, width, height }
 | `provider` + `model` | `targets: [{ provider, model }, ...]` |
 | 1 job | N jobs |
 | 聚合规则按单 job | 多 job 聚合见 constraints §8（部分成功 → generation `completed`） |
-| 用 status 充当乐观锁 | 独立 `pollLeaseUntil`；pending/running 均可在租约过期后 claim |
+| POST 内直接 provider.submit / 可能 201 completed | commit admission 后立即 `202`；worker/default phase lifecycle 再执行外部副作用 |
+| GET 推进所有 async job | GET 只在 due/lease 可 claim 时辅助推进；worker 默认运行，`JOB_WORKER_ENABLED=false` 显式关闭 |
+| 用 status 充当乐观锁 | 内部 phase + `pollLeaseUntil` CAS；物理 `next_poll_at` 是当前 phase 的 due 时间 |
 
 ---
 
@@ -277,4 +287,4 @@ ImageView { id, jobId, index, url, width, height }
 
 - 扇出 submit/get 数据流完整；部分失败隔离明确
 - seed / aspectRatio 校验规则与 web-ui 约定一致
-- Breaking change 与 API 201/400 语义闭合
+- durable `202`、idempotency、snapshot 与 phase/lease 语义闭合

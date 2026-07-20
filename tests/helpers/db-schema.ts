@@ -46,6 +46,12 @@ export function initializeTestSchema(sqlite: Database.Database): void {
       status TEXT NOT NULL,
       provider_handle TEXT,
       error TEXT,
+      phase TEXT NOT NULL DEFAULT 'queued',
+      request_snapshot TEXT,
+      request_snapshot_version INTEGER,
+      result_snapshot TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      retry_started_at TEXT,
       poll_lease_until TEXT,
       next_poll_at TEXT,
       cancel_requested_at TEXT,
@@ -53,6 +59,8 @@ export function initializeTestSchema(sqlite: Database.Database): void {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX generation_jobs_generation_idx ON generation_jobs(generation_id);
+    CREATE INDEX generation_jobs_due_idx
+      ON generation_jobs(phase, next_poll_at, poll_lease_until, updated_at, id);
     CREATE TABLE images (
       id TEXT PRIMARY KEY,
       generation_job_id TEXT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   ConflictError,
   IdempotencyKeyReusedError,
+  PayloadTooLargeError,
   ValidationError,
   NotFoundError,
   RateLimitError,
@@ -126,6 +127,15 @@ function classifyApiError(err: unknown): StructuredApiError {
       safeMessage: 'Request validation failed',
       retryable: false,
       status: 400,
+    };
+  }
+  if (err instanceof PayloadTooLargeError) {
+    return {
+      code: 'PAYLOAD_TOO_LARGE',
+      message: err.message,
+      safeMessage: 'Request payload is too large',
+      retryable: false,
+      status: 413,
     };
   }
   if (err instanceof NotFoundError) {

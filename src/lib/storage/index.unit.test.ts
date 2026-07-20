@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { downloadAndStore, getReadStream, removeStoredFile } from './index';
+import {
+  downloadAndStore,
+  getReadStream,
+  removeStagedImage,
+  removeStoredFile,
+  stageInlineImage,
+} from './index';
 import { NotFoundError, StorageError } from '../errors';
 
 describe('storage', () => {
@@ -47,6 +53,36 @@ describe('storage', () => {
     expect(result.sizeBytes).toBe(Buffer.byteLength('fake-image-binary'));
     const absolutePath = path.join(tempDir, result.storagePath);
     expect(fs.readFileSync(absolutePath).toString()).toBe('fake-image-binary');
+  });
+
+  it('stages Base64 data behind an opaque reference before materializing it', async () => {
+    const staged = stageInlineImage(
+      'data:image/png;base64,ZmFrZS1pbWFnZS1iaW5hcnk=',
+      'image/png',
+    );
+    expect(staged.reference).toMatch(/^staging:[0-9a-f-]{36}$/);
+    expect(staged.reference).not.toContain('ZmFrZS');
+
+    // Materializing is deliberately a copy, not a move. If the process dies
+    // before the lifecycle transaction checkpoints the image row, the durable
+    // result snapshot must still have a source that a later worker can use.
+    const firstAttempt = await downloadAndStore(staged.reference);
+    const secondAttempt = await downloadAndStore(staged.reference);
+
+    expect(firstAttempt.contentType).toBe('image/png');
+    expect(fs.readFileSync(path.join(tempDir, firstAttempt.storagePath)).toString())
+      .toBe('fake-image-binary');
+    expect(fs.readFileSync(path.join(tempDir, secondAttempt.storagePath)).toString())
+      .toBe('fake-image-binary');
+
+    removeStagedImage(staged.reference);
+    await expect(downloadAndStore(staged.reference)).rejects.toBeInstanceOf(StorageError);
+  });
+
+  it('removes a staged image without permitting an arbitrary filesystem path', async () => {
+    const staged = stageInlineImage('data:image/png;base64,ZmFrZQ==', 'image/png');
+    removeStagedImage(staged.reference);
+    await expect(downloadAndStore(staged.reference)).rejects.toBeInstanceOf(StorageError);
   });
 
   it('throws StorageError when download fails', async () => {

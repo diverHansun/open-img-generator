@@ -73,12 +73,26 @@ describe('database schema compatibility', () => {
 
   it('rejects a current version whose required column is missing', () => {
     testDb = createTestDb();
-    testDb.sqlite.exec('ALTER TABLE generation_jobs DROP COLUMN next_poll_at');
+    testDb.sqlite.exec(`
+      DROP INDEX generation_jobs_due_idx;
+      ALTER TABLE generation_jobs DROP COLUMN next_poll_at;
+    `);
 
     expect(inspectDatabaseCompatibility(testDb.db)).toMatchObject({
       ready: false,
       currentVersion: REQUIRED_DATABASE_SCHEMA_VERSION,
       missingColumns: ['generation_jobs.next_poll_at'],
+    });
+  });
+
+  it('rejects a current version whose lifecycle due index is missing', () => {
+    testDb = createTestDb();
+    testDb.sqlite.exec('DROP INDEX generation_jobs_due_idx');
+
+    expect(inspectDatabaseCompatibility(testDb.db)).toMatchObject({
+      ready: false,
+      currentVersion: REQUIRED_DATABASE_SCHEMA_VERSION,
+      missingIndexes: ['generation_jobs_due_idx'],
     });
   });
 

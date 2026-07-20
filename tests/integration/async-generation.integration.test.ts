@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { createIntegrationDb, createStorageDir } from '../helpers/integration';
 
 process.env.FAL_KEY = 'test-fal-key';
+const originalWorkerEnabled = process.env.JOB_WORKER_ENABLED;
+process.env.JOB_WORKER_ENABLED = 'false';
 
 const { tempFile, cleanup: cleanupDb } = createIntegrationDb();
 const { tempDir, cleanup: cleanupStorage } = createStorageDir();
@@ -17,9 +19,11 @@ describe('async generation end-to-end (fal)', () => {
   afterAll(() => {
     cleanupDb();
     cleanupStorage();
+    if (originalWorkerEnabled === undefined) delete process.env.JOB_WORKER_ENABLED;
+    else process.env.JOB_WORKER_ENABLED = originalWorkerEnabled;
   });
 
-  it('creates pending generation and completes on GET poll', async () => {
+  it('creates a durable pending generation and completes across dispatch, poll, and storage', async () => {
     let submitCall = false;
     let statusCall = false;
     const imageBuffer = Buffer.from('fake-fal-image');
@@ -76,10 +80,23 @@ describe('async generation end-to-end (fal)', () => {
       }),
     );
 
-    expect(postResponse.status).toBe(201);
+    expect(postResponse.status).toBe(202);
     const postBody = await postResponse.json();
     expect(postBody.status).toBe('pending');
+    expect(submitCall).toBe(false);
+
+    const dispatchResponse = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    expect((await dispatchResponse.json()).status).toBe('pending');
     expect(submitCall).toBe(true);
+
+    const pollResponse = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    expect((await pollResponse.json()).status).toBe('running');
 
     const getResponse = await getGeneration(
       new Request(`http://localhost:3000/api/generations/${postBody.id}`),

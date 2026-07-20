@@ -92,7 +92,7 @@ flowchart LR
 - 只允许 `prompt/mode/width/height/aspectRatio/count/negativePrompt/seed/referenceImages/providerOptions`；不允许 session、provider credential、任意内部对象或函数透传。
 - JSON 写入前执行深度、key 数、字符串和总字节上限；整个 POST body 也设置上限，避免 reference data URL 撑爆内存/SQLite。
 - result snapshot 只在 Provider 已返回 image refs、尚未完成本地转存时存在；只保存有界远端 URL 或服务端生成的 opaque staging ref，终态 transaction 中清空。
-- ZenMux 若返回 Base64/data URL，必须先经流式/分块解码、25 MiB 硬上限、类型与 magic-byte 校验写入私有 staging 临时文件，再把 opaque ref 写入 snapshot；不得把原 data URL 写入 SQLite。Doubao 及其他 adapter 即使当前通常返回 URL，也必须走同一防御分支处理意外 Base64。
+- ZenMux 若返回 Base64/data URL，必须先经流式/分块解码、25 MiB 硬上限、类型与 magic-byte 校验写入私有 staging 临时文件，再把 opaque ref 写入 snapshot；不得把原 data URL 写入 SQLite。Doubao 及其他 adapter 即使当前通常返回 URL，也必须走同一防御分支处理意外 Base64。**D1 已提供 25 MiB、content-type 一致性和不透明 `staging:<uuid>` 引用的最小私有 staging，保证当前 ZenMux 正常可用且 raw Base64 不入库；E3 再补流式解码、magic-byte、总预算和完整清理策略。**
 - server log、API DTO 和 UI 不输出两个 snapshot；错误只输出安全 code 与 redacted context。
 
 ### 3.4 旧数据回填
@@ -100,6 +100,7 @@ flowchart LR
 | 旧 Job 情况 | backfill |
 |---|---|
 | status 为 `completed/failed/cancelled` | `phase=terminal` |
+| active 且 `cancel_requested_at IS NOT NULL` | 保持用户 status=`cancelled`；有 handle 时 `phase=cancelling`，无 handle 时 `phase=terminal`；不得回到 polling |
 | active 且 `provider_handle IS NOT NULL` | `phase=polling`；可继续现有 handle |
 | active 且 handle 为空 | `status=failed`、`phase=outcome_unknown`、error=`LEGACY_DISPATCH_STATE_UNKNOWN`；不猜测重投 |
 
@@ -244,8 +245,8 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 ### 5.4 Dispatch 崩溃窗口
 
 1. `queued` claim 成 `dispatching`，立即持久化 lease，再调用 Provider。
-2. Provider 返回 async handle 时，在同一 DB write 中保存 handle、切 `polling`、清 dispatch lease。
-3. Provider 返回 sync refs 时，先把 Base64 转成有界 staging ref，再持久化仅含远端 URL/staging ref 的 `result_snapshot`、切 `storing`、清 dispatch lease，之后再开始落正式图片。
+2. Provider 返回 async handle 时，在同一 DB write 中保存 handle、切 `polling`、清 dispatch lease；若本地取消已在 dispatch 期间获胜，则以原 dispatch lease + cancelling marker CAS 持久化该 handle，保持 `cancelling` 以便 worker 做远端取消，绝不复活公开 status。
+3. Provider 返回 sync refs 时，D1 对 URL 直接持久化有界 ref；对 Base64/data URL 先写入带 25 MiB 上限的私有 staging，只把不透明 `staging:<uuid>` 写入 `result_snapshot`，切 `storing`、清 dispatch lease，之后再开始落正式图片；E3 在此基础上补流式解码、magic-byte、总预算和完整远端图片安全策略。
 4. 进程若在 `dispatching` lease 过期后仍无持久结果：
    - Provider 支持且实际使用相同 idempotency key：可按策略恢复；
    - 本批七家默认不满足，切 `outcome_unknown`，不重投。
@@ -255,11 +256,11 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 
 ### 5.5 取消
 
-- cancel API 在一个 transaction 中把所有可取消 Job 的用户 status 置为 `cancelled`、写 `cancel_requested_at`、phase 置 `cancelling`（queued 且从未 dispatch 的可直接 terminal）。
+- cancel API 在一个 transaction 中批量把所有可取消 Job 的用户 status 置为 `cancelled`、写 `cancel_requested_at`、phase 置 `cancelling` 并重聚合 Generation；queued 且从未 claim 的 Job 可直接 `terminal`，避免 fan-out 半取消。
 - API 立即返回聚合视图，不等待远端。
 - worker 对有 handle/支持 cancel 的 Job 执行有界重试；unsupported 或预算耗尽均写安全 warning 后 terminal。
-- dispatch/poll/store 每个外部调用前后都检查 cancel marker；晚到结果不能恢复 user status。
-- storing 期间取消时，新下载文件未落 row 则立即删除；已由本次 attempt 插入的 image rows/files 做限定 job 补偿。补偿失败记录 structured log 并由现有 orphan cleanup 兜底。
+- dispatch/poll/store 每个外部调用前后都检查 cancel marker；dispatch 在 limiter 队列真正执行前重新读取 lease/marker，晚到结果不能恢复 user status。
+- storing 的「文件已下载 → DB row/phase」在同一短 SQLite transaction 内用 lease + `cancel_requested_at IS NULL` 条件提交；取消先线性化时没有 image row 可见且立即删除文件，存储 checkpoint 先线性化时保留该次已提交图片、停止后续图片。补偿失败记录 structured log 并由现有 orphan cleanup 兜底。
 
 ## 6. Provider、限流与图片安全边界
 
@@ -373,6 +374,8 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 - retry state（attempt、elapsed window、next due）在本批持久化；这里只用 typed fake Provider 验证 state transition、重启延续预算与穷尽收口，不在本批宣称真实 HTTP/adapter mapping 已接通。
 - DoD：所有 crash checkpoint 在重启后恢复或明确 unknown；无永久无解释 pending；终态不可逆；每个 commit 都有 fault-injection integration。
 - 对应：P-04、P-05、P-07、P-08、P-09。
+
+**实施状态（2026-07-20）**：D1 已实现、复审并提交（`feat(job-engine): persist recoverable dispatch state`）：schema v3/backfill、202 durable admission、版本化 request/result snapshot、phase/lease worker、late-handle cancellation CAS、fan-out 原子取消、lease-guarded image checkpoint、终态快照清理，以及有界 inline-image staging（raw Base64 不入 SQLite）。D2 只承担 retry policy/预算、取消重试收敛与更完整的恢复故障注入，不重复打开 D1 已闭合的竞态窗口。
 
 ### Batch E — Provider、队列与 storage 边界
 
