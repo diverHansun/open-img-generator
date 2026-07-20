@@ -8,8 +8,10 @@
   },
   "description": "Open-source multi-provider AI image generator (backend-first, web-then-app).",
   "scripts": {
+    "predev": "npm run db:migrate",
     "dev": "next dev",
     "build": "next build",
+    "prestart": "npm run db:migrate",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",

@@ -8,6 +8,8 @@ import {
   ConfigurationUnavailableError,
   CredentialManagedByEnvironmentError,
   InitialSessionUnavailableError,
+  SchemaNotReadyError,
+  DatabaseUnavailableError,
 } from '../../lib/errors';
 
 type StructuredApiError = {
@@ -23,6 +25,22 @@ export type ApiErrorOptions = {
 };
 
 function classifyApiError(err: unknown): StructuredApiError {
+  if (err instanceof SchemaNotReadyError) {
+    return {
+      code: 'SCHEMA_NOT_READY',
+      message: err.message,
+      retryable: false,
+      status: 503,
+    };
+  }
+  if (err instanceof DatabaseUnavailableError) {
+    return {
+      code: 'DATABASE_UNAVAILABLE',
+      message: err.message,
+      retryable: true,
+      status: 503,
+    };
+  }
   if (err instanceof CredentialManagedByEnvironmentError) {
     return {
       code: 'CREDENTIAL_MANAGED_BY_ENV',

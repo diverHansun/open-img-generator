@@ -14,6 +14,27 @@ export class InitialSessionUnavailableError extends AppError {}
 export class ConfigurationUnavailableError extends AppError {}
 export class CredentialManagedByEnvironmentError extends ConflictError {}
 
+export type SchemaCompatibilityDetails = {
+  currentVersion: number;
+  requiredVersion: number;
+  foreignKeysEnabled: boolean;
+  missingTables: string[];
+  missingColumns: string[];
+  missingIndexes: string[];
+};
+
+export class SchemaNotReadyError extends AppError {
+  constructor(public readonly details: SchemaCompatibilityDetails) {
+    super('Database schema is not ready');
+  }
+}
+
+export class DatabaseUnavailableError extends AppError {
+  constructor(public readonly cause?: unknown) {
+    super('Database is unavailable');
+  }
+}
+
 export class StorageError extends AppError {
   constructor(
     message: string,

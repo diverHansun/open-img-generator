@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ValidationError, NotFoundError } from '../../src/lib/errors';
+import {
+  ValidationError,
+  NotFoundError,
+  SchemaNotReadyError,
+} from '../../src/lib/errors';
 import { GET as getGeneration } from '../../src/app/api/generations/[id]/route';
 import { POST as cancelGeneration } from '../../src/app/api/generations/[id]/cancel/route';
 import { GET as listGenerations, POST as postGeneration } from '../../src/app/api/generations/route';
@@ -15,8 +19,17 @@ vi.mock('../../src/lib/library', () => ({
   listGenerations: vi.fn(),
 }));
 
+vi.mock('../../src/lib/db', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/lib/db')>();
+  return {
+    ...original,
+    assertDatabaseReady: vi.fn(),
+  };
+});
+
 import * as jobEngine from '../../src/lib/job-engine';
 import * as library from '../../src/lib/library';
+import * as database from '../../src/lib/db';
 
 describe('GET /api/generations', () => {
   it('delegates to the read-only list query without advancing jobs', async () => {
@@ -47,6 +60,8 @@ describe('GET /api/generations', () => {
 describe('POST /api/generations', () => {
   beforeEach(() => {
     vi.mocked(jobEngine.submitGeneration).mockReset();
+    vi.mocked(jobEngine.ensureWorkerStarted).mockReset();
+    vi.mocked(database.assertDatabaseReady).mockReset();
   });
 
   it('returns 201 with id, status and self link', async () => {
@@ -106,6 +121,35 @@ describe('POST /api/generations', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Session is required',
     });
+  });
+
+  it('returns 503 before worker or provider dispatch when the schema is not ready', async () => {
+    vi.mocked(database.assertDatabaseReady).mockImplementation(() => {
+      throw new SchemaNotReadyError({
+        currentVersion: 0,
+        requiredVersion: 1,
+        missingTables: [],
+        missingColumns: ['generation_jobs.next_poll_at'],
+        missingIndexes: [],
+        foreignKeysEnabled: true,
+      });
+    });
+
+    const response = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
+          prompt: 'A cat',
+          sessionId: 'session-1',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(jobEngine.ensureWorkerStarted).not.toHaveBeenCalled();
+    expect(jobEngine.submitGeneration).not.toHaveBeenCalled();
   });
 });
 

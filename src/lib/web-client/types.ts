@@ -39,6 +39,15 @@ export type HealthView = {
   status: 'ok' | 'error';
   enabledProviders: ProviderId[];
   db: 'ok' | 'error';
+  schema?: {
+    currentVersion: number;
+    requiredVersion: number;
+    foreignKeysEnabled?: boolean;
+    missingTables?: string[];
+    missingColumns?: string[];
+    missingIndexes?: string[];
+  };
+  error?: ApiErrorBody['error'];
 };
 
 export type ApiErrorBody = {

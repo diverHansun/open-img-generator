@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import schemaManifest from '../../src/lib/db/schema-manifest.json';
 
 /**
  * Minimal schema shared by isolated unit repositories and file-backed integration tests.
@@ -76,4 +77,5 @@ export function initializeTestSchema(sqlite: Database.Database): void {
     INSERT INTO projects VALUES ('default-project', 'Test Project', 'now', 'now');
     INSERT INTO sessions VALUES ('default-session', 'default-project', 'Test Session', 'now', 'now');
   `);
+  sqlite.pragma(`user_version = ${schemaManifest.version}`);
 }

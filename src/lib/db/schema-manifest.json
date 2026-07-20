@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "tables": {
+    "projects": ["id", "title", "created_at", "updated_at"],
+    "sessions": ["id", "project_id", "title", "created_at", "updated_at"],
+    "generations": ["id", "session_id", "prompt", "status", "created_at", "updated_at"],
+    "generation_jobs": [
+      "id",
+      "generation_id",
+      "provider",
+      "model",
+      "status",
+      "provider_handle",
+      "error",
+      "poll_lease_until",
+      "next_poll_at",
+      "cancel_requested_at",
+      "created_at",
+      "updated_at"
+    ],
+    "images": [
+      "id",
+      "generation_job_id",
+      "index",
+      "storage_path",
+      "content_type",
+      "width",
+      "height",
+      "size_bytes",
+      "created_at"
+    ],
+    "favorites": ["id", "image_id", "created_at"],
+    "model_preferences": ["provider", "model", "enabled", "updated_at"]
+  },
+  "indexes": [
+    {
+      "name": "projects_updated_at_idx",
+      "table": "projects",
+      "columns": ["updated_at"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "sessions_project_updated_at_idx",
+      "table": "sessions",
+      "columns": ["project_id", "updated_at"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "generations_session_created_at_idx",
+      "table": "generations",
+      "columns": ["session_id", "created_at"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "generations_created_at_idx",
+      "table": "generations",
+      "columns": ["created_at"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "generation_jobs_generation_idx",
+      "table": "generation_jobs",
+      "columns": ["generation_id"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "unique_job_index",
+      "table": "images",
+      "columns": ["generation_job_id", "index"],
+      "unique": true,
+      "partial": false
+    },
+    {
+      "name": "favorites_image_unique",
+      "table": "favorites",
+      "columns": ["image_id"],
+      "unique": true,
+      "partial": false
+    },
+    {
+      "name": "favorites_created_at_idx",
+      "table": "favorites",
+      "columns": ["created_at"],
+      "unique": false,
+      "partial": false
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ensureWorkerStarted, submitGeneration } from '../../../lib/job-engine';
-import { db } from '../../../lib/db';
+import { assertDatabaseReady, db } from '../../../lib/db';
 import { handleApiError } from '../error-handler';
 import { listGenerations } from '../../../lib/library';
 import { readJsonObject } from '../request-body';
@@ -32,6 +32,7 @@ export function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    assertDatabaseReady(db);
     ensureWorkerStarted();
     const body = (await readJsonObject(request)) as Parameters<typeof submitGeneration>[0];
     const result = await submitGeneration(body, { db });

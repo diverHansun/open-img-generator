@@ -19,4 +19,21 @@ export function createDbClient(url: string): DbClient {
   return drizzle(sqlite);
 }
 
-export const db: DbClient = createDbClient(getDatabaseUrl());
+export function createLazyDbClient(
+  factory: () => DbClient = () => createDbClient(getDatabaseUrl()),
+): DbClient {
+  let client: DbClient | undefined;
+  return new Proxy({} as DbClient, {
+    get(_target, property) {
+      client ??= factory();
+      const value = Reflect.get(client, property, client);
+      return typeof value === 'function' ? value.bind(client) : value;
+    },
+    set(_target, property, value) {
+      client ??= factory();
+      return Reflect.set(client, property, value, client);
+    },
+  });
+}
+
+export const db: DbClient = createLazyDbClient();

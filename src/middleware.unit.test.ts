@@ -26,4 +26,15 @@ describe('API authentication middleware', () => {
       },
     });
   });
+
+  it('keeps readiness and liveness probes public when authentication is enabled', () => {
+    process.env.APP_AUTH_TOKEN = 'test-token';
+
+    for (const path of ['/api/health', '/api/health/live']) {
+      const response = middleware(new NextRequest(`http://localhost:3000${path}`));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-middleware-next')).toBe('1');
+    }
+  });
 });

@@ -4,6 +4,7 @@ import { isAuthorizedEdgeRequest } from './lib/auth-edge';
 export function middleware(request: NextRequest): NextResponse {
   if (
     request.nextUrl.pathname === '/api/health' ||
+    request.nextUrl.pathname === '/api/health/live' ||
     request.nextUrl.pathname === '/api/auth/session'
   ) {
     return NextResponse.next();
