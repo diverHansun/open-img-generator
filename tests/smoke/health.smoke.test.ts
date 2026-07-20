@@ -13,7 +13,9 @@ describe('health smoke', () => {
   });
 
   it('returns ok with enabled providers and db ok', async () => {
-    const response = await getHealth();
+    const response = await getHealth(
+      new Request('http://localhost:3000/api/health'),
+    );
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.status).toBe('ok');

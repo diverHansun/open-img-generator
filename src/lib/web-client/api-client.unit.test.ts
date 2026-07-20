@@ -60,6 +60,95 @@ describe('web API client', () => {
     );
   });
 
+  it('prefers a valid body request ID and parses delta-seconds Retry-After', async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'Please wait.',
+            retryable: true,
+            requestId: 'body-request-1',
+          },
+        }),
+        {
+          status: 429,
+          headers: {
+            'X-Request-Id': 'header-request-2',
+            'Retry-After': '9',
+          },
+        },
+      ),
+    );
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(
+      client.submitGeneration({
+        prompt: 'A cat',
+        targets: [],
+        sessionId: 'session-1',
+      }),
+    ).rejects.toMatchObject({
+      code: 'RATE_LIMITED',
+      retryable: true,
+      requestId: 'body-request-1',
+      retryAfterMs: 9_000,
+    });
+  });
+
+  it('falls back to a safe header request ID and caps HTTP-date Retry-After', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'DATABASE_UNAVAILABLE',
+            message: 'Unavailable',
+            retryable: true,
+            requestId: 'contains spaces',
+          },
+        }),
+        {
+          status: 503,
+          headers: {
+            'X-Request-Id': 'safe-header-id',
+            'Retry-After': 'Mon, 20 Jul 2026 00:30:00 GMT',
+          },
+        },
+      ),
+    );
+    const client = createApiClient(fetcher as typeof fetch);
+
+    try {
+      await expect(client.getHealth()).rejects.toMatchObject({
+        requestId: 'safe-header-id',
+        retryAfterMs: 300_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores invalid request and Retry-After headers for legacy errors', async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Bad request' }), {
+        status: 400,
+        headers: {
+          'X-Request-Id': 'bad header',
+          'Retry-After': 'later',
+        },
+      }),
+    );
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.getHealth()).rejects.toMatchObject({
+      message: 'Bad request',
+      requestId: undefined,
+      retryAfterMs: undefined,
+    });
+  });
+
   it('preserves structured authentication errors for project deletion', async () => {
     const fetcher = vi.fn().mockResolvedValue(
       new Response(

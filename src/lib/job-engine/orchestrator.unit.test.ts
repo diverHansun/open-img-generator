@@ -322,6 +322,48 @@ describe('orchestrator', () => {
       await expect(getGeneration('missing', { db })).rejects.toThrow('Generation not found');
     });
 
+    it('exposes only allowlisted job error fields and fixed safe policy', async () => {
+      const canaries = {
+        message:
+          'private prompt https://signed.example/image.png?token=secret /private/app.db',
+        prompt: 'private prompt',
+        storagePath: '/private/app.db',
+        providerPayload: { token: 'secret-provider-token' },
+      };
+      vi.mocked(providers.getById).mockReturnValue(
+        makeProvider({
+          submit: vi.fn().mockResolvedValue({
+            kind: 'failed',
+            error: {
+              code: 'PROVIDER_ERROR',
+              retryable: false,
+              ...canaries,
+            },
+          } as unknown as ProviderSubmitResult),
+        }),
+      );
+
+      const submitted = await submitGeneration(makeParams(), { db });
+      const view = await getGeneration(submitted.generationId, { db });
+      const serialized = JSON.stringify(view);
+
+      expect(view.jobs[0]?.error).toEqual({
+        code: 'PROVIDER_ERROR',
+        message: 'Provider could not complete the job',
+        retryable: true,
+      });
+      expect(serialized).not.toContain('private prompt');
+      expect(serialized).not.toContain('signed.example');
+      expect(serialized).not.toContain('token=secret');
+      expect(serialized).not.toContain('/private/app.db');
+      expect(serialized).not.toContain('secret-provider-token');
+      expect(Object.keys(view.jobs[0]!.error!)).toEqual([
+        'code',
+        'message',
+        'retryable',
+      ]);
+    });
+
     it('advances async job and returns completed', async () => {
       vi.mocked(storage.downloadAndStore).mockResolvedValue({
         storagePath: '2026/07/img.png',

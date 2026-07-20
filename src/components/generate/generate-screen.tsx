@@ -20,6 +20,13 @@ import {
 } from '@/lib/web-client';
 
 import { GenerateCompose } from './generate-compose';
+import {
+  dispatchGenerateErrorAction,
+  getGenerateErrorActionLabelKey,
+  mapGenerateError,
+  type GenerateErrorAction,
+  type GenerateErrorPresentation,
+} from './generate-error';
 import { GenerateStage } from './generate-stage';
 import {
   buildAvailableModelTargets,
@@ -36,12 +43,8 @@ type ReadyData = {
 
 type LoadState =
   | { status: 'loading' }
-  | { status: 'error'; error: Error }
+  | { status: 'error'; error: GenerateErrorPresentation }
   | { status: 'ready'; data: ReadyData };
-
-function toError(cause: unknown): Error {
-  return cause instanceof Error ? cause : new Error(String(cause));
-}
 
 function modelKey(target: GenerationTarget): string {
   return target.provider + ':' + target.model;
@@ -91,6 +94,8 @@ export function GenerateScreen({
   const [seed, setSeed] = React.useState('');
   const [negativePrompt, setNegativePrompt] = React.useState('');
   const [formError, setFormError] = React.useState<TranslationKey | null>(null);
+  const [submissionError, setSubmissionError] =
+    React.useState<GenerateErrorPresentation | null>(null);
   const [sessionBusy, setSessionBusy] = React.useState(false);
   const [sessionError, setSessionError] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
@@ -157,7 +162,10 @@ export function GenerateScreen({
       })
       .catch((cause) => {
         if (!controller.signal.aborted) {
-          setLoadState({ status: 'error', error: toError(cause) });
+          setLoadState({
+            status: 'error',
+            error: mapGenerateError(cause, 'bootstrap'),
+          });
         }
       })
       .finally(() => {
@@ -230,6 +238,7 @@ export function GenerateScreen({
       setActiveSessionId(id);
       rememberLastSession(projectId, id);
       setSessionError(false);
+      setSubmissionError(null);
     },
     [projectId],
   );
@@ -297,6 +306,7 @@ export function GenerateScreen({
   const submit = React.useCallback(async () => {
     if (!readyData || submitting || submissionInFlight.current) return;
     setFormError(null);
+    setSubmissionError(null);
     if (!prompt.trim()) {
       setFormError('generate.validationPrompt');
       return;
@@ -359,9 +369,9 @@ export function GenerateScreen({
         '?generation=' +
         encodeURIComponent(response.id);
       router.replace(href, { scroll: false });
-    } catch {
+    } catch (cause) {
       if (mounted.current && sequence === submissionSequence.current) {
-        setFormError('generate.submitError');
+        setSubmissionError(mapGenerateError(cause, 'submit'));
       }
     } finally {
       if (sequence === submissionSequence.current) {
@@ -413,6 +423,35 @@ export function GenerateScreen({
     });
   }, []);
 
+  const handleErrorAction = React.useCallback(
+    (action: GenerateErrorAction) => {
+      dispatchGenerateErrorAction(action, {
+        'configure-providers': () =>
+          router.push(workspaceRoute(projectId, 'providers')),
+        'check-history': () =>
+          router.push(workspaceRoute(projectId, 'history')),
+        reload: () => window.location.reload(),
+        'back-to-compose': backToCompose,
+        wait: () => void submit(),
+      });
+    },
+    [backToCompose, projectId, router, submit],
+  );
+
+  const handleBootstrapErrorAction = React.useCallback(
+    (action: GenerateErrorAction) => {
+      // A bootstrap retry must reload the workspace prerequisites. `submit()`
+      // intentionally no-ops before they are ready, so it cannot be reused
+      // for this branch.
+      if (action === 'wait') {
+        load();
+        return;
+      }
+      handleErrorAction(action);
+    },
+    [handleErrorAction, load],
+  );
+
   if (loadState.status === 'loading') {
     return (
       <div className={styles.loadingState} aria-live="polite">
@@ -423,13 +462,28 @@ export function GenerateScreen({
   }
 
   if (loadState.status === 'error') {
+    const actionLabelKey = getGenerateErrorActionLabelKey(
+      loadState.error.action,
+    );
     return (
       <div className={styles.errorState} role="alert">
-        <strong>{t('generate.loadError')}</strong>
-        <small>{loadState.error.message}</small>
-        <Button type="button" variant="secondary" onClick={load}>
-          {t('common.retry')}
-        </Button>
+        <strong>{t(loadState.error.messageKey)}</strong>
+        {loadState.error.requestId ? (
+          <small>
+            {t('generate.error.requestId', {
+              requestId: loadState.error.requestId,
+            })}
+          </small>
+        ) : null}
+        {actionLabelKey ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => handleBootstrapErrorAction(loadState.error.action)}
+          >
+            {t(actionLabelKey)}
+          </Button>
+        ) : null}
       </div>
     );
   }
@@ -474,6 +528,7 @@ export function GenerateScreen({
             )
           : null
       }
+      submissionError={submissionError}
       submitting={submitting}
       currentGenerationId={task.currentGenerationId}
       currentSnapshot={task.snapshot}
@@ -483,6 +538,7 @@ export function GenerateScreen({
       onPromptChange={(value) => {
         setPrompt(value);
         setFormError(null);
+        setSubmissionError(null);
       }}
       onToggleModel={(key) => {
         setSelectedKeys((current) => {
@@ -496,16 +552,31 @@ export function GenerateScreen({
             ? null
             : 'generate.validationTargetsLimit',
         );
+        setSubmissionError(null);
       }}
-      onAspectRatioChange={setAspectRatio}
-      onCountChange={setCount}
-      onSeedChange={setSeed}
-      onNegativePromptChange={setNegativePrompt}
+      onAspectRatioChange={(value) => {
+        setAspectRatio(value);
+        setSubmissionError(null);
+      }}
+      onCountChange={(value) => {
+        setCount(value);
+        setSubmissionError(null);
+      }}
+      onSeedChange={(value) => {
+        setSeed(value);
+        setSubmissionError(null);
+      }}
+      onNegativePromptChange={(value) => {
+        setNegativePrompt(value);
+        setSubmissionError(null);
+      }}
       onClear={() => {
         setPrompt('');
         setFormError(null);
+        setSubmissionError(null);
       }}
       onSubmit={() => void submit()}
+      onSubmissionAction={handleErrorAction}
       onOpenCurrentTask={openCurrentTask}
     />
   );

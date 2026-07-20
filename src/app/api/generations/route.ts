@@ -4,6 +4,7 @@ import { assertDatabaseReady, db } from '../../../lib/db';
 import { handleApiError } from '../error-handler';
 import { listGenerations } from '../../../lib/library';
 import { readJsonObject } from '../request-body';
+import { getRequestId, withRequestId } from '../../../lib/request-id';
 
 function parseLimit(value: string | null): number | undefined {
   if (value === null) return undefined;
@@ -31,20 +32,28 @@ export function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const requestId = getRequestId(request);
   try {
     assertDatabaseReady(db);
     ensureWorkerStarted();
     const body = (await readJsonObject(request)) as Parameters<typeof submitGeneration>[0];
     const result = await submitGeneration(body, { db });
-    return NextResponse.json(
-      {
-        id: result.generationId,
-        status: result.status,
-        links: { self: `/api/generations/${result.generationId}` },
-      },
-      { status: 201 },
+    return withRequestId(
+      NextResponse.json(
+        {
+          id: result.generationId,
+          status: result.status,
+          links: { self: `/api/generations/${result.generationId}` },
+        },
+        { status: 201 },
+      ),
+      requestId,
     );
   } catch (err) {
-    return handleApiError(err);
+    return handleApiError(err, {
+      structured: true,
+      requestId,
+      unexpectedRetryable: false,
+    });
   }
 }

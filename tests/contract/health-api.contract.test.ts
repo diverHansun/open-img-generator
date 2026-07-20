@@ -46,10 +46,15 @@ describe('GET /api/health', () => {
     vi.mocked(providers.listEnabled).mockReturnValue([
       { id: 'fal', displayName: 'fal.ai', models: [] },
     ]);
-    const response = await getHealth();
+    const response = await getHealth(
+      new Request('http://localhost:3000/api/health', {
+        headers: { 'X-Request-Id': 'health-request-1' },
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('X-Request-Id')).toBe('health-request-1');
     expect(body.status).toBe('ok');
     expect(body.enabledProviders).toEqual(['fal']);
     expect(body.db).toBe('ok');
@@ -67,13 +72,19 @@ describe('GET /api/health', () => {
     );
     vi.mocked(providers.listEnabled).mockReturnValue([]);
 
-    const response = await getHealth();
+    const response = await getHealth(
+      new Request('http://localhost:3000/api/health', {
+        headers: { 'X-Request-Id': 'health-request-2' },
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(503);
     expect(body.status).toBe('error');
     expect(body.error.code).toBe('SCHEMA_NOT_READY');
     expect(body.error.retryable).toBe(false);
+    expect(body.error.requestId).toBe('health-request-2');
+    expect(response.headers.get('X-Request-Id')).toBe('health-request-2');
     expect(body.error.details).toEqual({
       currentVersion: 0,
       requiredVersion: 1,
@@ -91,14 +102,20 @@ describe('GET /api/health', () => {
       throw new Error('unable to open /private/app.db');
     });
 
-    const response = await getHealth();
+    const response = await getHealth(
+      new Request('http://localhost:3000/api/health', {
+        headers: { 'X-Request-Id': 'health-request-3' },
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(503);
     expect(body.error).toMatchObject({
       code: 'DATABASE_UNAVAILABLE',
       retryable: true,
+      requestId: 'health-request-3',
     });
+    expect(response.headers.get('X-Request-Id')).toBe('health-request-3');
     expect(JSON.stringify(body)).not.toContain('/private/app.db');
     expect(jobEngine.ensureWorkerStarted).not.toHaveBeenCalled();
   });
@@ -108,7 +125,11 @@ describe('GET /api/health', () => {
       throw new Error('worker failed');
     });
 
-    const response = await getHealth();
+    const response = await getHealth(
+      new Request('http://localhost:3000/api/health', {
+        headers: { 'X-Request-Id': 'health-request-4' },
+      }),
+    );
     const body = await response.json();
 
     expect(response.status).toBe(503);
@@ -119,6 +140,7 @@ describe('GET /api/health', () => {
         code: 'INTERNAL_ERROR',
         message: 'Service initialization failed',
         retryable: true,
+        requestId: 'health-request-4',
       },
     });
   });
@@ -128,9 +150,14 @@ describe('GET /api/health/live', () => {
   it('reports process liveness without inspecting the database or starting the worker', async () => {
     vi.mocked(database.inspectDatabaseCompatibility).mockReset();
     vi.mocked(jobEngine.ensureWorkerStarted).mockReset();
-    const response = await getLiveness();
+    const response = await getLiveness(
+      new Request('http://localhost:3000/api/health/live', {
+        headers: { 'X-Request-Id': 'live-request-1' },
+      }),
+    );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('X-Request-Id')).toBe('live-request-1');
     await expect(response.json()).resolves.toEqual({ status: 'ok' });
     expect(database.inspectDatabaseCompatibility).not.toHaveBeenCalled();
     expect(jobEngine.ensureWorkerStarted).not.toHaveBeenCalled();

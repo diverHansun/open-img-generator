@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { isAuthorizedEdgeRequest } from './lib/auth-edge';
+import { getRequestId, withRequestId } from './lib/request-id';
 
 export function middleware(request: NextRequest): NextResponse {
   if (
@@ -10,15 +11,20 @@ export function middleware(request: NextRequest): NextResponse {
     return NextResponse.next();
   }
   if (isAuthorizedEdgeRequest(request)) return NextResponse.next();
-  return NextResponse.json(
-    {
-      error: {
-        code: 'AUTHENTICATION_REQUIRED',
-        message: 'Authentication required',
-        retryable: false,
+  const requestId = getRequestId(request);
+  return withRequestId(
+    NextResponse.json(
+      {
+        error: {
+          code: 'AUTHENTICATION_REQUIRED',
+          message: 'Authentication required',
+          retryable: false,
+          requestId,
+        },
       },
-    },
-    { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } },
+      { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } },
+    ),
+    requestId,
   );
 }
 

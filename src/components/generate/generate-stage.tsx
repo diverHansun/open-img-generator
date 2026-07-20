@@ -2,13 +2,16 @@
 
 import * as React from 'react';
 import { ArrowLeft, LoaderCircle, XCircle } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 import { ImagePreviewDialog } from '@/components/dialogs/image-preview-dialog';
 import { FavoriteButton } from '@/components/generation/favorite-button';
+import { getJobErrorMessageKey } from '@/components/generation/job-error';
 import { reconcileGenerationSnapshot } from '@/components/generation/generation-view-state';
 import { useLocale } from '@/components/i18n/locale-provider';
 import { Button } from '@/components/ui/button';
 import { accessibleExcerpt } from '@/lib/a11y';
+import { workspaceRoute } from '@/lib/routes';
 import {
   areAllJobsTerminal,
   getBrowserWebClientRuntime,
@@ -16,6 +19,13 @@ import {
   type GenerationView,
 } from '@/lib/web-client';
 
+import {
+  dispatchGenerateErrorAction,
+  getGenerateErrorActionLabelKey,
+  mapGenerateError,
+  type GenerateErrorAction,
+  type GenerateErrorPresentation,
+} from './generate-error';
 import { summarizeGeneration } from './generate-state';
 import styles from './generate-screen.module.css';
 
@@ -42,10 +52,6 @@ function statusKey(status: GenerationStatus | 'partial') {
     case 'partial':
       return 'generate.status.partial' as const;
   }
-}
-
-function toError(cause: unknown): Error {
-  return cause instanceof Error ? cause : new Error(String(cause));
 }
 
 function patchFavorite(
@@ -83,13 +89,16 @@ export function GenerateStage({
   onBack,
 }: GenerateStageProps) {
   const { t } = useLocale();
+  const router = useRouter();
   const runtime = React.useMemo(() => getBrowserWebClientRuntime(), []);
   const [view, setView] = React.useState<GenerationView | null>(
     initialSnapshot?.id === generationId && initialSnapshot.projectId === projectId
       ? initialSnapshot
       : null,
   );
-  const [loadError, setLoadError] = React.useState<Error | null>(null);
+  const [loadError, setLoadError] =
+    React.useState<GenerateErrorPresentation | null>(null);
+  const [retryNonce, setRetryNonce] = React.useState(0);
   const [cancelling, setCancelling] = React.useState(false);
   const [favoriteBusy, setFavoriteBusy] = React.useState<Set<string>>(
     () => new Set(),
@@ -126,7 +135,10 @@ export function GenerateStage({
         if (mounted.current) {
           viewRef.current = null;
           setView(null);
-          setLoadError(new Error(t('generate.stageNotFound')));
+          setLoadError({
+            messageKey: 'generate.error.notFound',
+            action: 'back-to-compose',
+          });
         }
         return false;
       }
@@ -136,7 +148,7 @@ export function GenerateStage({
       if (patched !== viewRef.current) commitView(patched);
       return true;
     },
-    [commitView, generationId, projectId, t],
+    [commitView, generationId, projectId],
   );
 
   React.useEffect(() => {
@@ -154,14 +166,34 @@ export function GenerateStage({
         }
       },
       onError: (cause) => {
-        if (active && mounted.current) setLoadError(toError(cause));
+        if (active && mounted.current) {
+          setLoadError(mapGenerateError(cause, 'detail'));
+        }
       },
     });
     return () => {
       active = false;
       unsubscribe();
     };
-  }, [acceptSnapshot, generationId, runtime]);
+  }, [acceptSnapshot, generationId, retryNonce, runtime]);
+
+  const handleErrorAction = React.useCallback(
+    (action: GenerateErrorAction) => {
+      dispatchGenerateErrorAction(action, {
+        'configure-providers': () =>
+          router.push(workspaceRoute(projectId, 'providers')),
+        'check-history': () =>
+          router.push(workspaceRoute(projectId, 'history')),
+        reload: () => window.location.reload(),
+        'back-to-compose': onBack,
+        wait: () => {
+          setLoadError(null);
+          setRetryNonce((current) => current + 1);
+        },
+      });
+    },
+    [onBack, projectId, router],
+  );
 
   const cancel = React.useCallback(async () => {
     setCancelling(true);
@@ -170,7 +202,7 @@ export function GenerateStage({
       const snapshot = await runtime.client.cancelGeneration(generationId);
       if (mounted.current) acceptSnapshot(snapshot);
     } catch (cause) {
-      if (mounted.current) setLoadError(toError(cause));
+      if (mounted.current) setLoadError(mapGenerateError(cause, 'cancel'));
     } finally {
       if (mounted.current) setCancelling(false);
     }
@@ -230,6 +262,9 @@ export function GenerateStage({
     ? view?.jobs.find((job) => job.id === selectedImage.jobId)
     : undefined;
   const accessiblePrompt = view ? accessibleExcerpt(view.prompt) : '';
+  const loadErrorActionLabelKey = loadError
+    ? getGenerateErrorActionLabelKey(loadError.action)
+    : null;
 
   return (
     <section className={styles.stage}>
@@ -281,15 +316,48 @@ export function GenerateStage({
 
       {loadError && !view ? (
         <div className={styles.stageMessage} role="alert">
-          <strong>{t('generate.stageLoadError')}</strong>
-          <small>{loadError.message}</small>
+          <strong>{t(loadError.messageKey)}</strong>
+          {loadError.requestId ? (
+            <small>
+              {t('generate.error.requestId', {
+                requestId: loadError.requestId,
+              })}
+            </small>
+          ) : null}
+          {loadErrorActionLabelKey ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => handleErrorAction(loadError.action)}
+            >
+              {t(loadErrorActionLabelKey)}
+            </Button>
+          ) : null}
         </div>
       ) : view ? (
         <>
           {loadError ? (
-            <p className={styles.inlineError} role="alert">
-              {t('generate.stageLoadError')} {loadError.message}
-            </p>
+            <div className={styles.submissionNotice} role="alert">
+              <p>{t(loadError.messageKey)}</p>
+              {loadError.requestId ? (
+                <small>
+                  {t('generate.error.requestId', {
+                    requestId: loadError.requestId,
+                  })}
+                </small>
+              ) : null}
+              {loadErrorActionLabelKey ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleErrorAction(loadError.action)}
+                >
+                  {t(loadErrorActionLabelKey)}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           {favoriteError ? (
             <p className={styles.inlineError} role="alert">
@@ -372,7 +440,9 @@ export function GenerateStage({
                       </small>
                     </span>
                     {job.error ? (
-                      <p className={styles.jobError}>{job.error.message}</p>
+                      <p className={styles.jobError}>
+                        {t(getJobErrorMessageKey(job.error.code))}
+                      </p>
                     ) : null}
                   </div>
                 );

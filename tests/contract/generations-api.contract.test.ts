@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
+  ConfigurationUnavailableError,
   ValidationError,
   NotFoundError,
+  RateLimitError,
   SchemaNotReadyError,
 } from '../../src/lib/errors';
 import { GET as getGeneration } from '../../src/app/api/generations/[id]/route';
@@ -73,12 +75,16 @@ describe('POST /api/generations', () => {
     const response = await postGeneration(
       new Request('http://localhost:3000/api/generations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Id': 'submit-request-1',
+        },
         body: JSON.stringify({ targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }], prompt: 'A cat', sessionId: 'session-1' }),
       }),
     );
 
     expect(response.status).toBe(201);
+    expect(response.headers.get('X-Request-Id')).toBe('submit-request-1');
     const body = await response.json();
     expect(body.id).toBe('gen-1');
     expect(body.status).toBe('pending');
@@ -98,7 +104,13 @@ describe('POST /api/generations', () => {
 
     expect(response.status).toBe(400);
     const body = await response.json();
-    expect(body.error).toBe('Provider not enabled');
+    expect(response.headers.get('X-Request-Id')).toBeTruthy();
+    expect(body.error).toEqual({
+      code: 'VALIDATION_ERROR',
+      message: 'Request validation failed',
+      retryable: false,
+      requestId: response.headers.get('X-Request-Id'),
+    });
   });
 
   it('returns 400 when sessionId is missing', async () => {
@@ -119,8 +131,114 @@ describe('POST /api/generations', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: 'Session is required',
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request validation failed',
+        retryable: false,
+        requestId: response.headers.get('X-Request-Id'),
+      },
     });
+  });
+
+  it('returns an actionable correlated rate-limit error', async () => {
+    vi.mocked(jobEngine.submitGeneration).mockRejectedValue(
+      new RateLimitError('raw limiter state must not be exposed'),
+    );
+
+    const response = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Id': 'rate-request-1',
+        },
+        body: JSON.stringify({
+          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
+          prompt: 'A cat',
+          sessionId: 'session-1',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('5');
+    expect(response.headers.get('X-Request-Id')).toBe('rate-request-1');
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Too many requests; retry later',
+        retryable: true,
+        requestId: 'rate-request-1',
+      },
+    });
+  });
+
+  it('returns a safe correlated configuration error', async () => {
+    vi.mocked(jobEngine.submitGeneration).mockRejectedValue(
+      new ConfigurationUnavailableError(
+        'secret-canary USER_CONFIG_ENCRYPTION_KEY=/private/key',
+      ),
+    );
+
+    const response = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Request-Id': 'config-request-1',
+        },
+        body: JSON.stringify({
+          targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
+          prompt: 'A cat',
+          sessionId: 'session-1',
+        }),
+      }),
+    );
+    const bodyText = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get('X-Request-Id')).toBe('config-request-1');
+    expect(bodyText).toContain('Provider configuration is unavailable');
+    expect(bodyText).not.toContain('secret-canary');
+    expect(bodyText).not.toContain('/private/key');
+  });
+
+  it('redacts raw internal errors while retaining their request correlation', async () => {
+    const logSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const canary =
+      'secret-canary prompt /private/app.db https://signed.test/?token=private';
+    vi.mocked(jobEngine.submitGeneration).mockRejectedValue(new Error(canary));
+
+    try {
+      const response = await postGeneration(
+        new Request('http://localhost:3000/api/generations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Request-Id': 'internal-request-1',
+          },
+          body: JSON.stringify({
+            targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
+            prompt: 'another secret prompt',
+            sessionId: 'session-1',
+          }),
+        }),
+      );
+      const bodyText = await response.text();
+      const logText = logSpy.mock.calls.flat().join(' ');
+
+      expect(response.status).toBe(500);
+      expect(response.headers.get('X-Request-Id')).toBe('internal-request-1');
+      expect(bodyText).toContain('INTERNAL_ERROR');
+      expect(bodyText).toContain('internal-request-1');
+      expect(JSON.parse(bodyText).error.retryable).toBe(false);
+      expect(bodyText).not.toContain(canary);
+      expect(logText).toContain('internal-request-1');
+      expect(logText).not.toContain(canary);
+      expect(logText).not.toContain('another secret prompt');
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 
   it('returns 503 before worker or provider dispatch when the schema is not ready', async () => {
@@ -148,6 +266,17 @@ describe('POST /api/generations', () => {
     );
 
     expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.error).toMatchObject({
+      code: 'SCHEMA_NOT_READY',
+      retryable: false,
+      requestId: response.headers.get('X-Request-Id'),
+      details: {
+        currentVersion: 0,
+        requiredVersion: 1,
+        missingColumns: ['generation_jobs.next_poll_at'],
+      },
+    });
     expect(jobEngine.ensureWorkerStarted).not.toHaveBeenCalled();
     expect(jobEngine.submitGeneration).not.toHaveBeenCalled();
   });
@@ -182,11 +311,14 @@ describe('GET /api/generations/:id', () => {
     });
 
     const response = await getGeneration(
-      new Request('http://localhost:3000/api/generations/gen-1'),
+      new Request('http://localhost:3000/api/generations/gen-1', {
+        headers: { 'X-Request-Id': 'detail-request-1' },
+      }),
       { params: Promise.resolve({ id: 'gen-1' }) },
     );
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('X-Request-Id')).toBe('detail-request-1');
     const body = await response.json();
     expect(body.id).toBe('gen-1');
     expect(body.status).toBe('completed');
@@ -197,11 +329,22 @@ describe('GET /api/generations/:id', () => {
     vi.mocked(jobEngine.getGeneration).mockRejectedValue(new NotFoundError('Generation not found'));
 
     const response = await getGeneration(
-      new Request('http://localhost:3000/api/generations/missing'),
+      new Request('http://localhost:3000/api/generations/missing', {
+        headers: { 'X-Request-Id': 'detail-request-2' },
+      }),
       { params: Promise.resolve({ id: 'missing' }) },
     );
 
     expect(response.status).toBe(404);
+    expect(response.headers.get('X-Request-Id')).toBe('detail-request-2');
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Not found',
+        retryable: false,
+        requestId: 'detail-request-2',
+      },
+    });
   });
 });
 
@@ -236,12 +379,14 @@ describe('POST /api/generations/:id/cancel', () => {
     const response = await cancelGeneration(
       new Request('http://localhost:3000/api/generations/gen-1/cancel', {
         method: 'POST',
+        headers: { 'X-Request-Id': 'cancel-request-1' },
       }),
       { params: Promise.resolve({ id: 'gen-1' }) },
     );
     const body = await response.json();
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('X-Request-Id')).toBe('cancel-request-1');
     expect(body.images[0]).toEqual({
       id: 'image-1',
       jobId: 'job-1',
@@ -250,6 +395,31 @@ describe('POST /api/generations/:id/cancel', () => {
       width: 1024,
       height: 1024,
       favorited: true,
+    });
+  });
+
+  it('returns a correlated structured error without exposing resource details', async () => {
+    vi.mocked(jobEngine.cancelGeneration).mockRejectedValue(
+      new NotFoundError('Generation not found: secret-generation-id'),
+    );
+
+    const response = await cancelGeneration(
+      new Request('http://localhost:3000/api/generations/missing/cancel', {
+        method: 'POST',
+        headers: { 'X-Request-Id': 'cancel-request-2' },
+      }),
+      { params: Promise.resolve({ id: 'missing' }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('X-Request-Id')).toBe('cancel-request-2');
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Not found',
+        retryable: false,
+        requestId: 'cancel-request-2',
+      },
     });
   });
 });

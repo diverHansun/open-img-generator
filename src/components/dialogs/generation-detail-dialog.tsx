@@ -4,6 +4,7 @@ import * as React from 'react';
 import { ArrowLeft, ImageOff } from 'lucide-react';
 
 import { FavoriteButton } from '@/components/generation/favorite-button';
+import { getJobErrorMessageKey } from '@/components/generation/job-error';
 import { reconcileGenerationSnapshot } from '@/components/generation/generation-view-state';
 import { GenerationStatus } from '@/components/generation/generation-status';
 import { useLocale } from '@/components/i18n/locale-provider';
@@ -339,7 +340,9 @@ export function GenerationDetailDialog({
                       </span>
                       {job.error ? (
                         <p className={styles.jobError}>
-                          {t('dialogs.jobError', { message: job.error.message })}
+                          {t('dialogs.jobError', {
+                            message: t(getJobErrorMessageKey(job.error.code)),
+                          })}
                         </p>
                       ) : null}
                     </article>
@@ -400,7 +403,7 @@ export function GenerationDetailDialog({
         ) : loadError ? (
           <section className={styles.state}>
             <h2>{t('dialogs.detailLoadError')}</h2>
-            <p>{loadError.message}</p>
+            <p>{t('dialogs.detailLoadErrorText')}</p>
             <Button
               type="button"
               variant="secondary"

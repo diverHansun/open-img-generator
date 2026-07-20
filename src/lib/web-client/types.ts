@@ -55,6 +55,8 @@ export type ApiErrorBody = {
     code: string;
     message: string;
     retryable: boolean;
+    requestId?: string;
+    details?: Record<string, unknown>;
   };
 };
 

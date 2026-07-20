@@ -28,10 +28,10 @@ import type {
   GenerationTarget,
   GenerationView,
   GenerationStatus,
-  JobView,
 } from './types';
 import { acquireGenerationSlot } from './admission';
 import { withProviderLimit } from '../providers/limiter';
+import { toSafeJobError } from './job-error';
 
 export type SubmitResult = {
   generationId: string;
@@ -364,15 +364,6 @@ export async function cancelGeneration(
   return toGenerationView(generation, ctx.db);
 }
 
-function parseJobError(error: string | null): JobView['error'] {
-  if (!error) return undefined;
-  try {
-    return JSON.parse(error) as NonNullable<JobView['error']>;
-  } catch {
-    return { code: 'UNKNOWN', message: error, retryable: false };
-  }
-}
-
 function toGenerationView(
   generation: GenerationWithJobsAndImages,
   client: DbClient,
@@ -400,7 +391,7 @@ function toGenerationView(
       provider: job.provider as GenerationView['jobs'][number]['provider'],
       model: job.model,
       status: job.status as GenerationStatus,
-      error: parseJobError(job.error),
+      error: toSafeJobError(job.error),
     })),
     images: generation.images.map((image) => ({
       id: image.id,

@@ -14,17 +14,36 @@ describe('API authentication middleware', () => {
     process.env.APP_AUTH_TOKEN = 'test-token';
 
     const response = middleware(
-      new NextRequest('http://localhost:3000/api/project-summaries'),
+      new NextRequest('http://localhost:3000/api/project-summaries', {
+        headers: { 'X-Request-Id': 'middleware-request-1' },
+      }),
     );
 
     expect(response.status).toBe(401);
+    expect(response.headers.get('X-Request-Id')).toBe('middleware-request-1');
     await expect(response.json()).resolves.toEqual({
       error: {
         code: 'AUTHENTICATION_REQUIRED',
         message: 'Authentication required',
         retryable: false,
+        requestId: 'middleware-request-1',
       },
     });
+  });
+
+  it('does not echo an unsafe correlation ID in authentication failures', async () => {
+    process.env.APP_AUTH_TOKEN = 'test-token';
+
+    const response = middleware(
+      new NextRequest('http://localhost:3000/api/generations', {
+        headers: { 'X-Request-Id': 'unsafe request id' },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error.requestId).toBe(response.headers.get('X-Request-Id'));
+    expect(body.error.requestId).not.toBe('unsafe request id');
   });
 
   it('keeps readiness and liveness probes public when authentication is enabled', () => {

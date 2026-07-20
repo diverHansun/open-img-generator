@@ -23,11 +23,16 @@ export class ApiClientError extends Error {
     readonly status: number,
     readonly code = `HTTP_${status}`,
     readonly retryable = status === 429 || status >= 500,
+    readonly requestId?: string,
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'ApiClientError';
   }
 }
+
+const MAX_RETRY_AFTER_MS = 5 * 60 * 1_000;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
 
 export type FetchLike = typeof fetch;
 export type ApiRequestOptions = {
@@ -70,10 +75,32 @@ function requestInitWithSignal(options?: ApiRequestOptions): RequestInit | undef
   return options?.signal ? { signal: options.signal } : undefined;
 }
 
+function validRequestId(value: unknown): string | undefined {
+  return typeof value === 'string' && REQUEST_ID_PATTERN.test(value)
+    ? value
+    : undefined;
+}
+
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined;
+  let milliseconds: number;
+  if (/^\d+$/.test(value)) {
+    milliseconds = Number(value) * 1_000;
+  } else {
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) return undefined;
+    milliseconds = Math.max(0, timestamp - Date.now());
+  }
+  if (!Number.isFinite(milliseconds)) return undefined;
+  return Math.min(milliseconds, MAX_RETRY_AFTER_MS);
+}
+
 async function toApiClientError(response: Response): Promise<ApiClientError> {
   const payload = (await response.json().catch(() => null)) as
     | { error?: unknown }
     | null;
+  const headerRequestId = validRequestId(response.headers.get('X-Request-Id'));
+  const retryAfterMs = parseRetryAfter(response.headers.get('Retry-After'));
   if (
     payload?.error &&
     typeof payload.error === 'object' &&
@@ -90,12 +117,18 @@ async function toApiClientError(response: Response): Promise<ApiClientError> {
         response.status,
         structured.error.code,
         structured.error.retryable,
+        validRequestId(structured.error.requestId) ?? headerRequestId,
+        retryAfterMs,
       );
     }
   }
   return new ApiClientError(
     typeof payload?.error === 'string' ? payload.error : response.statusText,
     response.status,
+    undefined,
+    undefined,
+    headerRequestId,
+    retryAfterMs,
   );
 }
 

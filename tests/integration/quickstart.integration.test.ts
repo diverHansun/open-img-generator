@@ -35,7 +35,9 @@ describe('quickstart vertical slice', () => {
 
   it('matches the quickstart.md flows', async () => {
     // 1. Health check
-    const health = await getHealth();
+    const health = await getHealth(
+      new Request('http://localhost:3000/api/health'),
+    );
     expect(health.status).toBe(200);
     const healthBody = await health.json();
     expect(healthBody.status).toBe('ok');
@@ -216,6 +218,13 @@ describe('quickstart vertical slice', () => {
     );
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({ error: 'At least one target is required' });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Request validation failed',
+        retryable: false,
+        requestId: response.headers.get('X-Request-Id'),
+      },
+    });
   });
 });

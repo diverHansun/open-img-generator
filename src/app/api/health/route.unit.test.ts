@@ -19,14 +19,17 @@ describe('health readiness with an unavailable database', () => {
     vi.resetModules();
 
     const { GET } = await import('./route');
-    const response = GET();
+    const response = GET(new Request('http://localhost:3000/api/health'));
     const body = await response.json();
+    const requestId = response.headers.get('X-Request-Id');
 
     expect(response.status).toBe(503);
+    expect(requestId).toBeTruthy();
     expect(body.error).toEqual({
       code: 'DATABASE_UNAVAILABLE',
       message: 'Database is unavailable',
       retryable: true,
+      requestId,
     });
     expect(JSON.stringify(body)).not.toContain(os.tmpdir());
   });

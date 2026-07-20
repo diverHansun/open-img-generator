@@ -13,6 +13,11 @@ import type {
 } from '@/lib/web-client';
 
 import { GenerateInspector } from './generate-inspector';
+import {
+  getGenerateErrorActionLabelKey,
+  type GenerateErrorAction,
+  type GenerateErrorPresentation,
+} from './generate-error';
 import type { AvailableModelTarget } from './generate-state';
 import styles from './generate-screen.module.css';
 
@@ -33,6 +38,7 @@ export type GenerateComposeProps = {
   seed: string;
   negativePrompt: string;
   formError: string | null;
+  submissionError: GenerateErrorPresentation | null;
   submitting: boolean;
   currentGenerationId: string | null;
   currentSnapshot: GenerationView | null;
@@ -47,6 +53,7 @@ export type GenerateComposeProps = {
   onNegativePromptChange: (value: string) => void;
   onClear: () => void;
   onSubmit: () => void;
+  onSubmissionAction: (action: GenerateErrorAction) => void;
   onOpenCurrentTask: () => void;
 };
 
@@ -71,6 +78,7 @@ export function GenerateCompose({
   seed,
   negativePrompt,
   formError,
+  submissionError,
   submitting,
   currentGenerationId,
   currentSnapshot,
@@ -85,6 +93,7 @@ export function GenerateCompose({
   onNegativePromptChange,
   onClear,
   onSubmit,
+  onSubmissionAction,
   onOpenCurrentTask,
 }: GenerateComposeProps) {
   const { t } = useLocale();
@@ -92,6 +101,9 @@ export function GenerateCompose({
   const [sessionDraft, setSessionDraft] = React.useState('');
 
   const activeSession = sessions.find((item) => item.id === activeSessionId);
+  const submissionActionLabelKey = submissionError
+    ? getGenerateErrorActionLabelKey(submissionError.action)
+    : null;
 
   const beginRename = React.useCallback(() => {
     if (!activeSession) return;
@@ -216,6 +228,36 @@ export function GenerateCompose({
           <p className={styles.inlineError} role="alert">
             {formError}
           </p>
+        ) : null}
+
+        {submissionError ? (
+          <div className={styles.submissionNotice} role="alert">
+            <p>{t(submissionError.messageKey)}</p>
+            {submissionError.retryAfterSeconds !== undefined ? (
+              <small>
+                {t('generate.error.retryAfter', {
+                  seconds: submissionError.retryAfterSeconds,
+                })}
+              </small>
+            ) : null}
+            {submissionError.requestId ? (
+              <small>
+                {t('generate.error.requestId', {
+                  requestId: submissionError.requestId,
+                })}
+              </small>
+            ) : null}
+            {submissionActionLabelKey ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => onSubmissionAction(submissionError.action)}
+              >
+                {t(submissionActionLabelKey)}
+              </Button>
+            ) : null}
+          </div>
         ) : null}
 
         <div className={styles.composeActions}>
