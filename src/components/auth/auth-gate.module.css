@@ -1,0 +1,94 @@
+.page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: clamp(1.5rem, 5vw, 3.5rem);
+  background: var(--color-canvas);
+}
+
+.panel {
+  display: grid;
+  width: min(100%, 28rem);
+  gap: clamp(1.25rem, 4vw, 2rem);
+  padding-block: clamp(2rem, 6vw, 3.5rem);
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.panel > svg {
+  box-sizing: content-box;
+  width: 1.125rem;
+  height: 1.125rem;
+  padding: 0.625rem;
+  border: 1px solid var(--color-line);
+  border-radius: 50%;
+  background: var(--color-accent-quiet);
+  color: var(--color-accent-strong);
+}
+
+.panel h1,
+.panel p {
+  margin: 0;
+}
+
+.panel h1 {
+  font-size: clamp(1.45rem, 3vw, 1.75rem);
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+:global(html:lang(zh-CN)) .panel h1 {
+  font-family: var(--font-display-zh);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.panel p {
+  margin-top: var(--space-2);
+  color: var(--color-ink-muted);
+}
+
+.form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.form label {
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.error {
+  color: var(--color-danger) !important;
+  font-size: 0.8125rem;
+}
+
+.progress {
+  width: 5.5rem;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-line);
+}
+
+.progress::after {
+  display: block;
+  width: 45%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent-strong);
+  animation: auth-progress 1.1s var(--ease-standard) infinite alternate;
+  content: '';
+}
+
+@keyframes auth-progress {
+  to {
+    transform: translateX(125%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress::after {
+    animation: none;
+  }
+}

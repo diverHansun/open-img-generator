@@ -3,3 +3,7 @@ allowBuilds:
   esbuild: true
   msw: false
   sharp: true
+minimumReleaseAgeExclude:
+  - '@fontsource-variable/noto-sans-sc@5.3.0'
+  - '@fontsource-variable/suse@5.3.0'
+  - '@fontsource/lxgw-wenkai@5.3.0'

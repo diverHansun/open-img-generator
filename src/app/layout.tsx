@@ -1,5 +1,9 @@
 import type { Metadata } from 'next';
 
+import { AuthGate } from '@/components/auth/auth-gate';
+import { LocaleProvider } from '@/components/i18n/locale-provider';
+
+import { appFontClassName } from './fonts';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -10,7 +14,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body className={appFontClassName}>
+        <LocaleProvider>
+          <AuthGate>{children}</AuthGate>
+        </LocaleProvider>
+      </body>
     </html>
   );
 }
