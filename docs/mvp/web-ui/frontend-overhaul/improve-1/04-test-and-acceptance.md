@@ -205,7 +205,7 @@ npm run build
 | `pnpm test:integration` | **通过：5 files / 11 tests** | 临时 SQLite、原子 user-config、并发写入、加密文件与 API/console secret canary 均通过；未调用真实 Provider 外部 HTTP |
 | `pnpm test:verify` | **通过** | 顺序执行 typecheck、unit、contract、integration 的完整本地发布门 |
 | `pnpm build` | **通过** | Next.js 15.5.20 production build 成功 |
-| 浏览器人工 QA | **通过（本轮范围）** | 1440/1024/390px；中英文；Home、Generate Compose/Stage、Provider 目录/详情、History、Gallery、Models；移动导航；Preview → Generation Detail 互斥切换与焦点转移；模型开关写入/恢复；空凭证校验；干净导航后无新增 warning/error |
+| 浏览器人工 QA | **通过（本轮范围）** | 1440/1024/919/620/390px；中英文；Home、Generate Compose/Stage、Provider 目录/详情、History、Gallery、Models；Gallery 标题右侧筛选在各断点无横向溢出；移动导航；Preview → Generation Detail 互斥切换与焦点转移；模型开关写入/恢复；空凭证校验；干净导航后无新增 warning/error |
 | motion / glass 静态检查 | **通过** | 动效均有 `prefers-reduced-motion` 收敛；glass 有实色 token 或 `@supports not (backdrop-filter)` fallback；未做脆弱的逐像素或浏览器特性模拟断言 |
 
 当前发布门已完成。运行环境使用 Node 26.3.1 时 pnpm 会提示项目声明仅支持 Node 20/22/24；验证本身全部通过，但正式开发与 CI 应使用 Node 24 或 22 以消除 engine warning。

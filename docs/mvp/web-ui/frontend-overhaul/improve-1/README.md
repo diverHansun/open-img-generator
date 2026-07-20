@@ -192,4 +192,4 @@ README.md
 2. Backend Contract、Frontend API Wiring、App Router 壳、Tailwind/shadcn、基础 CSS Modules 与 typed i18n 已落地；旧巨型 workbench 已删除。
 3. Visual Decision Gate 已冻结结构、密度、青瓷/茉莉绿色相家族、无渐变规则、受限 glass/halo 与字体边界。
 4. Generate → Provider 配置 → History/Gallery → Models/Providers → Dialogs 的真实 TSX 与业务状态已按顺序落地，Foundation 与旧页面 CSS 已删除。
-5. `pnpm test:verify`、secret canary、production build，以及 1440/1024/390px、中英文与关键正常/校验错误状态的浏览器验收已完成；验证证据记录在 `04-test-and-acceptance.md`。
+5. `pnpm test:verify`、secret canary、production build，以及 1440/1024/919/620/390px、中英文与关键正常/校验错误状态的浏览器验收已完成；验证证据记录在 `04-test-and-acceptance.md`。

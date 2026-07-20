@@ -1,40 +1,38 @@
 .switcher {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-raised);
+  gap: var(--space-1);
   color: var(--color-ink-muted);
   font-size: 0.75rem;
 }
 
 .switcher > span {
-  display: none;
+  color: var(--color-line-strong);
+  user-select: none;
 }
 
 .switcher button {
   min-width: 2.5rem;
   min-height: 2.125rem;
-  padding: 0 var(--space-2);
+  padding: 0 var(--space-1);
   border: 0;
-  border-radius: calc(var(--radius-md) - 2px);
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
-  transition: background-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard);
+  transition: color var(--duration-fast) var(--ease-standard);
 }
 
 .switcher button:hover {
-  background: var(--color-accent-quiet);
   color: var(--color-ink);
 }
 
 .switcher button[aria-pressed='true'] {
-  background: var(--color-accent-soft);
   color: var(--color-ink);
   font-weight: 650;
+  text-decoration-color: var(--color-accent-strong);
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.35em;
 }
 
 @media (hover: none) {

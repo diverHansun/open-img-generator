@@ -473,53 +473,62 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
         eyebrow={t('gallery.eyebrow')}
         title={t('gallery.title')}
         description={t('gallery.description')}
+        actions={
+          <div ref={filtersRef} className={styles.filters}>
+            <label>
+              <span>{t('gallery.workspaceFilter')}</span>
+              <select
+                value={filters.workspace ?? ''}
+                onChange={(event) =>
+                  changeFilters({
+                    ...filters,
+                    workspace: event.target.value || undefined,
+                  })
+                }
+              >
+                <option value="">{t('gallery.allWorkspaces')}</option>
+                {filters.workspace &&
+                !options.projects.some(
+                  (entry) => entry.project.id === filters.workspace,
+                ) ? (
+                  <option value={filters.workspace}>{filters.workspace}</option>
+                ) : null}
+                {options.projects.map((entry) => (
+                  <option key={entry.project.id} value={entry.project.id}>
+                    {entry.project.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>{t('gallery.providerFilter')}</span>
+              <select
+                value={filters.provider ?? ''}
+                onChange={(event) =>
+                  changeFilters({
+                    ...filters,
+                    provider: (event.target.value ||
+                      undefined) as GalleryFilters['provider'],
+                  })
+                }
+              >
+                <option value="">{t('gallery.allProviders')}</option>
+                {filters.provider &&
+                !options.providers.some(
+                  (entry) => entry.providerId === filters.provider,
+                ) ? (
+                  <option value={filters.provider}>{filters.provider}</option>
+                ) : null}
+                {options.providers.map((entry) => (
+                  <option key={entry.providerId} value={entry.providerId}>
+                    {entry.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        }
       />
-
-      <div ref={filtersRef} className={styles.filters}>
-        <label>
-          <span>{t('gallery.workspaceFilter')}</span>
-          <select
-            value={filters.workspace ?? ''}
-            onChange={(event) =>
-              changeFilters({ ...filters, workspace: event.target.value || undefined })
-            }
-          >
-            <option value="">{t('gallery.allWorkspaces')}</option>
-            {filters.workspace && !options.projects.some((entry) => entry.project.id === filters.workspace) ? (
-              <option value={filters.workspace}>{filters.workspace}</option>
-            ) : null}
-            {options.projects.map((entry) => (
-              <option key={entry.project.id} value={entry.project.id}>
-                {entry.project.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>{t('gallery.providerFilter')}</span>
-          <select
-            value={filters.provider ?? ''}
-            onChange={(event) =>
-              changeFilters({
-                ...filters,
-                provider: (event.target.value || undefined) as GalleryFilters['provider'],
-              })
-            }
-          >
-            <option value="">{t('gallery.allProviders')}</option>
-            {filters.provider &&
-            !options.providers.some((entry) => entry.providerId === filters.provider) ? (
-              <option value={filters.provider}>{filters.provider}</option>
-            ) : null}
-            {options.providers.map((entry) => (
-              <option key={entry.providerId} value={entry.providerId}>
-                {entry.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <span className={styles.sortLabel}>{t('gallery.newest')}</span>
-      </div>
 
       {options.hasError ? (
         <InlineNotice variant="warning" title={t('gallery.filterError')} />

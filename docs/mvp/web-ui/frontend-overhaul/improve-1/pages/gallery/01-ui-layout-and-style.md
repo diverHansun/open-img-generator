@@ -3,15 +3,14 @@
 ## 1. 页面结构
 
 ```text
-Gallery
-[Workspace ▼] [Provider ▼]                           Newest
+Gallery · description                  [Workspace ▼] [Provider ▼]
 ──────────────────────────────────────────────────────────────
 [ portrait ][ landscape ][ square ][ tall ][ landscape ... ]
 [   tall   ][ square    ][ wide                ][ portrait  ]
                          Load more
 ```
 
-PageHeader 下是一行轻量 filters：Workspace、Provider；Newest 为固定排序文案，不渲染可变 sort 控件。正文直接进入图片区，不设置 Workspace rail、Refresh 或额外卡片容器。
+Workspace、Provider 作为紧凑 actions 放在 PageHeader 文字右侧；排序固定为 newest，不额外渲染排序文案或可变 sort 控件。筛选区不使用全宽卡片、玻璃底板或独立纵向区块，正文尽早进入图片区；不设置 Workspace rail、Refresh 或额外卡片容器。
 
 ## 2. 图片墙
 
@@ -42,6 +41,6 @@ Load more 位于网格底部中央；加载/失败不清空已有图片。无收
 ## 5. 响应式与样式边界
 
 - 桌面列宽根据可用主区自适应；小屏通常 2 列，极窄或大图场景可 1 列。
-- filters 可换行或横向滚动，不引入首批范围外的 filter drawer 字段。
+- 桌面端标题文字与 filters 同排；窄屏时 PageHeader 上下堆叠，但两个筛选控件优先保持同排并允许收缩，不引入首批范围外的 filter drawer 字段。
 - 不使用常驻文字标签、任何渐变/gradient shimmer、蓝紫或多色 AI 光效、emoji Favorite 或厚卡片；仅 hover/focus/预览工具可使用单色局部 halo/glass 反馈。
 - 实施模型可以调整列宽算法、圆角和 hover 过渡，但必须保留图片优先、细 gutter、可访问顺序和无常驻标签。

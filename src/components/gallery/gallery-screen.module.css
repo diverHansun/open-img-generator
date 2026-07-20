@@ -1,27 +1,29 @@
 .page { width: 100%; }
 .filters {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: var(--space-2);
-  align-items: end;
-  margin-bottom: var(--space-5);
-  padding: var(--space-2);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-lg);
-  background: var(--color-glass);
-  backdrop-filter: blur(12px);
+  align-items: flex-end;
+  justify-content: flex-end;
+  min-width: 0;
 }
-.filters label { display: grid; gap: 3px; }
+.filters label {
+  display: grid;
+  flex: 0 1 10rem;
+  min-width: 0;
+  gap: 3px;
+}
 .filters label > span { color: var(--color-ink-muted); font-size: .6875rem; }
 .filters select {
-  min-width: 10rem;
-  height: 2.4rem;
+  width: 100%;
+  min-width: 0;
+  height: 2.25rem;
   padding: 0 2rem 0 var(--space-3);
-  border: 0;
+  border: 1px solid var(--color-control-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
+  color: var(--color-ink);
 }
-.sortLabel { margin-left: auto; padding: .65rem var(--space-3); color: var(--color-ink-muted); font-size: .75rem; }
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
@@ -76,12 +78,14 @@
 }
 .loadingGrid span { border-radius: var(--radius-md); background: var(--color-surface-subtle); animation: gallery-loading 900ms ease-in-out infinite alternate; }
 @keyframes gallery-loading { to { opacity: .42; } }
-@supports not (backdrop-filter: blur(1px)) { .filters, .tileMeta { background: var(--color-surface); } }
-@media (max-width: 620px) {
-  .filters { align-items: stretch; }
+@supports not (backdrop-filter: blur(1px)) { .tileMeta { background: var(--color-surface); } }
+@media (max-width: 619px) {
+  .filters {
+    width: 100%;
+    align-items: stretch;
+    justify-content: flex-start;
+  }
   .filters label { flex: 1 1 9rem; }
-  .filters select { width: 100%; min-width: 0; }
-  .sortLabel { width: 100%; margin-left: 0; padding: var(--space-1); }
   .grid, .loadingGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 6rem; }
 }
 @media (max-width: 400px) {

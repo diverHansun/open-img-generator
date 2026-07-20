@@ -202,3 +202,11 @@ UI 文案使用 Workspace，代码和 HTTP DTO 继续使用 Project/`projectId`�
 | 实施顺序 | 先更新文档和承重边界，再删除 `PageFoundation` / `GenerateFoundation` 与旧 CSS；按 Generate → Provider 配置 → History/Gallery → Models/Providers → Dialogs 落地真实 TSX/业务状态，最后统一视觉收口 |
 | 页面验收 | 每完成一个板块即检查排版、颜色、密度、动效、空/错/loading、中英文与响应式；不等全部页面完成后才发现系统性偏差 |
 | 架构边界 | 保持 App Router + feature components + web-client；补 WorkspaceContext、统一 AbortSignal 和单例 poll runtime，不引入全局业务 store 或万能 Page/DataTable |
+
+## 0.14 Gallery 首屏密度修订（2026-07-20）
+
+用户基于真实运行截图复核 Gallery 后，确认独立全宽筛选卡占用了过多首屏高度。最终调整为：Workspace 与 Provider 筛选复用 `PageHeader.actions`，在桌面端位于标题文字右侧；移除筛选容器的卡片底板、玻璃效果与固定 newest 文案。窄屏时 PageHeader 可上下堆叠，但两个原生筛选控件优先保持同排并允许收缩。筛选 URL、真实 API 请求、字段 label 与取消收藏后的焦点回退行为保持不变。
+
+## 0.15 语言切换去卡片化（2026-07-20）
+
+用户在桌面侧栏与竖版布局中复核 `中文 / EN` 切换后，确认白色底板与外框形成了突兀的独立卡片。共享 `LocaleSwitcher` 改为无容器底色、无边框、无阴影的裸文字切换；当前语言仅用字重和青瓷绿下划线标记。两种壳的位置、可访问 group/pressed 语义、触控热区与 localStorage 持久化行为保持不变。
