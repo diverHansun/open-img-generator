@@ -13,6 +13,11 @@ import {
 } from '../http-client';
 import { zenmuxCapabilities } from '../capabilities/zenmux';
 import { resolveCredential } from '../../user-config';
+import { resolveSyncImageGenerationTimeoutMs } from '../timeout-policy';
+import {
+  classifyProviderDiagnostic,
+  readProviderRequestIdFromResponse,
+} from '../error-diagnostics';
 
 function resolveSize(req: NormalizedRequest): string {
   if (req.width && req.height) {
@@ -112,12 +117,15 @@ export class ZenmuxProvider implements ImageProvider {
         url,
         body,
         this.authHeaders(),
+        { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
       );
       const images = parseImages(data);
       if (images.length === 0) {
         return {
           kind: 'failed',
-          error: createProviderError(500, 'No images in zenmux response', false),
+          error: createProviderError(500, 'No images in zenmux response', false, {
+            diagnostic: classifyProviderDiagnostic('zenmux', { noResult: true }),
+          }),
         };
       }
       return { kind: 'sync', images };
@@ -129,17 +137,34 @@ export class ZenmuxProvider implements ImageProvider {
   private mapError(err: unknown): ReturnType<typeof createProviderError> {
     if (err instanceof ProviderHttpError) {
       const body = err.body as Record<string, unknown> | null;
+      const providerError =
+        body && body.error && typeof body.error === 'object'
+          ? (body.error as Record<string, unknown>)
+          : null;
       const message =
-        body && 'error' in body && body.error && typeof body.error === 'object'
-          ? String((body.error as Record<string, unknown>).message ?? err.message)
+        providerError
+          ? String(providerError.message ?? err.message)
           : err.message;
-      return createProviderErrorFromHttpError(err, message);
+      return createProviderErrorFromHttpError(err, message, {
+        diagnostic: classifyProviderDiagnostic('zenmux', {
+          httpStatus: err.status,
+          providerCode: providerError?.type,
+          providerRequestId: readProviderRequestIdFromResponse(err.body, [
+            err.getHeader('x-zenmux-requestid'),
+            err.getHeader('x-request-id'),
+          ]),
+          transportTimeout: err.status === 0 && err.retryable,
+        }),
+      });
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
       return createProviderError(0, err.message, true, {
         disposition: 'unknown',
+        diagnostic: classifyProviderDiagnostic('zenmux', { transportTimeout: true }),
       });
     }
-    return createProviderError(0, err instanceof Error ? err.message : String(err), false);
+    return createProviderError(0, err instanceof Error ? err.message : String(err), false, {
+      diagnostic: classifyProviderDiagnostic('zenmux'),
+    });
   }
 }

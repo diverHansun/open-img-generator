@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeNormalizedRequest } from '../../../../tests/factories';
 import { ZhipuProvider } from './zhipu';
+import { SYNC_IMAGE_GENERATION_TIMEOUT_MS } from '../timeout-policy';
 
 describe('ZhipuProvider', () => {
   let provider: ZhipuProvider;
@@ -18,6 +19,7 @@ describe('ZhipuProvider', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.restoreAllMocks();
     if (originalEnv.apiKey === undefined) delete process.env.ZHIPU_API_KEY;
     else process.env.ZHIPU_API_KEY = originalEnv.apiKey;
     if (originalEnv.userId === undefined) delete process.env.ZHIPU_USER_ID;
@@ -34,6 +36,8 @@ describe('ZhipuProvider', () => {
   }
 
   it('submits glm-image with official size and parses data URLs', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
     mockFetch({
       created: 1720000000,
       data: [{ url: 'https://cdn.bigmodel.cn/result.png' }],
@@ -69,6 +73,7 @@ describe('ZhipuProvider', () => {
       watermark_enabled: true,
       user_id: 'local-test-user',
     });
+    expect(timeout).toHaveBeenCalledWith(SYNC_IMAGE_GENERATION_TIMEOUT_MS);
   });
 
   it('passes non-reserved provider options without allowing canonical overrides', async () => {
@@ -103,6 +108,11 @@ describe('ZhipuProvider', () => {
     if (invalid.kind === 'failed') {
       expect(invalid.error.code).toBe('INVALID_REQUEST');
       expect(invalid.error.message).toContain('invalid prompt');
+      expect(invalid.error.diagnostic).toMatchObject({
+        providerId: 'zhipu',
+        category: 'input_invalid',
+        providerCode: '1210',
+      });
     }
 
     mockFetch({ created: 1720000000, data: [] });

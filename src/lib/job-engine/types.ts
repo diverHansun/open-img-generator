@@ -1,4 +1,8 @@
-import type { ProviderId, ProviderMode } from '../providers/types';
+import type {
+  ProviderDiagnostic,
+  ProviderId,
+  ProviderMode,
+} from '../providers/types';
 
 export type GenerationTarget = {
   provider: ProviderId;
@@ -34,7 +38,12 @@ export type JobView = {
   provider: ProviderId;
   model: string;
   status: GenerationStatus;
-  error?: { code: string; message: string; retryable: boolean };
+  error?: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    diagnostic?: ProviderDiagnostic;
+  };
 };
 
 export type ImageView = {

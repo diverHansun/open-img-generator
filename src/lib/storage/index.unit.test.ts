@@ -15,6 +15,7 @@ import { NotFoundError, StorageError } from '../errors';
 describe('storage', () => {
   let tempDir: string;
   const originalEnv = process.env.LOCAL_STORAGE_DIR;
+  const originalTrustedProxyImageHosts = process.env.TRUSTED_PROXY_IMAGE_HOSTS;
   const originalFetch = global.fetch;
   const imageBuffer = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -30,6 +31,11 @@ describe('storage', () => {
 
   afterEach(() => {
     process.env.LOCAL_STORAGE_DIR = originalEnv;
+    if (originalTrustedProxyImageHosts === undefined) {
+      delete process.env.TRUSTED_PROXY_IMAGE_HOSTS;
+    } else {
+      process.env.TRUSTED_PROXY_IMAGE_HOSTS = originalTrustedProxyImageHosts;
+    }
     global.fetch = originalFetch;
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
@@ -140,6 +146,20 @@ describe('storage', () => {
 
     await expect(downloadAndStore('https://cdn.example.com/signed?token=secret', {
       resolveHostname: publicResolver,
+    })).rejects.toThrow('Remote image redirect is not allowed');
+
+    expect(global.fetch).toHaveBeenCalledOnce();
+  });
+
+  it('rechecks proxy-mapped host allowlisting after each redirect', async () => {
+    process.env.TRUSTED_PROXY_IMAGE_HOSTS = 'v3b.fal.media';
+    global.fetch = vi.fn().mockResolvedValue(new Response(null, {
+      status: 302,
+      headers: { location: 'https://untrusted.example/private-image' },
+    }));
+
+    await expect(downloadAndStore('https://v3b.fal.media/signed?token=secret', {
+      resolveHostname: async () => ['198.18.0.125'],
     })).rejects.toThrow('Remote image redirect is not allowed');
 
     expect(global.fetch).toHaveBeenCalledOnce();

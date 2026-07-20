@@ -23,6 +23,10 @@ import {
   trustedSameOriginProviderUrl,
 } from '../endpoint-policy';
 import { resolveCredential } from '../../user-config';
+import {
+  classifyProviderDiagnostic,
+  readProviderRequestIdFromResponse,
+} from '../error-diagnostics';
 
 const DEFAULT_FAL_BASE_URL = 'https://queue.fal.run';
 
@@ -132,6 +136,22 @@ function parseImages(payload: unknown): ProviderImageRef[] {
   });
 }
 
+function falErrorType(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const root = payload as Record<string, unknown>;
+  if (typeof root.error_type === 'string') return root.error_type;
+  const detail = root.detail;
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    return (detail as Record<string, unknown>).type;
+  }
+  if (Array.isArray(detail) && detail[0] && typeof detail[0] === 'object') {
+    return (detail[0] as Record<string, unknown>).type;
+  }
+  return undefined;
+}
+
 export class FalProvider implements ImageProvider {
   id = 'fal' as const;
   displayName = 'fal.ai';
@@ -193,6 +213,19 @@ export class FalProvider implements ImageProvider {
 
       if (status === 'IN_QUEUE') return { status: 'pending' };
       if (status === 'IN_PROGRESS') return { status: 'running' };
+      if (status === 'FAILED') {
+        return {
+          status: 'failed',
+          error: createProviderError(422, 'Fal task failed', false, {
+            diagnostic: classifyProviderDiagnostic('fal', {
+              httpStatus: 422,
+              providerCode: falErrorType(statusData),
+              providerRequestId: readProviderRequestIdFromResponse(statusData),
+              upstreamRejected: true,
+            }),
+          }),
+        };
+      }
       if (status !== 'COMPLETED') {
         return {
           status: 'failed',
@@ -200,6 +233,11 @@ export class FalProvider implements ImageProvider {
             500,
             `Unexpected fal status: ${status}`,
             false,
+            {
+              diagnostic: classifyProviderDiagnostic('fal', {
+                httpStatus: 500,
+              }),
+            },
           ),
         };
       }
@@ -213,7 +251,9 @@ export class FalProvider implements ImageProvider {
       if (images.length === 0) {
         return {
           status: 'failed',
-          error: createProviderError(500, 'No images in fal response', false),
+          error: createProviderError(500, 'No images in fal response', false, {
+            diagnostic: classifyProviderDiagnostic('fal', { noResult: true }),
+          }),
         };
       }
       return { status: 'completed', images };
@@ -253,13 +293,30 @@ export class FalProvider implements ImageProvider {
         typeof err.body === 'object' && err.body && 'detail' in err.body
           ? String((err.body as Record<string, unknown>).detail)
           : err.message;
-      return createProviderErrorFromHttpError(err, message);
+      const retryableHeader = err.getHeader('x-fal-retryable')?.toLowerCase();
+      return createProviderErrorFromHttpError(err, message, {
+        ...(retryableHeader === 'true' || retryableHeader === 'false'
+          ? { retryable: retryableHeader === 'true' }
+          : {}),
+        diagnostic: classifyProviderDiagnostic('fal', {
+          httpStatus: err.status,
+          providerCode: falErrorType(err.body) ?? err.getHeader('x-fal-error-type'),
+          providerRequestId: readProviderRequestIdFromResponse(err.body, [
+            err.getHeader('x-fal-request-id'),
+            err.getHeader('x-request-id'),
+          ]),
+          transportTimeout: err.status === 0 && err.retryable,
+        }),
+      });
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
       return createProviderError(0, err.message, true, {
         disposition: 'unknown',
+        diagnostic: classifyProviderDiagnostic('fal', { transportTimeout: true }),
       });
     }
-    return createProviderError(0, err instanceof Error ? err.message : String(err), false);
+    return createProviderError(0, err instanceof Error ? err.message : String(err), false, {
+      diagnostic: classifyProviderDiagnostic('fal'),
+    });
   }
 }

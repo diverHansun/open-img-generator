@@ -1,4 +1,5 @@
 import type { JobView } from './types';
+import { toSafeProviderDiagnostic } from '../providers/error-diagnostics';
 
 type SafeJobError = NonNullable<JobView['error']>;
 
@@ -115,12 +116,15 @@ export function serializeSafeJobError(
   code: unknown,
   retryable: boolean,
   fallbackCode: SafeJobErrorCode = 'INTERNAL_ERROR',
+  diagnostic?: unknown,
 ): string {
   const safeCode = isSafeJobErrorCode(code) ? code : fallbackCode;
+  const safeDiagnostic = toSafeProviderDiagnostic(diagnostic);
   return JSON.stringify({
     code: safeCode,
     message: SAFE_JOB_ERRORS[safeCode].message,
     retryable,
+    ...(safeDiagnostic === undefined ? {} : { diagnostic: safeDiagnostic }),
   });
 }
 
@@ -152,6 +156,7 @@ export function toSafeJobError(serialized: string | null): JobView['error'] {
 
   const code = Reflect.get(parsed, 'code') as keyof typeof SAFE_JOB_ERRORS;
   const policy = SAFE_JOB_ERRORS[code];
+  const diagnostic = toSafeProviderDiagnostic(Reflect.get(parsed, 'diagnostic'));
   return {
     code,
     message: policy.message,
@@ -159,5 +164,6 @@ export function toSafeJobError(serialized: string | null): JobView['error'] {
     // deliberately retained: a provider can make an otherwise retryable code
     // terminal for this specific job (for example a non-retryable timeout).
     retryable: Reflect.get(parsed, 'retryable') as boolean,
+    ...(diagnostic === undefined ? {} : { diagnostic }),
   };
 }

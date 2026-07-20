@@ -18,6 +18,7 @@ describe('KlingProvider', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.restoreAllMocks();
     if (originalEnv.apiKey === undefined) delete process.env.KLING_API_KEY;
     else process.env.KLING_API_KEY = originalEnv.apiKey;
     if (originalEnv.baseUrl === undefined) delete process.env.KLING_BASE_URL;
@@ -34,6 +35,8 @@ describe('KlingProvider', () => {
   }
 
   it('submits through the standalone Kling API and strips data URL prefixes', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
     mockFetch({ code: 0, data: { task_id: 'kling-task-1' } });
 
     const result = await provider.submit(
@@ -77,9 +80,12 @@ describe('KlingProvider', () => {
       image_fidelity: 0.7,
     });
     expect(JSON.parse(init?.body as string).model_name).toBe('kling-v3');
+    expect(timeout).toHaveBeenCalledWith(30_000);
   });
 
   it('polls submitted, processing, success, and failure envelopes', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
     mockFetch({ code: 0, data: { task_status: 'submitted' } });
     const handle = {
       providerId: 'kling' as const,
@@ -111,6 +117,14 @@ describe('KlingProvider', () => {
     mockFetch({ code: '1001', message: 'bad prompt' });
     const failed = await provider.poll(handle);
     expect(failed.status).toBe('failed');
+    if (failed.status === 'failed') {
+      expect(failed.error.diagnostic).toMatchObject({
+        providerId: 'kling',
+        category: 'authentication',
+        providerCode: '1001',
+      });
+    }
+    expect(timeout).toHaveBeenCalledWith(15_000);
   });
 
   it('rebuilds a poll endpoint from the configured base and encoded task ID', async () => {

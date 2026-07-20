@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { toSafeJobError } from './job-error';
+import { serializeSafeJobError, toSafeJobError } from './job-error';
 
 describe('public job error DTO', () => {
   it('replaces malformed legacy diagnostics without echoing their contents', () => {
@@ -68,6 +68,34 @@ describe('public job error DTO', () => {
       code: 'TIMEOUT',
       message: 'Provider request timed out',
       retryable: false,
+    });
+  });
+
+  it('keeps only allowlisted provider diagnostics', () => {
+    const serialized = serializeSafeJobError(
+      'INVALID_REQUEST',
+      false,
+      'PROVIDER_ERROR',
+      {
+        providerId: 'kling',
+        category: 'content_policy',
+        providerCode: '1301',
+        providerRequestId: 'req-123',
+        rawMessage: 'prompt https://signed.example/image?token=secret',
+      },
+    );
+
+    expect(serialized).not.toContain('signed.example');
+    expect(toSafeJobError(serialized)).toEqual({
+      code: 'INVALID_REQUEST',
+      message: 'Provider rejected the request',
+      retryable: false,
+      diagnostic: {
+        providerId: 'kling',
+        category: 'content_policy',
+        providerCode: '1301',
+        providerRequestId: 'req-123',
+      },
     });
   });
 });

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeNormalizedRequest } from '../../../../tests/factories';
 import { DoubaoProvider } from './doubao';
+import { SYNC_IMAGE_GENERATION_TIMEOUT_MS } from '../timeout-policy';
 
 describe('DoubaoProvider', () => {
   let provider: DoubaoProvider;
@@ -18,6 +19,7 @@ describe('DoubaoProvider', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.restoreAllMocks();
     if (originalEnv.apiKey === undefined) delete process.env.ARK_API_KEY;
     else process.env.ARK_API_KEY = originalEnv.apiKey;
     if (originalEnv.baseUrl === undefined) delete process.env.ARK_BASE_URL;
@@ -34,6 +36,8 @@ describe('DoubaoProvider', () => {
   }
 
   it('submits Seedream and parses image metadata', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
     mockFetch({
       model: 'doubao-seedream-4-0-250828',
       data: [{ url: 'https://cdn.volcengine.com/result.jpg', size: '2048x1536' }],
@@ -67,6 +71,7 @@ describe('DoubaoProvider', () => {
       sequential_image_generation: 'disabled',
       response_format: 'url',
     });
+    expect(timeout).toHaveBeenCalledWith(SYNC_IMAGE_GENERATION_TIMEOUT_MS);
   });
 
   it('passes reference images and non-reserved options', async () => {
@@ -88,7 +93,7 @@ describe('DoubaoProvider', () => {
   });
 
   it.each([
-    [400, { error: { message: 'invalid prompt' } }, 'INVALID_REQUEST', false],
+    [400, { error: { code: 'InvalidParameter', message: 'invalid prompt' } }, 'INVALID_REQUEST', false],
     [401, { message: 'invalid token' }, 'AUTH_FAILED', false],
     [429, { message: 'quota exceeded' }, 'RATE_LIMITED', true],
     [503, { message: 'service unavailable' }, 'PROVIDER_ERROR', true],
@@ -100,6 +105,13 @@ describe('DoubaoProvider', () => {
     if (result.kind === 'failed') {
       expect(result.error.code).toBe(code);
       expect(result.error.retryable).toBe(retryable);
+      if (status === 400) {
+        expect(result.error.diagnostic).toMatchObject({
+          providerId: 'doubao',
+          category: 'input_invalid',
+          providerCode: 'InvalidParameter',
+        });
+      }
     }
   });
 });

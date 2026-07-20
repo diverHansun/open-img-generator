@@ -13,7 +13,7 @@
 
 ## 下载安全边界
 
-`downloadAndStore()` 把 Provider/CDN 返回值视为不可信输入：每个初始 URL 与最多三次 manual redirect 都校验协议、userinfo、DNS 解析出的全部 IP 与地址类别；默认只接受公网 HTTPS。响应在 `.tmp/` 中流式写入，`Content-Length` 与实际字节都不能超过 25 MiB，只有 PNG/JPEG/WebP 且 MIME 与 magic bytes 一致才会原子 rename 到正式路径。失败只产生固定 `StorageError` 文案，不拼接签名 URL 的 pathname/query/fragment。
+`downloadAndStore()` 把 Provider/CDN 返回值视为不可信输入：每个初始 URL 与最多三次 manual redirect 都校验协议、userinfo、DNS 解析出的全部 IP 与地址类别；默认只接受公网 HTTPS。透明代理兼容仅限 `TRUSTED_PROXY_IMAGE_HOSTS` 中的精确 HTTPS hostname，且该 host 的**全部** DNS 结果均为 `198.18.0.0/15`；mixed answer、其他 reserved/private 段和未白名单 redirect 一律拒绝。它不是 `ALLOW_PRIVATE_IMAGE_URLS` 的替代品，后者仍仅供本地 fake provider。响应在 `.tmp/` 中流式写入，`Content-Length` 与实际字节都不能超过 25 MiB，只有 PNG/JPEG/WebP 且 MIME 与 magic bytes 一致才会原子 rename 到正式路径。失败只产生固定 `StorageError` 文案，不拼接签名 URL 的 pathname/query/fragment。
 
 `data:` 图片先分块解码到私有 `.staging/`，同样校验 25 MiB、声明 MIME 与 magic bytes；DB snapshot 仅能引用 `staging:<uuid>`。当前单图 sync adapter 的 encoded JSON 入口固定为 36 MiB，普通 Provider JSON 仍为 2 MiB；未来若放开 sync 多图，必须先重做 encoded 总预算。`.tmp/` 或 `.staging/` 的崩溃残留仍由现有 orphan grace 扫描回收。
 

@@ -21,6 +21,10 @@ import {
   trustedProviderExternalId,
 } from '../endpoint-policy';
 import { resolveCredential } from '../../user-config';
+import {
+  classifyProviderDiagnostic,
+  readProviderRequestIdFromResponse,
+} from '../error-diagnostics';
 
 const DEFAULT_BASE_URL = 'https://api-singapore.klingai.com';
 const RESERVED_KEYS = new Set([
@@ -113,6 +117,27 @@ function readEnvelopeError(payload: unknown): { code: number; message: string } 
   };
 }
 
+function klingHttpStatus(code: number): number {
+  if (code >= 1000 && code <= 1004) return 401;
+  if (code === 1103 || code === 1304) return 403;
+  if (code === 1100 || code === 1101 || code === 1102 || code === 1302 || code === 1303) {
+    return 429;
+  }
+  if (code === 1202 || code === 1203) return 404;
+  if (code === 1200 || code === 1201 || code === 1300 || code === 1301) return 400;
+  if (code === 5001) return 503;
+  if (code === 5002) return 504;
+  return 500;
+}
+
+function klingDiagnostic(payload: unknown, code: number, httpStatus: number) {
+  return classifyProviderDiagnostic('kling', {
+    httpStatus,
+    providerCode: code,
+    providerRequestId: readProviderRequestIdFromResponse(payload),
+  });
+}
+
 function parseImages(payload: unknown): ProviderImageRef[] {
   if (!payload || typeof payload !== 'object') return [];
   const root = payload as Record<string, unknown>;
@@ -155,7 +180,18 @@ export class KlingProvider implements ImageProvider {
       if (envelopeError) {
         return {
           kind: 'failed',
-          error: createProviderError(envelopeError.code === 401 ? 401 : 422, envelopeError.message),
+          error: createProviderError(
+            klingHttpStatus(envelopeError.code),
+            envelopeError.message,
+            false,
+            {
+              diagnostic: klingDiagnostic(
+                data,
+                envelopeError.code,
+                klingHttpStatus(envelopeError.code),
+              ),
+            },
+          ),
         };
       }
       const output = data && typeof data === 'object'
@@ -203,7 +239,21 @@ export class KlingProvider implements ImageProvider {
       const data = await getJson(generationsUrl(handle.externalId), authHeaders(), 15_000);
       const envelopeError = readEnvelopeError(data);
       if (envelopeError) {
-        return { status: 'failed', error: createProviderError(422, envelopeError.message) };
+        return {
+          status: 'failed',
+          error: createProviderError(
+            klingHttpStatus(envelopeError.code),
+            envelopeError.message,
+            false,
+            {
+              diagnostic: klingDiagnostic(
+                data,
+                envelopeError.code,
+                klingHttpStatus(envelopeError.code),
+              ),
+            },
+          ),
+        };
       }
       const output = data && typeof data === 'object'
         ? (data as Record<string, unknown>).data
@@ -217,7 +267,12 @@ export class KlingProvider implements ImageProvider {
         const images = parseImages(data);
         return images.length > 0
           ? { status: 'completed', images }
-          : { status: 'failed', error: createProviderError(500, 'No images in Kling response') };
+          : {
+              status: 'failed',
+              error: createProviderError(500, 'No images in Kling response', false, {
+                diagnostic: classifyProviderDiagnostic('kling', { noResult: true }),
+              }),
+            };
       }
       if (status === 'failed' || status === 'canceled' || status === 'cancelled') {
         const message = output && typeof output === 'object' && typeof (output as Record<string, unknown>).task_status_msg === 'string'
@@ -225,7 +280,16 @@ export class KlingProvider implements ImageProvider {
           : `Kling task ${status}`;
         return status === 'canceled' || status === 'cancelled'
           ? { status: 'cancelled' }
-          : { status: 'failed', error: createProviderError(422, message) };
+          : {
+              status: 'failed',
+              error: createProviderError(422, message, false, {
+                diagnostic: classifyProviderDiagnostic('kling', {
+                  httpStatus: 422,
+                  providerRequestId: readProviderRequestIdFromResponse(data),
+                  upstreamRejected: true,
+                }),
+              }),
+            };
       }
       return { status: 'failed', error: createProviderError(500, `Unexpected Kling status: ${status || 'unknown'}`) };
     } catch (err) {
@@ -237,13 +301,26 @@ export class KlingProvider implements ImageProvider {
     if (err instanceof ProviderHttpError) {
       const body = err.body as Record<string, unknown> | null;
       const message = body && typeof body.message === 'string' ? body.message : err.message;
-      return createProviderErrorFromHttpError(err, message);
+      const envelopeError = readEnvelopeError(err.body);
+      return createProviderErrorFromHttpError(err, message, {
+        diagnostic: classifyProviderDiagnostic('kling', {
+          httpStatus: err.status,
+          providerCode: envelopeError?.code,
+          providerRequestId: readProviderRequestIdFromResponse(err.body, [
+            err.getHeader('x-request-id'),
+          ]),
+          transportTimeout: err.status === 0 && err.retryable,
+        }),
+      });
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
       return createProviderError(0, err.message, true, {
         disposition: 'unknown',
+        diagnostic: classifyProviderDiagnostic('kling', { transportTimeout: true }),
       });
     }
-    return createProviderError(0, err instanceof Error ? err.message : String(err), false);
+    return createProviderError(0, err instanceof Error ? err.message : String(err), false, {
+      diagnostic: classifyProviderDiagnostic('kling'),
+    });
   }
 }

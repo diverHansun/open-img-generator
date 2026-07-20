@@ -4,6 +4,7 @@ import {
   DEFAULT_PROVIDER_JSON_RESPONSE_BYTES,
   getJson,
   MAX_PROVIDER_INLINE_JSON_RESPONSE_BYTES,
+  mapHttpStatusToErrorCode,
   parseRetryAfter,
   postJson,
   postJsonWithInlineImageResponse,
@@ -16,6 +17,13 @@ describe('provider HTTP boundary', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+  });
+
+  it.each([
+    [402, 'QUOTA_EXCEEDED'],
+    [404, 'INVALID_REQUEST'],
+  ] as const)('keeps HTTP %s in the stable provider error-code contract', (status, code) => {
+    expect(mapHttpStatusToErrorCode(status)).toBe(code);
   });
 
   it('parses delta and HTTP-date Retry-After values with a hard cap', () => {
@@ -51,6 +59,46 @@ describe('provider HTTP boundary', () => {
       disposition: 'not_started',
     } satisfies Partial<ProviderHttpError>);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('honors an explicit long submit budget until that budget expires', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout');
+    const controller = new AbortController();
+    const timeout = vi.fn((timeoutMs: number) => {
+      setTimeout(() => controller.abort(), timeoutMs);
+      return controller.signal;
+    });
+    vi.useFakeTimers();
+    try {
+      Object.defineProperty(AbortSignal, 'timeout', {
+        configurable: true,
+        value: timeout,
+      });
+      global.fetch = vi.fn().mockImplementation((_url, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+      );
+
+      const request = postJson('https://provider.example/submit', {}, {}, {
+        timeoutMs: 180_000,
+      });
+      const rejection = expect(request).rejects.toMatchObject({
+        disposition: 'unknown',
+        retryable: true,
+      } satisfies Partial<ProviderHttpError>);
+      expect(timeout).toHaveBeenCalledWith(180_000);
+
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(controller.signal.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(149_999);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+      if (descriptor) Object.defineProperty(AbortSignal, 'timeout', descriptor);
+      else Reflect.deleteProperty(AbortSignal, 'timeout');
+    }
   });
 
   it('composes a non-aborted caller signal without AbortSignal.any', async () => {

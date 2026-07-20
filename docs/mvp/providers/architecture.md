@@ -24,6 +24,7 @@ registry ──→ adapter(s) ──→ http-client
 | **registry** | 按 env key 判断启用状态，懒初始化 adapter 实例，对外提供 `listEnabled()` 与 `getById(id)`。是模块唯一对外入口（除 types 导出外）。 |
 | **adapter** | 每家厂商一个文件，实现 ImageProvider 契约：请求翻译、HTTP 调用、响应解析。当前已含 `fal.ts`、`zenmux.ts`、`siliconflow.ts`、`zhipu.ts`、`doubao.ts`、`qwen.ts` 与独立 Kling `kling.ts`。 |
 | **http-client** | 封装 fetch 调用：caller deadline、默认超时、manual redirect、2 MiB 流式 JSON 上限与统一错误元数据。具体 API key 由 adapter 读取 `env > user-config` 后传入；adapter 不直接裸调 fetch。 |
+| **timeout-policy** | 解析同步生图完整响应的有界预算；四个 sync adapter 共用 180 秒上限，避免在 adapter 内分散读取环境变量。 |
 | **endpoint-policy** | 校验可配置 Provider base、bounded external ID 与 Fal exact-origin 动态 URL；把 DB/Provider 返回的字符串隔离在带凭据的请求边界之外。 |
 
 **依赖规则**:
@@ -78,6 +79,7 @@ src/lib/providers/
 ├── types.ts                 # 共享数据结构（详见 data-model.md）
 ├── registry.ts              # 启用检测 + 懒初始化 + listEnabled/getById
 ├── http-client.ts           # fetch 封装（deadline、manual redirect、bounded JSON、错误映射）
+├── timeout-policy.ts         # sync 生图 submit 的共享三分钟预算
 ├── endpoint-policy.ts       # 受信 base / task ID / exact-origin 动态 URL
 ├── adapters/
 │   ├── fal.ts               # fal.ai async queue adapter
@@ -115,6 +117,10 @@ src/lib/providers/
 |------|------|------|
 | **当前: 原生 fetch** | 需手写请求/响应解析 | 协议语义清晰；async provider 不被 SDK 封装成阻塞式 await；依赖更少 |
 | 放弃: fal SDK | SDK 省少量样板代码 | SDK 把 submit+polling 封装为一次 await，与 job-engine 惰性推进语义冲突 |
+
+### 4.1.1 同步与异步的 timeout 边界
+
+ZenMux、SiliconFlow、智谱和 Doubao 的 `submit()` 成功响应本身承载完整图片，统一使用 `SYNC_IMAGE_GENERATION_TIMEOUT_MS`：默认 180 秒、只接受不大于 180 秒的正整数毫秒，非法配置回退默认值。fal、Qwen、Kling 的 submit 仅创建远端 task，继续使用 HTTP helper 的 30 秒 submit / 15 秒 poll 默认值。任何已进入网络的 submit 超时仍是 `unknown`，由 job-engine 终态收口，绝不自动重放。
 
 ### 4.2 capabilities 静态声明，不运行时探测
 

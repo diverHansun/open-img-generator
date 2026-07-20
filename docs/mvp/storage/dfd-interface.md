@@ -24,7 +24,7 @@
 ```
 job-engine
   → storage.downloadAndStore(remoteUrl)
-    → 校验 HTTPS、无 userinfo、DNS/IP 非私网（每次 redirect 重新校验）
+    → 校验 HTTPS、无 userinfo、DNS/IP 非私网（每次 redirect 重新校验；仅精确白名单 host 可使用全为 198.18/15 的透明代理映射）
     → manual redirect（最多 3 跳）→ 流式读取图片二进制（25 MiB 硬上限）
     → 校验 PNG/JPEG/WebP 的 Content-Type 与 magic bytes 一致
     → 先写 LOCAL_STORAGE_DIR/.tmp/{uuid}.tmp，再原子移动为 storagePath
@@ -53,7 +53,7 @@ API 层: GET /api/images/:id
 | 输出 | `{ storagePath: string; contentType: string; sizeBytes: number }` |
 | 失败 | 下载/URL/DNS/redirect/大小/类型/signature 任一失败均抛不含原 URL 的 `StorageError` |
 | 超时 | 建议 60s（图片文件可能较大） |
-| 网络安全 | 默认拒绝 `http:`、userinfo、localhost、loopback、RFC1918、link-local、multicast、IPv4-mapped IPv6；只有显式本地开发开关才允许 `http` + private fake provider |
+| 网络安全 | 默认拒绝 `http:`、userinfo、localhost、loopback、RFC1918、link-local、multicast、IPv4-mapped IPv6；仅 `TRUSTED_PROXY_IMAGE_HOSTS` 的精确 HTTPS host 且所有 DNS answer 在 `198.18.0.0/15` 时例外，redirect 逐跳复核；本地 fake provider 才可用显式 `http` + private 开关 |
 | 内容边界 | `Content-Length` 预检 + 流式计数均限制为 25 MiB；只接受 PNG/JPEG/WebP，MIME 与 magic bytes 必须匹配 |
 
 ### storage.getReadStream(storagePath)
@@ -90,3 +90,4 @@ worker 定期调用 `cleanupStoredImages()`；该调用只删除过期未收藏�
 | LOCAL_STORAGE_DIR | `./data/images` | 本地存储根目录 |
 | ALLOW_INSECURE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许 `http:`；生产保持关闭 |
 | ALLOW_PRIVATE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许私网/loopback 地址；生产保持关闭 |
+| TRUSTED_PROXY_IMAGE_HOSTS | 空 | 透明代理把已验证外部 HTTPS CDN 映射为 `198.18.0.0/15` 时的逗号分隔精确 host 列表；不是通配符或私网 bypass |

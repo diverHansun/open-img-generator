@@ -29,8 +29,12 @@ type ProviderHttpErrorOptions = {
 
 export type ProviderErrorMetadata = Pick<
   ProviderError,
-  'disposition' | 'retryAfterMs'
+  'diagnostic' | 'disposition' | 'retryAfterMs'
 >;
+
+export type ProviderHttpErrorMapping = ProviderErrorMetadata & {
+  retryable?: boolean;
+};
 
 export class ProviderHttpError extends Error {
   constructor(
@@ -38,6 +42,7 @@ export class ProviderHttpError extends Error {
     public readonly status: number,
     public readonly body: unknown,
     options: ProviderHttpErrorOptions = {},
+    private readonly responseHeaders?: Headers,
   ) {
     super(message);
     this.name = 'ProviderHttpError';
@@ -49,6 +54,18 @@ export class ProviderHttpError extends Error {
   public readonly disposition: ProviderRequestDisposition;
   public readonly retryable: boolean;
   public readonly retryAfterMs: number | undefined;
+
+  /**
+   * Adapters may read a documented provider request-id header while handling
+   * this transient error. Header values are never persisted by this class.
+   */
+  getHeader(name: string): string | null {
+    try {
+      return this.responseHeaders?.get(name) ?? null;
+    } catch {
+      return null;
+    }
+  }
 }
 
 function isRetryableHttpStatus(status: number): boolean {
@@ -184,8 +201,12 @@ export function mapHttpStatusToErrorCode(status: number): ProviderErrorCode {
       return 'INVALID_REQUEST';
     case 401:
       return 'AUTH_FAILED';
+    case 402:
+      return 'QUOTA_EXCEEDED';
     case 403:
       return 'QUOTA_EXCEEDED';
+    case 404:
+      return 'INVALID_REQUEST';
     case 422:
       return 'INVALID_REQUEST';
     case 429:
@@ -220,12 +241,15 @@ export function createProviderError(
 export function createProviderErrorFromHttpError(
   error: ProviderHttpError,
   message = error.message,
+  mapping: ProviderHttpErrorMapping = {},
 ): ProviderError {
-  return createProviderError(error.status, message, error.retryable, {
+  const { retryable, ...metadata } = mapping;
+  return createProviderError(error.status, message, retryable ?? error.retryable, {
     disposition: error.disposition,
     ...(error.retryAfterMs === undefined
       ? {}
       : { retryAfterMs: error.retryAfterMs }),
+    ...metadata,
   });
 }
 
@@ -333,6 +357,7 @@ async function readSuccessJson(
       response.status,
       null,
       { disposition: 'unknown', retryable: true },
+      response.headers,
     );
   }
 }
@@ -385,6 +410,7 @@ async function requestJson(request: JsonRequest): Promise<unknown> {
         response.status,
         responseBody,
         { retryAfterMs: responseRetryAfter(response) },
+        response.headers,
       );
     }
     return readSuccessJson(

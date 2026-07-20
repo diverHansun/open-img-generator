@@ -118,11 +118,13 @@ function providerFailureDiagnostic(error: unknown): {
   const retryable = safeRecordValue(error, 'retryable') as boolean;
   const disposition = safeRecordValue(error, 'disposition');
   const retryAfterMs = safeRecordValue(error, 'retryAfterMs');
+  const providerDiagnostic = safeRecordValue(error, 'diagnostic');
   return {
     diagnostic: serializeSafeJobError(
       safeRecordValue(error, 'code'),
       retryable,
       'PROVIDER_ERROR',
+      providerDiagnostic,
     ),
     retryable,
     ...(disposition === 'not_started' ||
@@ -149,6 +151,7 @@ type NormalizedPollResult =
         retryable: unknown;
         disposition: unknown;
         retryAfterMs: unknown;
+        diagnostic: unknown;
       };
     }
   | { status: 'cancelled' };
@@ -204,12 +207,14 @@ function normalizePollResult(value: unknown): NormalizedPollResult | null {
                   retryable: safeRecordValue(error, 'retryable'),
                   disposition: safeRecordValue(error, 'disposition'),
                   retryAfterMs: safeRecordValue(error, 'retryAfterMs'),
+                  diagnostic: safeRecordValue(error, 'diagnostic'),
                 }
               : {
                   code: undefined,
                   retryable: undefined,
                   disposition: undefined,
                   retryAfterMs: undefined,
+                  diagnostic: undefined,
                 },
         };
       }

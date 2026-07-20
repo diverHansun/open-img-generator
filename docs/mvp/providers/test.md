@@ -49,12 +49,14 @@
 | 厂商 401 | mock 返回 401 | SubmitResult.kind="failed"，error.code="AUTH_FAILED" |
 | 厂商 422 | mock 返回 422 | SubmitResult.kind="failed"，error.code="INVALID_REQUEST" |
 | HTTP 超时 | mock 超时 | SubmitResult.kind="failed"，error.code="TIMEOUT" |
+| sync timeout budget | fake timer 在 30s 后仍未 abort、180s 时 abort | ZenMux、SiliconFlow、智谱、Doubao 都传入共享 180s 预算；已开始请求仍标记 `unknown`，不安全重投 |
 
 ### 2.3 Fal Async 路径
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
 | 正常 submit | prompt="A cat", model="fal-ai/flux/schnell" | SubmitResult.kind="async"，handle.externalId 非空 |
+| async submit budget | mock `AbortSignal.timeout` | fal 继续使用 30s，未被 sync 三分钟预算改变 |
 | poll pending | mock status=IN_QUEUE | PollResult.status="pending" |
 | poll running | mock status=IN_PROGRESS | PollResult.status="running" |
 | poll completed | mock status=COMPLETED + response 含 images | PollResult.status="completed"，images 含 url |

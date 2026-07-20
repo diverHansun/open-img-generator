@@ -2,6 +2,8 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 export const MAX_REMOTE_IMAGE_URL_LENGTH = 8 * 1_024;
+const TRUSTED_PROXY_MAPPED_HOSTS_ENV = 'TRUSTED_PROXY_IMAGE_HOSTS';
+const TRUSTED_HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export type HostResolver = (hostname: string) => Promise<readonly string[]>;
 
@@ -33,6 +35,22 @@ function allowPrivateAddresses(options: RemoteImageUrlPolicyOptions): boolean {
   return options.allowPrivateAddresses ?? environmentFlag('ALLOW_PRIVATE_IMAGE_URLS');
 }
 
+/**
+ * Reads a deliberately narrow escape hatch for transparent proxies that map a
+ * known HTTPS media origin into RFC 2544's 198.18.0.0/15 benchmarking range.
+ * Invalid entries never grant trust; the list is intentionally exact-host only.
+ */
+function trustedProxyMappedHosts(): ReadonlySet<string> {
+  const hosts = new Set<string>();
+  for (const entry of (process.env[TRUSTED_PROXY_MAPPED_HOSTS_ENV] ?? '').split(',')) {
+    const hostname = entry.trim().toLowerCase();
+    if (TRUSTED_HOSTNAME_PATTERN.test(hostname) && isIP(hostname) === 0) {
+      hosts.add(hostname);
+    }
+  }
+  return hosts;
+}
+
 async function resolveHostname(hostname: string): Promise<readonly string[]> {
   // MSW/Vitest tests use synthetic CDN hosts that are intentionally not
   // resolvable on the developer's network. Production and development always
@@ -59,6 +77,14 @@ function isForbiddenIpv4(address: string): boolean {
     (a === 203 && b === 0) ||
     a >= 224
   );
+}
+
+function isTrustedProxyMappedIpv4(address: string): boolean {
+  if (isIP(address) !== 4) return false;
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false;
+  const [a, b] = parts;
+  return a === 198 && (b === 18 || b === 19);
 }
 
 function isForbiddenIpv6(address: string): boolean {
@@ -88,6 +114,19 @@ function isForbiddenAddress(address: string): boolean {
 
 function hostnameFromUrl(url: URL): string {
   return url.hostname.replace(/^\[|\]$/g, '');
+}
+
+function allowsTrustedProxyMappedAddresses(
+  url: URL,
+  hostname: string,
+  addresses: readonly string[],
+): boolean {
+  return (
+    url.protocol === 'https:' &&
+    trustedProxyMappedHosts().has(hostname) &&
+    addresses.length > 0 &&
+    addresses.every(isTrustedProxyMappedIpv4)
+  );
 }
 
 /**
@@ -135,7 +174,13 @@ export async function validateRemoteImageUrl(
   }
   if (addresses.length === 0) throw new RemoteImageUrlError();
   if (!allowPrivateAddresses(options) && addresses.some(isForbiddenAddress)) {
-    throw new RemoteImageUrlError();
+    // A local transparent proxy can intentionally synthesize 198.18/15 DNS
+    // answers for an external CDN. Do not globally permit private/reserved
+    // ranges: this exception is HTTPS-only, exact-host configured, and rejects
+    // mixed DNS answers. The caller repeats this policy after every redirect.
+    if (!allowsTrustedProxyMappedAddresses(parsed, hostname, addresses)) {
+      throw new RemoteImageUrlError();
+    }
   }
   return parsed;
 }

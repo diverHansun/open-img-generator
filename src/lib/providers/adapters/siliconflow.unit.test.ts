@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeNormalizedRequest } from '../../../../tests/factories';
 import { SiliconFlowProvider } from './siliconflow';
+import { SYNC_IMAGE_GENERATION_TIMEOUT_MS } from '../timeout-policy';
 
 describe('SiliconFlowProvider', () => {
   let provider: SiliconFlowProvider;
@@ -14,6 +15,7 @@ describe('SiliconFlowProvider', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.restoreAllMocks();
     if (originalKey === undefined) delete process.env.SILICONFLOW_API_KEY;
     else process.env.SILICONFLOW_API_KEY = originalKey;
   });
@@ -28,6 +30,8 @@ describe('SiliconFlowProvider', () => {
   }
 
   it('submits a sync Kolors request and parses image metadata', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
     mockFetch({ images: [{ url: 'https://cdn.siliconflow.cn/result.png' }], seed: 123 });
 
     const result = await provider.submit(
@@ -67,6 +71,7 @@ describe('SiliconFlowProvider', () => {
       negative_prompt: 'blurry',
       seed: 123,
     });
+    expect(timeout).toHaveBeenCalledWith(SYNC_IMAGE_GENERATION_TIMEOUT_MS);
   });
 
   it('passes non-reserved provider options through', async () => {
@@ -89,6 +94,10 @@ describe('SiliconFlowProvider', () => {
     if (invalid.kind === 'failed') {
       expect(invalid.error.code).toBe('INVALID_REQUEST');
       expect(invalid.error.message).toContain('invalid image size');
+      expect(invalid.error.diagnostic).toMatchObject({
+        providerId: 'siliconflow',
+        category: 'input_invalid',
+      });
     }
 
     mockFetch({ images: [] });

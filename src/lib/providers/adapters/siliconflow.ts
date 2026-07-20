@@ -13,6 +13,11 @@ import {
 } from '../http-client';
 import { siliconflowCapabilities } from '../capabilities/siliconflow';
 import { resolveCredential } from '../../user-config';
+import { resolveSyncImageGenerationTimeoutMs } from '../timeout-policy';
+import {
+  classifyProviderDiagnostic,
+  readProviderRequestIdFromResponse,
+} from '../error-diagnostics';
 
 const API_URL = 'https://api.siliconflow.cn/v1/images/generations';
 const RESERVED_KEYS = new Set([
@@ -102,12 +107,15 @@ export class SiliconFlowProvider implements ImageProvider {
         API_URL,
         buildRequestBody(req, model),
         this.authHeaders(),
+        { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
       );
       const images = parseImages(data, size);
       if (images.length === 0) {
         return {
           kind: 'failed',
-          error: createProviderError(500, 'No images in SiliconFlow response', false),
+          error: createProviderError(500, 'No images in SiliconFlow response', false, {
+            diagnostic: classifyProviderDiagnostic('siliconflow', { noResult: true }),
+          }),
         };
       }
       return { kind: 'sync', images };
@@ -119,7 +127,15 @@ export class SiliconFlowProvider implements ImageProvider {
   private mapError(err: unknown): ReturnType<typeof createProviderError> {
     if (err instanceof ProviderHttpError) {
       if (typeof err.body === 'string' && err.body.length > 0) {
-        return createProviderErrorFromHttpError(err, err.body);
+        return createProviderErrorFromHttpError(err, err.body, {
+          diagnostic: classifyProviderDiagnostic('siliconflow', {
+            httpStatus: err.status,
+            providerRequestId: readProviderRequestIdFromResponse(err.body, [
+              err.getHeader('x-request-id'),
+            ]),
+            transportTimeout: err.status === 0 && err.retryable,
+          }),
+        });
       }
       const body = err.body as Record<string, unknown> | null;
       const message =
@@ -128,17 +144,27 @@ export class SiliconFlowProvider implements ImageProvider {
           : body && typeof body.data === 'string'
             ? body.data
             : err.message;
-      return createProviderErrorFromHttpError(err, message);
+      return createProviderErrorFromHttpError(err, message, {
+        diagnostic: classifyProviderDiagnostic('siliconflow', {
+          httpStatus: err.status,
+          providerRequestId: readProviderRequestIdFromResponse(err.body, [
+            err.getHeader('x-request-id'),
+          ]),
+          transportTimeout: err.status === 0 && err.retryable,
+        }),
+      });
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
       return createProviderError(0, err.message, true, {
         disposition: 'unknown',
+        diagnostic: classifyProviderDiagnostic('siliconflow', { transportTimeout: true }),
       });
     }
     return createProviderError(
       0,
       err instanceof Error ? err.message : String(err),
       false,
+      { diagnostic: classifyProviderDiagnostic('siliconflow') },
     );
   }
 }

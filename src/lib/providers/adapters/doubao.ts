@@ -13,6 +13,11 @@ import {
 } from '../http-client';
 import { doubaoCapabilities } from '../capabilities/doubao';
 import { resolveCredential } from '../../user-config';
+import { resolveSyncImageGenerationTimeoutMs } from '../timeout-policy';
+import {
+  classifyProviderDiagnostic,
+  readProviderRequestIdFromResponse,
+} from '../error-diagnostics';
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 const RESERVED_KEYS = new Set([
@@ -137,12 +142,15 @@ export class DoubaoProvider implements ImageProvider {
         apiUrl(),
         buildRequestBody(req, model),
         this.authHeaders(),
+        { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
       );
       const images = parseImages(data, resolveSize(req));
       if (images.length === 0) {
         return {
           kind: 'failed',
-          error: createProviderError(500, 'No images in Doubao response', false),
+          error: createProviderError(500, 'No images in Doubao response', false, {
+            diagnostic: classifyProviderDiagnostic('doubao', { noResult: true }),
+          }),
         };
       }
       return { kind: 'sync', images };
@@ -166,13 +174,25 @@ export class DoubaoProvider implements ImageProvider {
             : typeof err.body === 'string'
               ? err.body
             : err.message;
-      return createProviderErrorFromHttpError(err, message);
+      return createProviderErrorFromHttpError(err, message, {
+        diagnostic: classifyProviderDiagnostic('doubao', {
+          httpStatus: err.status,
+          providerCode: nestedError?.code,
+          providerRequestId: readProviderRequestIdFromResponse(err.body, [
+            err.getHeader('x-request-id'),
+          ]),
+          transportTimeout: err.status === 0 && err.retryable,
+        }),
+      });
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
       return createProviderError(0, err.message, true, {
         disposition: 'unknown',
+        diagnostic: classifyProviderDiagnostic('doubao', { transportTimeout: true }),
       });
     }
-    return createProviderError(0, err instanceof Error ? err.message : String(err), false);
+    return createProviderError(0, err instanceof Error ? err.message : String(err), false, {
+      diagnostic: classifyProviderDiagnostic('doubao'),
+    });
   }
 }

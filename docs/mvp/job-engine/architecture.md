@@ -153,6 +153,8 @@ sync target 被 claim 后才调用 `provider.submit()`；其返回的 image refs
 | sync count | 仍强制该 target `count=1`（MVP） |
 | POST 耗时 | 与 Provider/图片下载无关；只受校验和 SQLite transaction 影响 |
 
+同步 image provider 的已开始 submit 使用最多 180 秒的完整响应预算（默认 `SYNC_IMAGE_GENERATION_TIMEOUT_MS=180000`）；该时间包含在现有 5 分钟 phase lease 内，但不改变 30 秒 per-provider queue deadline、60 秒图片下载预算或 async provider 的 submit/poll timeout。180 秒后仍无法确认厂商是否接收/计费时，lifecycle 写入 `outcome_unknown`，不自动重投。
+
 ### 4.5 phase lease、取消线性化与图片 checkpoint
 
 公开 `status` 不能承担互斥职责；同一 Job 的 dispatch/poll/store/cancel 都使用物理 `poll_lease_until`（兼容列名）作为当前 phase lease。

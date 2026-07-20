@@ -13,6 +13,11 @@ import {
 } from '../http-client';
 import { zhipuCapabilities } from '../capabilities/zhipu';
 import { resolveCredential } from '../../user-config';
+import { resolveSyncImageGenerationTimeoutMs } from '../timeout-policy';
+import {
+  classifyProviderDiagnostic,
+  readProviderRequestIdFromResponse,
+} from '../error-diagnostics';
 
 const API_URL = 'https://open.bigmodel.cn/api/paas/v4/images/generations';
 const RESERVED_KEYS = new Set([
@@ -106,12 +111,15 @@ export class ZhipuProvider implements ImageProvider {
         API_URL,
         buildRequestBody(req, model),
         this.authHeaders(),
+        { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
       );
       const images = parseImages(data, size);
       if (images.length === 0) {
         return {
           kind: 'failed',
-          error: createProviderError(500, 'No images in Zhipu response', false),
+          error: createProviderError(500, 'No images in Zhipu response', false, {
+            diagnostic: classifyProviderDiagnostic('zhipu', { noResult: true }),
+          }),
         };
       }
       return { kind: 'sync', images };
@@ -131,17 +139,28 @@ export class ZhipuProvider implements ImageProvider {
         errorBody && typeof errorBody.message === 'string'
           ? errorBody.message
           : err.message;
-      return createProviderErrorFromHttpError(err, message);
+      return createProviderErrorFromHttpError(err, message, {
+        diagnostic: classifyProviderDiagnostic('zhipu', {
+          httpStatus: err.status,
+          providerCode: errorBody?.code,
+          providerRequestId: readProviderRequestIdFromResponse(err.body, [
+            err.getHeader('x-request-id'),
+          ]),
+          transportTimeout: err.status === 0 && err.retryable,
+        }),
+      });
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
       return createProviderError(0, err.message, true, {
         disposition: 'unknown',
+        diagnostic: classifyProviderDiagnostic('zhipu', { transportTimeout: true }),
       });
     }
     return createProviderError(
       0,
       err instanceof Error ? err.message : String(err),
       false,
+      { diagnostic: classifyProviderDiagnostic('zhipu') },
     );
   }
 }

@@ -18,6 +18,7 @@ describe('FalProvider', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.restoreAllMocks();
     if (originalEnv.apiKey === undefined) delete process.env.FAL_KEY;
     else process.env.FAL_KEY = originalEnv.apiKey;
     if (originalEnv.baseUrl === undefined) delete process.env.FAL_BASE_URL;
@@ -29,6 +30,8 @@ describe('FalProvider', () => {
   }
 
   it('submits async job and returns handle', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
     mockFetch({
       ok: true,
       status: 200,
@@ -48,6 +51,7 @@ describe('FalProvider', () => {
       expect(result.handle.externalId).toBe('req-1');
       expect(result.handle.statusUrl).toContain('/status');
     }
+    expect(timeout).toHaveBeenCalledWith(30_000);
   });
 
   it('maps public aspect ratios to Fal image_size values', async () => {
@@ -116,6 +120,35 @@ describe('FalProvider', () => {
       expect(result.error.code).toBe('AUTH_FAILED');
       expect(result.error.httpStatus).toBe(401);
     }
+  });
+
+  it('maps documented Fal error types and preserves only a safe request id', async () => {
+    mockFetch({
+      ok: false,
+      status: 422,
+      headers: new Headers({
+        'content-type': 'application/json',
+        'x-fal-request-id': 'fal-req-123',
+      }),
+      json: async () => ({
+        detail: [{ type: 'content_policy_violation', input: 'private prompt' }],
+      }),
+    });
+
+    const result = await provider.submit(makeNormalizedRequest(), 'fal-ai/flux/schnell');
+
+    expect(result).toMatchObject({
+      kind: 'failed',
+      error: {
+        diagnostic: {
+          providerId: 'fal',
+          category: 'content_policy',
+          providerCode: 'content_policy_violation',
+          providerRequestId: 'fal-req-123',
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('private prompt');
   });
 
   it('polls pending status', async () => {

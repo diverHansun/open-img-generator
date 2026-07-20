@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ZenmuxProvider } from './zenmux';
 import { makeNormalizedRequest } from '../../../../tests/factories';
+import { SYNC_IMAGE_GENERATION_TIMEOUT_MS } from '../timeout-policy';
 
 describe('ZenmuxProvider', () => {
   let provider: ZenmuxProvider;
@@ -12,6 +13,7 @@ describe('ZenmuxProvider', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   function mockFetch(response: Partial<Response>) {
@@ -19,6 +21,8 @@ describe('ZenmuxProvider', () => {
   }
 
   it('submits sync job and returns images', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
     mockFetch({
       ok: true,
       status: 200,
@@ -50,6 +54,7 @@ describe('ZenmuxProvider', () => {
     const body = JSON.parse(fetchCall[1]?.body as string);
     expect(body.size).toBe('1024x1024');
     expect(body.n).toBe(1);
+    expect(timeout).toHaveBeenCalledWith(SYNC_IMAGE_GENERATION_TIMEOUT_MS);
   });
 
   it('normalizes ZenMux Base64 responses as data URLs', async () => {
@@ -79,7 +84,8 @@ describe('ZenmuxProvider', () => {
       status: 422,
       headers: new Headers({ 'content-type': 'application/json' }),
       json: async () => ({
-        error: { message: 'Invalid prompt' },
+        request_id: 'zenmux-req-1',
+        error: { type: 'invalid_params', message: 'Invalid prompt' },
       }),
     });
 
@@ -89,6 +95,12 @@ describe('ZenmuxProvider', () => {
     if (result.kind === 'failed') {
       expect(result.error.code).toBe('INVALID_REQUEST');
       expect(result.error.message).toContain('Invalid prompt');
+      expect(result.error.diagnostic).toEqual({
+        providerId: 'zenmux',
+        category: 'input_invalid',
+        providerCode: 'invalid_params',
+        providerRequestId: 'zenmux-req-1',
+      });
     }
   });
 

@@ -18,6 +18,7 @@ describe('QwenProvider', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.restoreAllMocks();
     if (originalEnv.apiKey === undefined) delete process.env.DASHSCOPE_API_KEY;
     else process.env.DASHSCOPE_API_KEY = originalEnv.apiKey;
     if (originalEnv.baseUrl === undefined) delete process.env.DASHSCOPE_BASE_URL;
@@ -44,6 +45,8 @@ describe('QwenProvider', () => {
   };
 
   it('submits an async Qwen task with DashScope headers and nested body', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
     mockFetch({ output: { task_id: 'task-1', task_status: 'PENDING' } });
 
     const result = await provider.submit(
@@ -78,9 +81,12 @@ describe('QwenProvider', () => {
         seed: 7,
       },
     });
+    expect(timeout).toHaveBeenCalledWith(30_000);
   });
 
   it('polls pending, running, completed, and cancelled states', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
     mockFetch({ output: { task_id: 'task-1', task_status: 'PENDING' } });
     expect((await provider.poll(handle)).status).toBe('pending');
 
@@ -107,6 +113,7 @@ describe('QwenProvider', () => {
 
     mockFetch({ output: { task_id: 'task-1', task_status: 'CANCELED' } });
     expect((await provider.poll(handle)).status).toBe('cancelled');
+    expect(timeout).toHaveBeenCalledWith(15_000);
   });
 
   it('rebuilds a poll endpoint from the configured base and encoded task ID', async () => {
@@ -144,7 +151,14 @@ describe('QwenProvider', () => {
     });
     const failed = await provider.poll(handle);
     expect(failed.status).toBe('failed');
-    if (failed.status === 'failed') expect(failed.error.code).toBe('INVALID_REQUEST');
+    if (failed.status === 'failed') {
+      expect(failed.error.code).toBe('INVALID_REQUEST');
+      expect(failed.error.diagnostic).toMatchObject({
+        providerId: 'qwen',
+        category: 'input_invalid',
+        providerCode: 'InvalidParameter',
+      });
+    }
 
     mockFetch({ code: 'InvalidApiKey', message: 'No API-key provided.' }, 401);
     const auth = await provider.submit(makeNormalizedRequest(), 'qwen-image-plus');

@@ -1,3 +1,7 @@
+import type { ProviderDiagnostic } from './error-diagnostics';
+
+export type { ProviderDiagnostic, ProviderDiagnosticCategory } from './error-diagnostics';
+
 export type ProviderId =
   | 'fal'
   | 'zenmux'
@@ -69,6 +73,12 @@ export type ProviderError = {
   disposition?: ProviderRequestDisposition;
   /** A bounded, parsed provider Retry-After value. It is never persisted raw. */
   retryAfterMs?: number;
+  /**
+   * Allowlisted provider metadata for safe support diagnostics. Raw upstream
+   * messages, response bodies, prompt fragments, URLs, and credentials are
+   * intentionally excluded from this shape.
+   */
+  diagnostic?: ProviderDiagnostic;
 };
 
 export type SubmitResult =

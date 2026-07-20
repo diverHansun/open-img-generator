@@ -21,6 +21,10 @@ import {
   trustedProviderExternalId,
 } from '../endpoint-policy';
 import { resolveCredential } from '../../user-config';
+import {
+  classifyProviderDiagnostic,
+  readProviderRequestIdFromResponse,
+} from '../error-diagnostics';
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
 const RESERVED_PARAMETER_KEYS = new Set([
@@ -139,6 +143,15 @@ function readOutput(payload: unknown): Record<string, unknown> | null {
   return output && typeof output === 'object' ? (output as Record<string, unknown>) : null;
 }
 
+function qwenErrorCode(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const root = payload as Record<string, unknown>;
+  if (root.code !== undefined) return root.code;
+  return readOutput(payload)?.code;
+}
+
 export class QwenProvider implements ImageProvider {
   id = 'qwen' as const;
   displayName = 'Qwen';
@@ -213,7 +226,9 @@ export class QwenProvider implements ImageProvider {
           ? { status: 'completed', images }
           : {
               status: 'failed',
-              error: createProviderError(500, 'No images in Qwen response', false),
+              error: createProviderError(500, 'No images in Qwen response', false, {
+                diagnostic: classifyProviderDiagnostic('qwen', { noResult: true }),
+              }),
             };
       }
 
@@ -221,7 +236,14 @@ export class QwenProvider implements ImageProvider {
       const message = typeof output?.message === 'string' ? output.message : code;
       return {
         status: 'failed',
-        error: createProviderError(422, `${code}: ${message}`, false),
+        error: createProviderError(422, `${code}: ${message}`, false, {
+          diagnostic: classifyProviderDiagnostic('qwen', {
+            httpStatus: 422,
+            providerCode: code,
+            providerRequestId: readProviderRequestIdFromResponse(data),
+            upstreamRejected: true,
+          }),
+        }),
       };
     } catch (err) {
       return { status: 'failed', error: this.mapError(err) };
@@ -237,13 +259,25 @@ export class QwenProvider implements ImageProvider {
           : body && typeof body.error === 'string'
             ? body.error
             : err.message;
-      return createProviderErrorFromHttpError(err, message);
+      return createProviderErrorFromHttpError(err, message, {
+        diagnostic: classifyProviderDiagnostic('qwen', {
+          httpStatus: err.status,
+          providerCode: qwenErrorCode(err.body),
+          providerRequestId: readProviderRequestIdFromResponse(err.body, [
+            err.getHeader('x-request-id'),
+          ]),
+          transportTimeout: err.status === 0 && err.retryable,
+        }),
+      });
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
       return createProviderError(0, err.message, true, {
         disposition: 'unknown',
+        diagnostic: classifyProviderDiagnostic('qwen', { transportTimeout: true }),
       });
     }
-    return createProviderError(0, err instanceof Error ? err.message : String(err), false);
+    return createProviderError(0, err instanceof Error ? err.message : String(err), false, {
+      diagnostic: classifyProviderDiagnostic('qwen'),
+    });
   }
 }

@@ -152,7 +152,7 @@ API 路由为 `POST /api/generations/:id/cancel`；取消与 submit/poll 竞争�
 | 输入 | `NormalizedRequest` + model id 字符串 |
 | 输出 | `Promise<SubmitResult>` |
 | 同步/异步 | 异步函数；async 厂商返回的 SubmitResult.kind 为 "async"，sync 厂商返回 "sync" |
-| 超时 | adapter 内通过 http-client 设置（建议 30s submit 超时） |
+| 超时 | sync（ZenMux、SiliconFlow、智谱、Doubao）通过共享 `SYNC_IMAGE_GENERATION_TIMEOUT_MS` 使用默认/最大 180s；async task submit 继续为 30s |
 | 副作用 | 向外部厂商发起 HTTP 请求 |
 
 ### 3.4 ImageProvider.poll(handle)（仅 async provider）
