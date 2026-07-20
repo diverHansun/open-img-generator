@@ -88,6 +88,10 @@ describe('Generate error presentation', () => {
       messageKey: 'generate.error.serviceUnavailable',
       action: 'reload',
     });
+    expect(mapGenerateError(new Error('deadline exceeded'), 'detail')).toMatchObject({
+      messageKey: 'generate.error.serviceUnavailable',
+      action: 'wait',
+    });
   });
 
   it.each([

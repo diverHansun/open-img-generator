@@ -68,7 +68,7 @@ function unknownPresentation(
   }
   return {
     messageKey: 'generate.error.serviceUnavailable',
-    action: operation === 'detail' ? 'check-history' : 'none',
+    action: operation === 'detail' ? 'wait' : 'none',
   };
 }
 
