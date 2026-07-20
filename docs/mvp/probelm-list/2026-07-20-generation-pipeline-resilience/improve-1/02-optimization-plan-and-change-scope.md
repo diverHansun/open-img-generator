@@ -272,8 +272,9 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 - `withProviderLimit()` 增加 queue 上限（默认 32/provider）、排队 deadline（默认 30s）和 AbortSignal；队列满快速返回 `QUEUE_SATURATED`。
 - 不同 Provider 继续独立 bucket，避免一家慢拖住其他 targets。
 - 所有携带 Authorization 的 Provider 请求使用 manual redirect；跨 origin redirect 一律拒绝，既不继续请求也不转发 credential。
-- Fal 返回的动态 status/cancel URL 必须与配置的 Fal API origin（scheme、host、effective port）精确一致，每一跳 redirect 重新验证。
-- Qwen/Kling 只持久化 external ID/handle；poll/cancel URL 必须由受信 base URL + 编码后的 external ID 重建，不执行 Provider response 或 DB 中的任意完整 URL。
+- Fal 返回的动态 status/response/cancel URL 必须与配置的 Fal API origin（scheme、host、effective port）精确一致；Provider API redirect 不跟随，因此没有携带 credential 的第二跳。
+- Qwen/Kling 的 legacy handle URL 只作兼容字段保存；poll URL 必须由受信 base URL + 编码后的 external ID 重建，不执行 Provider response 或 DB 中的任意完整 URL。
+- 可配置 base 只接受无 userinfo/query/fragment 的 HTTP(S) URL；所有动态 path segment 有长度上限，并拒绝空、`.`、`..`，防止 WHATWG URL 规范化逃出 API path 前缀。
 
 ### 6.2 远端图片 ingestion
 
@@ -375,7 +376,7 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 - DoD：所有 crash checkpoint 在重启后恢复或明确 unknown；无永久无解释 pending；终态不可逆；每个 commit 都有 fault-injection integration。
 - 对应：P-04、P-05、P-07、P-08、P-09。
 
-**实施状态（2026-07-20）**：D1 与 D2 已实现、复审并独立验证。D1 覆盖 schema v3/backfill、202 durable admission、版本化 request/result snapshot、phase/lease worker、late-handle cancellation CAS、fan-out 原子取消、lease-guarded image checkpoint、终态快照清理与有界 inline-image staging（raw Base64 不入 SQLite）。D2 新增集中 `retry-policy`：已有 handle 的 typed-retryable poll（最多 6 次/10 分钟）和 remote cancel（最多 3 次/30 秒）以 full jitter、due/lease CAS 与重启延续收口；只有远端 `cancelled` 确认 remote cancel，`pending/running` 重排、`completed` 以安全诊断收口，畸形 runtime result 也写有界 checkpoint。所有新写入的 job 诊断、详情与 History read model 只使用 allowlisted code、固定文案和 retryable 布尔值，绝不暴露 Provider 原始 message/body/prompt/URL；成功/phase 切换/终态/本地取消清空 retry state。E1 已为七家 adapter 的 HTTP error 统一 `not_started / rejected / unknown`、有界 `Retry-After`、caller signal/deadline 和默认 submit/poll/cancel timeout；并为每 provider 的进程内 limiter 增加队列上限、deadline、AbortSignal 移除。只有明确未开始或 retryable rejected 的 submit 可 `dispatching → queued` 有界重排（总计最多 3 次/30 秒）；已进入 fetch 的 timeout/reset/5xx 仍保守进入 unknown。E1 的 unit 覆盖不把它误报为真实 HTTP/完整安全闭环：2 MiB 流式 JSON、manual redirect、dynamic endpoint trust 与图片 download/inline Base64 边界仍在 E2/E3。
+**实施状态（2026-07-20）**：D1 与 D2 已实现、复审并独立验证。D1 覆盖 schema v3/backfill、202 durable admission、版本化 request/result snapshot、phase/lease worker、late-handle cancellation CAS、fan-out 原子取消、lease-guarded image checkpoint、终态快照清理与有界 inline-image staging（raw Base64 不入 SQLite）。D2 新增集中 `retry-policy`：已有 handle 的 typed-retryable poll（最多 6 次/10 分钟）和 remote cancel（最多 3 次/30 秒）以 full jitter、due/lease CAS 与重启延续收口；只有远端 `cancelled` 确认 remote cancel，`pending/running` 重排、`completed` 以安全诊断收口，畸形 runtime result 也写有界 checkpoint。所有新写入的 job 诊断、详情与 History read model 只使用 allowlisted code、固定文案和 retryable 布尔值，绝不暴露 Provider 原始 message/body/prompt/URL；成功/phase 切换/终态/本地取消清空 retry state。E1 已为七家 adapter 的 HTTP error 统一 `not_started / rejected / unknown`、有界 `Retry-After`、caller signal/deadline 和默认 submit/poll/cancel timeout；并为每 provider 的进程内 limiter 增加队列上限、deadline、AbortSignal 移除。只有明确未开始或 retryable rejected 的 submit 可 `dispatching → queued` 有界重排（总计最多 3 次/30 秒）；已进入 fetch 的 timeout/reset/5xx 仍保守进入 unknown。E2 已让所有 Provider JSON 经 2 MiB 流式上限读取，所有带授权请求拒绝自动 redirect；Fal 只接受 exact-origin 动态 handle URL，Qwen/Kling 从 trusted base + encoded external ID 重建 poll URL。单测覆盖超限、redirect 与 URL 污染；远端图片 download/inline Base64 的专用解析仍属于 E3。
 
 ### Batch E — Provider、队列与 storage 边界
 
@@ -386,7 +387,7 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 3. `fix(storage): stage and validate remote images`
 
 - E1：Provider HTTP caller deadline、`not_started/rejected/unknown`、Retry-After 与 limiter queue 上限/deadline/abort；已实现。普通 JSON 的 2 MiB streaming reader 归入 E2，避免把 Base64 endpoint 当成普通 JSON 误处理。
-- E2：七家 adapter 逐家对齐；普通 JSON 2 MiB streaming reader；Fal exact-origin/manual redirect；Qwen/Kling 从 base + external ID 重建 URL；auth redirect 与日志脱敏。
+- E2：七家 adapter 通过统一 HTTP client 对齐；普通 JSON 2 MiB streaming reader；Fal exact-origin/manual redirect；Qwen/Kling 从 base + external ID 重建 URL；auth redirect 与日志脱敏。**已实现。**
 - E3：storage URL/redirect/IP/size/type/magic-byte/temp-file；ZenMux Base64 有界 staging 与 Doubao 防御分支；每 lease 一张缺失 image。
 - DoD：真实本地 fake HTTP 串起 I-22… I-25；pre-send 可安全重排，HTTP started unknown 不重投；poll/download transient 按预算恢复；SSRF/超大 JSON/Base64/非图片/签名 URL 测试通过。
 - 对应：P-06、P-10、P-13。

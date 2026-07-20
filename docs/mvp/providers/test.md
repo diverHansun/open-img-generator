@@ -150,6 +150,9 @@
 | fal 使用 `Key $FAL_KEY` 格式 | mock fetch 断言 header 值 |
 | sync providers 使用 Bearer key | mock fetch 断言 ZenMux/SiliconFlow/智谱/Doubao header 值 |
 | Qwen 使用 Bearer + Async header | mock fetch 断言 `Authorization` 与 `X-DashScope-Async: enable` |
+| 所有授权请求拒绝自动 redirect | mock 302，断言 `redirect: 'manual'`、只有一次 fetch |
+| 普通 JSON 响应上限 | mock `Content-Length` 或 chunked stream 超过 2 MiB，断言 body 被取消且只返回安全错误 |
+| 动态/历史 handle URL | Fal 非同源 URL 在 fetch 前拒绝；Qwen/Kling 从受信 base + 编码 `externalId` 重建 URL |
 
 ---
 

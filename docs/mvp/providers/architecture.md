@@ -23,12 +23,14 @@ registry ──→ adapter(s) ──→ http-client
 | **types** | 定义模块内外的共享数据结构：NormalizedRequest、SubmitResult、ProviderCapabilities 等。是整个系统与厂商之间的"通用语言"。 |
 | **registry** | 按 env key 判断启用状态，懒初始化 adapter 实例，对外提供 `listEnabled()` 与 `getById(id)`。是模块唯一对外入口（除 types 导出外）。 |
 | **adapter** | 每家厂商一个文件，实现 ImageProvider 契约：请求翻译、HTTP 调用、响应解析。当前已含 `fal.ts`、`zenmux.ts`、`siliconflow.ts`、`zhipu.ts`、`doubao.ts`、`qwen.ts` 与独立 Kling `kling.ts`。 |
-| **http-client** | 封装 fetch 调用：超时、公共 headers 合并、基础错误码映射。具体 API key 由 adapter 读取 `env > user-config` 后传入；adapter 不直接裸调 fetch。 |
+| **http-client** | 封装 fetch 调用：caller deadline、默认超时、manual redirect、2 MiB 流式 JSON 上限与统一错误元数据。具体 API key 由 adapter 读取 `env > user-config` 后传入；adapter 不直接裸调 fetch。 |
+| **endpoint-policy** | 校验可配置 Provider base、bounded external ID 与 Fal exact-origin 动态 URL；把 DB/Provider 返回的字符串隔离在带凭据的请求边界之外。 |
 
 **依赖规则**:
 - registry 依赖 adapter 与 types
 - adapter 依赖 http-client 与 types
 - http-client 仅依赖 types（错误类型）
+- adapter 可依赖 endpoint-policy；endpoint-policy 不依赖 adapter、http-client 或业务层
 - types 不依赖任何子组件
 - adapter 之间互不依赖
 - 模块整体不依赖 job-engine、storage、db
@@ -75,7 +77,8 @@ src/lib/providers/
 ├── index.ts                 # 对外导出: registry 函数 + 全部 types
 ├── types.ts                 # 共享数据结构（详见 data-model.md）
 ├── registry.ts              # 启用检测 + 懒初始化 + listEnabled/getById
-├── http-client.ts           # fetch 封装（超时、auth、错误映射）
+├── http-client.ts           # fetch 封装（deadline、manual redirect、bounded JSON、错误映射）
+├── endpoint-policy.ts       # 受信 base / task ID / exact-origin 动态 URL
 ├── adapters/
 │   ├── fal.ts               # fal.ai async queue adapter
 │   ├── zenmux.ts            # ZenMux sync OpenAI Images API adapter

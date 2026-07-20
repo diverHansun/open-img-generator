@@ -5,13 +5,23 @@ import { makeNormalizedRequest, makeJobHandle } from '../../../../tests/factorie
 describe('FalProvider', () => {
   let provider: FalProvider;
   const originalFetch = global.fetch;
+  const originalEnv = {
+    apiKey: process.env.FAL_KEY,
+    baseUrl: process.env.FAL_BASE_URL,
+  };
 
   beforeEach(() => {
     provider = new FalProvider();
+    process.env.FAL_KEY = 'fal-test-key';
+    process.env.FAL_BASE_URL = 'https://queue.fal.run';
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
+    if (originalEnv.apiKey === undefined) delete process.env.FAL_KEY;
+    else process.env.FAL_KEY = originalEnv.apiKey;
+    if (originalEnv.baseUrl === undefined) delete process.env.FAL_BASE_URL;
+    else process.env.FAL_BASE_URL = originalEnv.baseUrl;
   });
 
   function mockFetch(response: Partial<Response>) {
@@ -47,8 +57,8 @@ describe('FalProvider', () => {
       headers: new Headers({ 'content-type': 'application/json' }),
       json: async () => ({
         request_id: 'req-1',
-        status_url: 'https://status',
-        response_url: 'https://response',
+        status_url: 'https://queue.fal.run/fal-ai/flux/schnell/requests/req-1/status',
+        response_url: 'https://queue.fal.run/fal-ai/flux/schnell/requests/req-1/response',
       }),
     });
 
@@ -59,6 +69,36 @@ describe('FalProvider', () => {
 
     const [, init] = vi.mocked(global.fetch).mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).toMatchObject({ image_size: 'landscape_16_9' });
+  });
+
+  it('does not persist attacker-controlled task endpoints from a submit response', async () => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        request_id: 'req-1',
+        status_url: 'https://attacker.example/collect',
+        response_url: 'https://queue.fal.run/requests/req-1/response',
+      }),
+    });
+
+    const result = await provider.submit(makeNormalizedRequest(), 'fal-ai/flux/schnell');
+
+    expect(result).toMatchObject({
+      kind: 'failed',
+      error: { code: 'PROVIDER_ERROR', disposition: 'unknown' },
+    });
+    expect(global.fetch).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a model path containing dot segments before sending its credential', async () => {
+    global.fetch = vi.fn();
+
+    const result = await provider.submit(makeNormalizedRequest(), 'fal-ai/../requests');
+
+    expect(result).toMatchObject({ kind: 'failed' });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('returns failed on HTTP error', async () => {
@@ -151,6 +191,20 @@ describe('FalProvider', () => {
     if (result.status === 'failed') {
       expect(result.error.code).toBe('PROVIDER_ERROR');
     }
+  });
+
+  it('does not send its credential to a poisoned persisted task URL', async () => {
+    global.fetch = vi.fn();
+
+    const result = await provider.poll(makeJobHandle({
+      statusUrl: 'https://attacker.example/collect',
+    }));
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: { code: 'INVALID_REQUEST' },
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 
   it('cancels via cancelUrl', async () => {

@@ -15,6 +15,11 @@ import {
   createProviderErrorFromHttpError,
 } from '../http-client';
 import { qwenCapabilities } from '../capabilities/qwen';
+import {
+  providerEndpointUrl,
+  trustedProviderBaseUrl,
+  trustedProviderExternalId,
+} from '../endpoint-policy';
 import { resolveCredential } from '../../user-config';
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
@@ -27,16 +32,26 @@ const RESERVED_PARAMETER_KEYS = new Set([
   'seed',
 ]);
 
-function baseUrl(): string {
-  return (process.env.DASHSCOPE_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
+function baseUrl(): URL {
+  return trustedProviderBaseUrl(
+    process.env.DASHSCOPE_BASE_URL ?? DEFAULT_BASE_URL,
+  );
 }
 
 function synthesisUrl(): string {
-  return `${baseUrl()}/services/aigc/text2image/image-synthesis`;
+  return providerEndpointUrl(baseUrl(), [
+    'services',
+    'aigc',
+    'text2image',
+    'image-synthesis',
+  ]);
 }
 
 function taskUrl(taskId: string): string {
-  return `${baseUrl()}/tasks/${encodeURIComponent(taskId)}`;
+  return providerEndpointUrl(baseUrl(), [
+    'tasks',
+    trustedProviderExternalId(taskId),
+  ]);
 }
 
 function resolveSize(req: NormalizedRequest): string {
@@ -150,7 +165,20 @@ export class QwenProvider implements ImageProvider {
           error: createProviderError(500, 'No task_id in Qwen response', false),
         };
       }
-      const statusUrl = taskUrl(taskId);
+      let statusUrl: string;
+      try {
+        statusUrl = taskUrl(taskId);
+      } catch {
+        return {
+          kind: 'failed',
+          error: createProviderError(
+            500,
+            'Qwen returned an invalid task reference',
+            false,
+            { disposition: 'unknown' },
+          ),
+        };
+      }
       const handle: JobHandle = {
         providerId: 'qwen',
         model,
@@ -168,7 +196,9 @@ export class QwenProvider implements ImageProvider {
 
   async poll(handle: JobHandle): Promise<PollResult> {
     try {
-      const data = await getJson(handle.statusUrl, this.authHeaders());
+      // Persisted URL fields are legacy compatibility data only. Reconstruct
+      // every authenticated Qwen poll endpoint from the configured base + ID.
+      const data = await getJson(taskUrl(handle.externalId), this.authHeaders());
       const output = readOutput(data);
       const status = typeof output?.task_status === 'string'
         ? output.task_status.toUpperCase()

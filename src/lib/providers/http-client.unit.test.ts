@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  DEFAULT_PROVIDER_JSON_RESPONSE_BYTES,
   getJson,
   parseRetryAfter,
   postJson,
@@ -126,6 +127,95 @@ describe('provider HTTP boundary', () => {
       retryable: true,
       body: null,
     } satisfies Partial<ProviderHttpError>);
+  });
+
+  it('uses manual redirects and treats an unexpected redirect as an ambiguous result', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(null, {
+      status: 302,
+      headers: { location: 'https://other.example/redirected' },
+    }));
+
+    await expect(postJson(
+      'https://provider.example/submit',
+      {},
+      { Authorization: 'Bearer provider-secret' },
+    )).rejects.toMatchObject({
+      status: 302,
+      disposition: 'unknown',
+      retryable: false,
+    } satisfies Partial<ProviderHttpError>);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[1]).toMatchObject({
+      redirect: 'manual',
+      headers: { Authorization: 'Bearer provider-secret' },
+    });
+  });
+
+  it('rejects an advertised oversized response before reading its JSON body', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const json = vi.fn();
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'content-length': String(DEFAULT_PROVIDER_JSON_RESPONSE_BYTES + 1),
+      }),
+      body: { cancel },
+      json,
+    } as unknown as Response);
+
+    await expect(postJson('https://provider.example/submit', {}, {})).rejects.toMatchObject({
+      status: 200,
+      disposition: 'unknown',
+      retryable: true,
+      body: null,
+    } satisfies Partial<ProviderHttpError>);
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it('does not let a caller raise the generic JSON response limit', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'content-length': String(DEFAULT_PROVIDER_JSON_RESPONSE_BYTES + 1),
+      }),
+      body: { cancel },
+      json: vi.fn(),
+    } as unknown as Response);
+
+    await expect(postJson('https://provider.example/submit', {}, {}, {
+      maxResponseBytes: DEFAULT_PROVIDER_JSON_RESPONSE_BYTES * 2,
+    })).rejects.toMatchObject({
+      disposition: 'unknown',
+      retryable: true,
+    } satisfies Partial<ProviderHttpError>);
+
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a chunked response after it crosses the JSON byte limit', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(DEFAULT_PROVIDER_JSON_RESPONSE_BYTES + 1));
+      },
+      cancel,
+    });
+    global.fetch = vi.fn().mockResolvedValue(new Response(stream, { status: 200 }));
+
+    await expect(postJson('https://provider.example/submit', {}, {})).rejects.toMatchObject({
+      status: 200,
+      disposition: 'unknown',
+      retryable: true,
+      body: null,
+    } satisfies Partial<ProviderHttpError>);
+
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it('does not treat an empty successful submit response as a confirmed result', async () => {

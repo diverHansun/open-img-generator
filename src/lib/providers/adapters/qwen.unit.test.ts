@@ -109,6 +109,35 @@ describe('QwenProvider', () => {
     expect((await provider.poll(handle)).status).toBe('cancelled');
   });
 
+  it('rebuilds a poll endpoint from the configured base and encoded task ID', async () => {
+    mockFetch({ output: { task_id: 'task/../?opaque', task_status: 'PENDING' } });
+
+    const result = await provider.poll({
+      ...handle,
+      externalId: 'task/../?opaque',
+      statusUrl: 'https://attacker.example/collect',
+      responseUrl: 'https://attacker.example/collect',
+    });
+
+    expect(result.status).toBe('pending');
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(url).toBe(
+      'https://dashscope.aliyuncs.com/api/v1/tasks/task%2F..%2F%3Fopaque',
+    );
+    expect((init?.headers as Record<string, string>).Authorization).toBe(
+      'Bearer dashscope-test-key',
+    );
+  });
+
+  it('rejects a dot-only persisted task ID before sending its credential', async () => {
+    global.fetch = vi.fn();
+
+    const result = await provider.poll({ ...handle, externalId: '..' });
+
+    expect(result.status).toBe('failed');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it('maps task failures, HTTP errors, and timeouts', async () => {
     mockFetch({
       output: { task_id: 'task-1', task_status: 'FAILED', code: 'InvalidParameter', message: 'bad size' },

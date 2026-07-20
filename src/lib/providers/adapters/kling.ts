@@ -15,6 +15,11 @@ import {
   ProviderHttpError,
 } from '../http-client';
 import { klingCapabilities } from '../capabilities/kling';
+import {
+  providerEndpointUrl,
+  trustedProviderBaseUrl,
+  trustedProviderExternalId,
+} from '../endpoint-policy';
 import { resolveCredential } from '../../user-config';
 
 const DEFAULT_BASE_URL = 'https://api-singapore.klingai.com';
@@ -34,12 +39,17 @@ const RESERVED_KEYS = new Set([
   'external_task_id',
 ]);
 
-function baseUrl(): string {
-  return (process.env.KLING_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
+function baseUrl(): URL {
+  return trustedProviderBaseUrl(process.env.KLING_BASE_URL ?? DEFAULT_BASE_URL);
 }
 
 function generationsUrl(taskId?: string): string {
-  return `${baseUrl()}/v1/images/generations${taskId ? `/${encodeURIComponent(taskId)}` : ''}`;
+  return providerEndpointUrl(baseUrl(), [
+    'v1',
+    'images',
+    'generations',
+    ...(taskId === undefined ? [] : [trustedProviderExternalId(taskId)]),
+  ]);
 }
 
 function authHeaders(): Record<string, string> {
@@ -157,7 +167,20 @@ export class KlingProvider implements ImageProvider {
       if (!taskId) {
         return { kind: 'failed', error: createProviderError(500, 'No task_id in Kling response') };
       }
-      const statusUrl = generationsUrl(taskId);
+      let statusUrl: string;
+      try {
+        statusUrl = generationsUrl(taskId);
+      } catch {
+        return {
+          kind: 'failed',
+          error: createProviderError(
+            500,
+            'Kling returned an invalid task reference',
+            false,
+            { disposition: 'unknown' },
+          ),
+        };
+      }
       const handle: JobHandle = {
         providerId: 'kling',
         model,
@@ -175,7 +198,9 @@ export class KlingProvider implements ImageProvider {
 
   async poll(handle: JobHandle): Promise<PollResult> {
     try {
-      const data = await getJson(handle.statusUrl, authHeaders(), 15_000);
+      // A JobHandle may originate from an older DB row. Its URL is not a
+      // trust boundary; only the configured Kling base and external ID are.
+      const data = await getJson(generationsUrl(handle.externalId), authHeaders(), 15_000);
       const envelopeError = readEnvelopeError(data);
       if (envelopeError) {
         return { status: 'failed', error: createProviderError(422, envelopeError.message) };

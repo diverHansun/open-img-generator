@@ -113,6 +113,46 @@ describe('KlingProvider', () => {
     expect(failed.status).toBe('failed');
   });
 
+  it('rebuilds a poll endpoint from the configured base and encoded task ID', async () => {
+    mockFetch({ code: 0, data: { task_status: 'submitted' } });
+
+    const result = await provider.poll({
+      providerId: 'kling',
+      model: 'kling-v3',
+      externalId: 'kling/../?opaque',
+      statusUrl: 'https://attacker.example/collect',
+      responseUrl: 'https://attacker.example/collect',
+      cancelUrl: null,
+      submittedAt: new Date().toISOString(),
+    });
+
+    expect(result.status).toBe('pending');
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(url).toBe(
+      'https://kling.example.test/v1/images/generations/kling%2F..%2F%3Fopaque',
+    );
+    expect((init?.headers as Record<string, string>).Authorization).toBe(
+      'Bearer kling-test-key',
+    );
+  });
+
+  it('rejects a dot-only persisted task ID before sending its credential', async () => {
+    global.fetch = vi.fn();
+
+    const result = await provider.poll({
+      providerId: 'kling',
+      model: 'kling-v3',
+      externalId: '..',
+      statusUrl: 'https://attacker.example/collect',
+      responseUrl: 'https://attacker.example/collect',
+      cancelUrl: null,
+      submittedAt: new Date().toISOString(),
+    });
+
+    expect(result.status).toBe('failed');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it('rejects more than one reference image for the standard endpoint', async () => {
     const result = await provider.submit(
       makeNormalizedRequest({ referenceImages: ['a', 'b'] }),

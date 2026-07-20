@@ -108,12 +108,12 @@ async 厂商的任务句柄，providers 内部结构，job-engine 原样存储�
 | `providerId` | 厂商标识 | `"fal"` | `"qwen"` |
 | `model` | 模型 id | `"fal-ai/flux/schnell"` | `"qwen-image-plus"` |
 | `externalId` | 厂商侧任务 id | `request_id` | `task_id` |
-| `statusUrl` | 状态查询 URL | submit 响应的 `status_url` | `/api/v1/tasks/:taskId` |
-| `responseUrl` | 结果获取 URL | submit 响应的 `response_url` | 与 `statusUrl` 相同（成功响应内含结果） |
-| `cancelUrl` | 取消 URL | submit 响应的 `cancel_url` | `null`（当前官方 HTTP 接口未提供取消调用） |
+| `statusUrl` | 状态查询 URL | submit 响应的 `status_url`（仅 exact-origin 后持久化） | 从受信 base + `externalId` 构建；字段为旧行兼容，不作为执行 URL |
+| `responseUrl` | 结果获取 URL | submit 响应的 `response_url`（仅 exact-origin 后持久化） | 与 `statusUrl` 相同（成功响应内含结果；不信任旧字段） |
+| `cancelUrl` | 取消 URL | submit 响应的 `cancel_url`（仅 exact-origin 后持久化） | `null`（当前官方 HTTP 接口未提供取消调用） |
 | `submittedAt` | 提交时间（ISO 8601） | 本地记录 | 本地记录 |
 
-Kling 映射：`externalId=data.task_id`，`statusUrl/responseUrl=/v1/images/generations/:taskId`，`cancelUrl=null`。
+Kling 映射：`externalId=data.task_id`，`statusUrl/responseUrl=/v1/images/generations/:taskId`，`cancelUrl=null`。Qwen/Kling 的 poll 每次都从已校验的 base URL 与编码后的 `externalId` 重建，因此旧数据库中的 URL 不可把 Bearer credential 导向其他 host。
 
 job-engine 将 handle 序列化存入 `generation_jobs.provider_handle`（JSON），不在 providers 模块持久化。
 
@@ -161,8 +161,10 @@ type PollResult =
 |------|------|
 | `code` | 机器可读错误码（见下方枚举） |
 | `message` | 人类可读描述 |
-| `retryable` | job-engine 是否可重试（MVP job-engine 不重试，但字段预留） |
+| `retryable` | job-engine 是否可按当前 operation 的有界策略重试；不等同于 submit 可安全重放 |
 | `httpStatus` | 原始 HTTP 状态码（如有） |
+| `disposition` | `not_started` / `rejected` / `unknown`；submit 是否可安全重放的副作用事实 |
+| `retryAfterMs` | Provider 返回的、已上限化的建议等待时间（如有） |
 
 ```
 type ProviderErrorCode =

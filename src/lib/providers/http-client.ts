@@ -5,6 +5,7 @@ import type {
 } from './types';
 
 export const MAX_PROVIDER_RETRY_AFTER_MS = 60_000;
+export const DEFAULT_PROVIDER_JSON_RESPONSE_BYTES = 2 * 1_024 * 1_024;
 
 export type ProviderHttpRequestOptions = {
   /** A caller-owned cancellation signal. A signal already aborted before fetch is safe to replay. */
@@ -13,6 +14,8 @@ export type ProviderHttpRequestOptions = {
   deadlineAt?: number | Date;
   /** Per-operation timeout. Defaults are selected by the HTTP verb helper. */
   timeoutMs?: number;
+  /** A bounded JSON envelope size; adapters may lower but never remove it. */
+  maxResponseBytes?: number;
 };
 
 type ProviderHttpErrorOptions = {
@@ -91,6 +94,16 @@ function normalizeRequestOptions(
 
 function normalizeTimeoutMs(value: number | undefined, fallback: number): number {
   return Number.isFinite(value) && value! > 0 ? Math.floor(value!) : fallback;
+}
+
+function normalizeResponseLimitBytes(value: number | undefined): number {
+  if (!Number.isFinite(value) || value === undefined || value <= 0) {
+    return DEFAULT_PROVIDER_JSON_RESPONSE_BYTES;
+  }
+  // The generic JSON envelope is never a Base64 transport. Endpoints which
+  // legitimately carry inline images must use E3's dedicated staged parser,
+  // rather than opting out of this common bound.
+  return Math.min(DEFAULT_PROVIDER_JSON_RESPONSE_BYTES, Math.floor(value));
 }
 
 function deadlineMs(value: number | Date | undefined): number | undefined {
@@ -232,9 +245,69 @@ function hasExplicitlyEmptyBody(response: Response): boolean {
   }
 }
 
-async function readErrorJsonOrNull(response: Response): Promise<unknown> {
+function declaredBodyExceedsLimit(response: Response, limitBytes: number): boolean {
   try {
-    return await response.json();
+    const value = response.headers?.get('content-length');
+    if (!value || !/^\d+$/.test(value.trim())) return false;
+    return Number(value) > limitBytes;
+  } catch {
+    return false;
+  }
+}
+
+async function cancelResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // A response body is disposable after a bounded read refusal.
+  }
+}
+
+async function readBoundedResponseJson(
+  response: Response,
+  limitBytes: number,
+): Promise<unknown> {
+  if (declaredBodyExceedsLimit(response, limitBytes)) {
+    await cancelResponseBody(response);
+    throw new Error('response_limit_exceeded');
+  }
+  // Existing unit fixtures use Response-shaped objects without a stream. Native
+  // fetch responses always expose a stream for non-empty bodies; production
+  // reads therefore take the bounded path below.
+  if (!response.body) return response.json();
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > limitBytes) {
+        await reader.cancel();
+        throw new Error('response_limit_exceeded');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const buffer = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(buffer));
+}
+
+async function readErrorJsonOrNull(
+  response: Response,
+  limitBytes: number,
+): Promise<unknown> {
+  try {
+    return await readBoundedResponseJson(response, limitBytes);
   } catch {
     return null;
   }
@@ -243,10 +316,11 @@ async function readErrorJsonOrNull(response: Response): Promise<unknown> {
 async function readSuccessJson(
   response: Response,
   allowEmptySuccessBody: boolean,
+  limitBytes: number,
 ): Promise<unknown> {
   if (allowEmptySuccessBody && hasExplicitlyEmptyBody(response)) return null;
   try {
-    return await response.json();
+    return await readBoundedResponseJson(response, limitBytes);
   } catch {
     // The remote endpoint responded, but a truncated/aborted/malformed 2xx
     // body cannot prove the submit result. Read-only poll/cancel callers keep
@@ -283,6 +357,7 @@ async function requestJson(request: JsonRequest): Promise<unknown> {
         headers: request.headers,
         ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
         signal: requestSignal.signal,
+        redirect: 'manual',
       });
     } catch {
       // Once fetch has been entered, native fetch cannot prove that no request
@@ -297,7 +372,10 @@ async function requestJson(request: JsonRequest): Promise<unknown> {
     }
 
     if (!response.ok) {
-      const responseBody = await readErrorJsonOrNull(response);
+      const responseBody = await readErrorJsonOrNull(
+        response,
+        normalizeResponseLimitBytes(request.options.maxResponseBytes),
+      );
       throw new ProviderHttpError(
         'Provider request was rejected',
         response.status,
@@ -305,7 +383,11 @@ async function requestJson(request: JsonRequest): Promise<unknown> {
         { retryAfterMs: responseRetryAfter(response) },
       );
     }
-    return readSuccessJson(response, request.allowEmptySuccessBody ?? false);
+    return readSuccessJson(
+      response,
+      request.allowEmptySuccessBody ?? false,
+      normalizeResponseLimitBytes(request.options.maxResponseBytes),
+    );
   } finally {
     requestSignal.cleanup();
   }

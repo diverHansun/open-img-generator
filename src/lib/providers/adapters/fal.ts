@@ -16,7 +16,56 @@ import {
   putJson,
 } from '../http-client';
 import { falCapabilities } from '../capabilities/fal';
+import {
+  providerEndpointUrl,
+  trustedProviderBaseUrl,
+  trustedProviderExternalId,
+  trustedSameOriginProviderUrl,
+} from '../endpoint-policy';
 import { resolveCredential } from '../../user-config';
+
+const DEFAULT_FAL_BASE_URL = 'https://queue.fal.run';
+
+function falBaseUrl(): URL {
+  return trustedProviderBaseUrl(process.env.FAL_BASE_URL ?? DEFAULT_FAL_BASE_URL);
+}
+
+function queueUrl(model: string): string {
+  return providerEndpointUrl(falBaseUrl(), model.split('/'));
+}
+
+function falHandle(
+  payload: unknown,
+  model: string,
+): JobHandle | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const data = payload as Record<string, unknown>;
+  try {
+    const base = falBaseUrl();
+    const externalId = trustedProviderExternalId(data.request_id);
+    const statusUrl = trustedSameOriginProviderUrl(data.status_url, base.origin);
+    const responseUrl = trustedSameOriginProviderUrl(data.response_url, base.origin);
+    const cancelUrl =
+      data.cancel_url === null || data.cancel_url === undefined
+        ? null
+        : trustedSameOriginProviderUrl(data.cancel_url, base.origin);
+    return {
+      providerId: 'fal',
+      model,
+      externalId,
+      statusUrl,
+      responseUrl,
+      cancelUrl,
+      submittedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function trustedFalHandleUrl(value: unknown): string {
+  return trustedSameOriginProviderUrl(value, falBaseUrl().origin);
+}
 
 function resolveSize(req: NormalizedRequest): string {
   const aspectRatioMap: Record<string, string> = {
@@ -100,23 +149,21 @@ export class FalProvider implements ImageProvider {
   }
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
-    const url = `https://queue.fal.run/${model}`;
     try {
       const body = buildRequestBody(req);
-      const data = (await postJson(url, body, this.authHeaders())) as Record<
-        string,
-        string
-      >;
-
-      const handle: JobHandle = {
-        providerId: 'fal',
-        model,
-        externalId: data.request_id,
-        statusUrl: data.status_url,
-        responseUrl: data.response_url,
-        cancelUrl: data.cancel_url ?? null,
-        submittedAt: new Date().toISOString(),
-      };
+      const data = await postJson(queueUrl(model), body, this.authHeaders());
+      const handle = falHandle(data, model);
+      if (!handle) {
+        return {
+          kind: 'failed',
+          error: createProviderError(
+            500,
+            'Fal returned an invalid task reference',
+            false,
+            { disposition: 'unknown' },
+          ),
+        };
+      }
 
       return { kind: 'async', handle };
     } catch (err) {
@@ -125,9 +172,20 @@ export class FalProvider implements ImageProvider {
   }
 
   async poll(handle: JobHandle): Promise<PollResult> {
+    let statusUrl: string;
+    let responseUrl: string;
+    try {
+      statusUrl = trustedFalHandleUrl(handle.statusUrl);
+      responseUrl = trustedFalHandleUrl(handle.responseUrl);
+    } catch {
+      return {
+        status: 'failed',
+        error: createProviderError(400, 'Fal task endpoint is invalid', false),
+      };
+    }
     try {
       const statusData = (await getJson(
-        handle.statusUrl,
+        statusUrl,
         this.authHeaders(),
         15_000,
       )) as Record<string, unknown>;
@@ -147,7 +205,7 @@ export class FalProvider implements ImageProvider {
       }
 
       const responseData = (await getJson(
-        handle.responseUrl,
+        responseUrl,
         this.authHeaders(),
         15_000,
       )) as Record<string, unknown>;
@@ -172,8 +230,17 @@ export class FalProvider implements ImageProvider {
       };
     }
 
+    let cancelUrl: string;
     try {
-      await putJson(handle.cancelUrl, this.authHeaders());
+      cancelUrl = trustedFalHandleUrl(handle.cancelUrl);
+    } catch {
+      return {
+        status: 'failed',
+        error: createProviderError(400, 'Fal cancel endpoint is invalid', false),
+      };
+    }
+    try {
+      await putJson(cancelUrl, this.authHeaders());
       return { status: 'cancelled' };
     } catch (err) {
       return { status: 'failed', error: this.mapError(err) };
