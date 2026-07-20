@@ -44,11 +44,11 @@ flowchart LR
 | payload 冲突 | canonical JSON 的 SHA-256；同键异 payload 返回 409 | 防止错误复用同一意图身份 | 相同 key 总是静默返回旧任务 | 需维护稳定 canonicalizer | P-03 |
 | 请求快照 | 每个 Job 持久化版本化、已校验的 `NormalizedRequest` | Provider 能力裁剪后才是真实派发输入，进程重启可恢复 | 只保存整单原始 body；从现有 prompt/model 猜参数 | SQLite 会短期保存 reference input；终态时清除快照 | P-04 |
 | 生命周期 | 保留 5 个用户状态，另加内部 `phase` | 避免把 dispatch/storage/cancel 运维细节扩散到 History/Gallery，同时可恢复 | 给 public status 增加十多个状态；继续用一个 pending | public `failed + PROVIDER_OUTCOME_UNKNOWN` 需 UI 特判 | P-04/P-08 |
-| Provider submit 重试 | 明确未受理才有界重试；结果未知不重试 | 优先防重复费用；`retryable` 不能等同于“可以重放副作用” | timeout/5xx 通用 retry(3)；从不区分失败 | 某些其实未发出的请求会被保守标记 unknown | P-03/P-06 |
+| Provider submit 重试 | 排队/网络发送前失败为 `not_started`，或 Provider 明确拒绝时才有界重试；发送后结果未知不重试 | 优先防重复费用；`retryable` 不能等同于“可以重放副作用” | timeout/5xx 通用 retry(3)；从不区分是否已发送 | 已开始 HTTP 后但实际未受理的极少数请求会被保守标记 unknown | P-03/P-06 |
 | poll/download 重试 | bounded exponential backoff + jitter + Retry-After + elapsed budget | 读取/下载可幂等，适合跨过瞬时故障 | 单次失败终结；无限重试 | 状态与测试增多 | P-06 |
 | cancel | 本地立即进入 `cancelled`，内部 phase 可继续 `cancelling`；远端尽力、有界恢复 | 用户不被远端取消接口拖住；崩溃后仍会收口远端动作 | marker 后同步等全部远端结果；忽略远端 cancel | 本地 cancelled 不承诺远端绝对停止/不计费 | P-05 |
 | worker | 默认启用（显式 `JOB_WORKER_ENABLED=false` 才关闭），detail GET 仍可辅助推进 | 单机无需外部队列即可恢复；关闭 worker 时仍保留 lazy path | worker 默认关闭；新增独立服务 | 进程未被任何请求/探针唤醒前不会运行 | P-04/P-08 |
-| 图片边界 | 协议/地址/redirect/大小/type/magic byte 全部验证；敏感 URL 脱敏 | Provider URL 是不可信输入，且可能含签名 | 直接 `fetch(url).arrayBuffer()` | 需要流式读取和 DNS/IP 校验；测试需 data URL 或公开地址 fake | P-09/P-10 |
+| 图片边界 | 协议/地址/redirect/大小/type/magic byte 全部验证；Base64 先有界暂存；敏感 URL 脱敏 | Provider URL/body 是不可信输入，且可能含签名或大体积内联图片 | 直接 `fetch(url).arrayBuffer()`；把 data URL 写进 SQLite | native fetch 的 DNS 预检存在 TOCTOU 残余；MVP 明确接受，不能宣称完全阻断 DNS rebinding | P-09/P-10 |
 | 前端恢复 | submission intent 写 sessionStorage；Stage 与 Compose bootstrap 解耦 | 响应丢失/刷新后可用同 key 找回；已知 ID 不受配置列表故障影响 | 只保留 React state | 需要过期和 payload-hash 清理规则 | P-02/P-03/P-11 |
 | 默认 fan-out | 默认仅选择 1 个已启用模型；多选时展示调用数/预计图片数 | 降低无意成本且不增加首次使用摩擦 | 默认 0 个；默认最多 8 个 | 用户要主动增加多 Provider 比较 | P-12 |
 | Seed 语义 | 只有所有 targets 支持时可用；服务端也拒绝部分生效 | 共享参数必须具有可预测含义 | 继续 `some` 并静默裁剪 | 原有“部分 Provider 应用 seed”行为被收紧 | P-12 |
@@ -78,7 +78,7 @@ flowchart LR
 | `phase` | `queued / dispatching / polling / storing / cancelling / terminal / outcome_unknown` |
 | `request_snapshot` | 版本化 `NormalizedRequest` JSON；只允许 validated fields，不包含 secret |
 | `request_snapshot_version` | 初版固定 `1`，未知版本禁止派发 |
-| `result_snapshot` | Provider image refs 的短期恢复快照；完成/终结后清空，不进入 API/log |
+| `result_snapshot` | 有界远端 URL 或 opaque staging-file refs 的短期恢复快照；禁止 data URL/Base64；完成/终结后清空，不进入 API/log |
 | `attempt_count` | 当前 phase 的连续失败/派发次数；phase 成功切换时归零 |
 | `retry_started_at` | 当前连续 retry window 起点，用于 elapsed budget |
 
@@ -91,7 +91,8 @@ flowchart LR
 - request snapshot 在全量校验、prompt process、按 Provider capability 裁剪之后生成，每个 target 各一份。
 - 只允许 `prompt/mode/width/height/aspectRatio/count/negativePrompt/seed/referenceImages/providerOptions`；不允许 session、provider credential、任意内部对象或函数透传。
 - JSON 写入前执行深度、key 数、字符串和总字节上限；整个 POST body 也设置上限，避免 reference data URL 撑爆内存/SQLite。
-- result snapshot 只在 Provider 已返回 image refs、尚未完成本地转存时存在；终态 transaction 中清空。
+- result snapshot 只在 Provider 已返回 image refs、尚未完成本地转存时存在；只保存有界远端 URL 或服务端生成的 opaque staging ref，终态 transaction 中清空。
+- ZenMux 若返回 Base64/data URL，必须先经流式/分块解码、25 MiB 硬上限、类型与 magic-byte 校验写入私有 staging 临时文件，再把 opaque ref 写入 snapshot；不得把原 data URL 写入 SQLite。Doubao 及其他 adapter 即使当前通常返回 URL，也必须走同一防御分支处理意外 Base64。
 - server log、API DTO 和 UI 不输出两个 snapshot；错误只输出安全 code 与 redacted context。
 
 ### 3.4 旧数据回填
@@ -216,6 +217,7 @@ Job diagnostics 出现在 Generation view 的 job.error，但必须经过 safe m
 - `claimDueJob()` 使用 phase、due time、lease expiry 的单条条件 UPDATE；claim 不改变用户 status。
 - lease token 仍使用写入的 expiry 值做 CAS；所有外部结果写回都要验证 lease 与 cancel marker。
 - `listDueGenerationJobs()` 排除有效 lease，按逻辑 `nextAttempt/updatedAt/id`（物理列仍为 `next_poll_at/updated_at/id`）稳定排序后再 limit，避免 batch 饥饿。
+- `storing` 每次 lease 最多处理一张尚缺失的 image；每张成功后持久化 row/file，再释放或短 due 重新排队处理下一张，避免多图任务跨过 lease budget。
 - worker 统计领域结果：`advanced/retried/completed/failed/unknown/cancelled/skipped`，不能再把 Promise fulfilled 等同业务成功。
 
 ### 5.3 重试矩阵
@@ -224,17 +226,18 @@ Job diagnostics 出现在 Generation view 的 job.error，但必须经过 safe m
 
 | 操作 | 可重试条件 | 最大总 attempt | base/cap | elapsed budget | 不重试条件 |
 |---|---|---:|---|---|---|
-| Provider submit | 明确 429/限流或 adapter 能证明“未受理” | 3 | 1s / 15s | 30s | timeout、断线、未知 5xx、已可能受理 |
+| Provider submit | limiter 排队超时/abort、HTTP 尚未开始发送即失败（`not_started`），或明确可重试的 Provider 拒绝（`rejected`） | 3 | 1s / 15s | 30s | HTTP 已开始后的 timeout/reset、未知 5xx、已可能受理（均 `unknown`） |
 | Provider poll | 429、timeout、network、5xx | 连续 6 | 2s / 60s | 首次失败后 10min | 4xx 业务失败、handle invalid；成功 poll 重置计数 |
 | Provider cancel | 429、timeout、network、5xx，且有 cancel endpoint/handle | 3 | 1s / 10s | 30s | unsupported；本地 cancelled 不回退 |
 | image download | 429、timeout、network、5xx、短读 | 3 | 500ms / 5s | 每张 60s | 非图片、超限、私网、非法 redirect、4xx（429 除外） |
 | browser POST | network/timeout/429/5xx；始终同 key | 2 | 500ms / 2s | 30s | 4xx 非 retryable、payload conflict |
 | browser detail GET | network/timeout/429/5xx | 连续 6 后暂停 | 2s / 30s | 单次 12s | 404/401/非 retryable；用户可手动恢复 |
 
-Provider adapter 的 submit error 新增副作用判定 `disposition: rejected | unknown`：
+Provider adapter 的 submit error 新增副作用判定 `disposition: not_started | rejected | unknown`：
 
+- limiter 队列超时/取消、queue saturation，以及 transport 能证明 HTTP 尚未开始发送的失败为 `not_started`，可在预算内安全重排。
 - 429 与明确 validation/auth response 为 `rejected`；其中只有 retryable rejected 可自动重试。
-- timeout、网络中断和不能证明未受理的 5xx 为 `unknown`。
+- HTTP 已开始发送后的 timeout、connection reset、网络中断和不能证明未受理的 5xx 为 `unknown`，即使底层异常标记 retryable 也不得自动重投 submit。
 - fal、ZenMux、SiliconFlow、Zhipu、Doubao、Qwen、Kling 在 improve-1 默认都**不声明 Provider submit idempotency**；后续只有官方契约和 adapter test 同时证明后才能打开 unknown replay。
 - poll 是读取型操作，按上表有界重试；`retryable` 不再被 catch 强制覆写为 false。
 
@@ -242,11 +245,11 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: rejected |
 
 1. `queued` claim 成 `dispatching`，立即持久化 lease，再调用 Provider。
 2. Provider 返回 async handle 时，在同一 DB write 中保存 handle、切 `polling`、清 dispatch lease。
-3. Provider 返回 sync refs 时，先持久化 `result_snapshot`、切 `storing`、清 dispatch lease，再开始下载。
+3. Provider 返回 sync refs 时，先把 Base64 转成有界 staging ref，再持久化仅含远端 URL/staging ref 的 `result_snapshot`、切 `storing`、清 dispatch lease，之后再开始落正式图片。
 4. 进程若在 `dispatching` lease 过期后仍无持久结果：
    - Provider 支持且实际使用相同 idempotency key：可按策略恢复；
    - 本批七家默认不满足，切 `outcome_unknown`，不重投。
-5. 进程若在 `storing` 退出，result snapshot 允许从缺失的 image index 继续。
+5. 进程若在 `storing` 退出，result snapshot 允许按“一次 lease 一张缺失 image”继续；已存在 index 不重写。
 
 这会保守地产生极少量“可能没真正发出但被标为 unknown”的任务，代价小于重复费用和不可见远端任务。
 
@@ -263,19 +266,23 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: rejected |
 ### 6.1 Provider HTTP
 
 - `http-client.ts` 接受 caller signal/deadline；submit 30s、poll 15s、cancel 10s 为默认上限，可按 adapter 更短，不能更长于 caller remaining budget。
+- 普通 Provider JSON response 必须流式计数并设置默认 2 MiB 硬上限（adapter 只能设得更小）；明确允许 Base64 的 endpoint 不得调用无界 `response.json()`，而应走专用流式 staging parser，并同时受“每张解码后 25 MiB、请求 count 对应总预算、编码 envelope 总上限”约束。任一上限触发即 abort，错误只保留有界、脱敏摘要。
 - 解析并上限化 `Retry-After`；错误保留 status/code/retryable/disposition/retryAfterMs，不保留 raw credential 或完整 body。
 - `withProviderLimit()` 增加 queue 上限（默认 32/provider）、排队 deadline（默认 30s）和 AbortSignal；队列满快速返回 `QUEUE_SATURATED`。
 - 不同 Provider 继续独立 bucket，避免一家慢拖住其他 targets。
-- fal 等动态 status/cancel URL 在附加 Authorization 前必须验证与配置的 Provider origin/allowlist 匹配，拒绝 credential forwarding 到任意 host。
+- 所有携带 Authorization 的 Provider 请求使用 manual redirect；跨 origin redirect 一律拒绝，既不继续请求也不转发 credential。
+- Fal 返回的动态 status/cancel URL 必须与配置的 Fal API origin（scheme、host、effective port）精确一致，每一跳 redirect 重新验证。
+- Qwen/Kling 只持久化 external ID/handle；poll/cancel URL 必须由受信 base URL + 编码后的 external ID 重建，不执行 Provider response 或 DB 中的任意完整 URL。
 
 ### 6.2 远端图片 ingestion
 
 - 允许 `data:`（仅 base64 raster image）和 `https:`；`http:` 仅测试或显式本地开发开关，生产默认拒绝。
 - HTTP redirect 使用 manual 模式，最多 3 次；每一跳重新校验 scheme、DNS 解析结果和 host。
-- 拒绝 loopback、RFC1918、link-local、multicast、metadata endpoint、IPv4-mapped IPv6 等非公网地址；DNS 每次连接前复核，降低 rebinding 风险。
+- 拒绝 loopback、RFC1918、link-local、multicast、metadata endpoint、IPv4-mapped IPv6 等非公网地址；连接/每次 redirect 前做 DNS/IP 预检只能降低风险。native fetch 可能在预检后自行再次解析，存在 DNS TOCTOU/rebinding 残余；MVP 明确接受该残余，不宣称已完全解决，若安全边界升级则改用能 pin 已校验地址的自定义 Node transport。
 - 先检查 `Content-Length`，再以流式计数强制每张最大 25 MiB；不再无界 `arrayBuffer()`。
-- 仅接收 PNG/JPEG/WebP/GIF，Content-Type 与 magic bytes 必须相符；SVG/HTML/JSON/空 body 拒绝。
-- error/log 中 URL 只保留 origin + redacted pathname 摘要，永不保留 query/fragment。
+- data URL/Base64 同样受 25 MiB **解码后**硬上限，先校验后写私有 staging 文件；snapshot 只保存 opaque ref，取消、终态、过期或失败时清理 staging 文件。
+- 仅接收 PNG/JPEG/WebP，Content-Type 与 magic bytes 必须相符；GIF/SVG/HTML/JSON/空 body 拒绝。
+- error/log 中 URL 只保留 origin + 完整 URL 的不可逆 digest，不记录 pathname、query 或 fragment；data URL 既不记录也不参与可逆摘要。
 - 文件先写临时路径，校验后原子 rename；DB unique insert 失败清理 loser file；终态/取消 CAS 失败执行 attempt-scoped cleanup。
 
 ## 7. 前端恢复与交互语义
@@ -328,6 +335,7 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: rejected |
 - 重构 `scripts/migrate-db.mjs` 为有序、幂等 migration；设置 `user_version`，迁移前创建一次版本化 backup，结束后验证 manifest/foreign keys。
 - 新增 schema compatibility checker 与 manifest；`/api/health` 改 readiness，新增 live route。
 - `predev/prestart` 执行 migrate；Generation POST 在 schema 不 ready 时快速返回 503。
+- 本批只冻结 readiness status/code/details；`X-Request-Id` 与 correlation contract 由 Batch B 增加，避免 A 的测试提前依赖 B。
 - DoD：触发截图故障的旧 schema 副本可升级且保留数据；未迁移副本 health/POST 均拒绝；当前真实 `data/app.db` 经备份后迁移可生成到 Provider dispatch 前。
 - 对应：P-01、P-14。
 
@@ -362,17 +370,22 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: rejected |
 - admission transaction 包含 session touch，POST 切为立即 `202`。
 - refactor lifecycle/state transition/worker due scan；默认 worker；dispatch/poll/store/cancel 使用同一 advance。
 - result snapshot、状态单调、空结果、图片补偿和领域 worker counters。
+- retry state（attempt、elapsed window、next due）在本批持久化；这里只用 typed fake Provider 验证 state transition、重启延续预算与穷尽收口，不在本批宣称真实 HTTP/adapter mapping 已接通。
 - DoD：所有 crash checkpoint 在重启后恢复或明确 unknown；无永久无解释 pending；终态不可逆；每个 commit 都有 fault-injection integration。
 - 对应：P-04、P-05、P-07、P-08、P-09。
 
 ### Batch E — Provider、队列与 storage 边界
 
-**建议 commit**：`fix(providers): bound retries and remote image ingestion`
+**建议拆为三个 commit**：
 
-- Provider error disposition/Retry-After/caller deadline；adapter 逐家对齐。
-- limiter queue 上限/deadline/abort。
-- storage URL、redirect、IP、size、type、magic-byte、temp-file 和 redaction。
-- DoD：submit unknown 不重投；poll/download transient 按预算恢复；SSRF/超大/非图片/签名 URL 测试通过。
+1. `fix(providers): bound http disposition and queues`
+2. `fix(providers): constrain adapter urls and responses`
+3. `fix(storage): stage and validate remote images`
+
+- E1：Provider HTTP body/deadline、`not_started/rejected/unknown`、Retry-After 与 limiter queue 上限/deadline/abort。
+- E2：七家 adapter 逐家对齐；Fal exact-origin/manual redirect；Qwen/Kling 从 base + external ID 重建 URL；auth redirect 与日志脱敏。
+- E3：storage URL/redirect/IP/size/type/magic-byte/temp-file；ZenMux Base64 有界 staging 与 Doubao 防御分支；每 lease 一张缺失 image。
+- DoD：真实本地 fake HTTP 串起 I-22… I-25；pre-send 可安全重排，HTTP started unknown 不重投；poll/download transient 按预算恢复；SSRF/超大 JSON/Base64/非图片/签名 URL 测试通过。
 - 对应：P-06、P-10、P-13。
 
 ### Batch F — Stage 恢复、成本护栏与 E2E

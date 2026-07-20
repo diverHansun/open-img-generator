@@ -67,15 +67,16 @@ tests/helpers/fake-provider-server.ts
 | U-05 | phase transition table | 仅允许 `02 §3.5` 的边；terminal/unknown 不可离开 | `state-machine.unit.test.ts` | P-04/P-08/D |
 | U-06 | user status 单调 | running 后 pending poll 不回退；terminal 晚到结果无效 | lifecycle/state unit | P-08/D |
 | U-07 | aggregate/partial/unknown | active 优先；完成+失败为 completed/partial；unknown 不被当普通可重试失败 | generation query/status tests | P-08/P-09/D/F |
-| U-08 | retry classifier | submit 429 rejected 可重试；timeout/network/未知 5xx disposition unknown；poll 5xx/timeout retryable | retry policy/provider tests | P-06/E |
+| U-08 | retry classifier | queue/pre-send timeout/abort 为 `not_started` 可重排；明确 429 为 `rejected`；HTTP started 后 timeout/reset/未知 5xx 为 `unknown`；poll 5xx/timeout retryable | retry policy/provider tests | P-06/E |
 | U-09 | retry schedule | attempt/elapsed cap、full jitter 下界/上界、Retry-After、成功重置 | `retry-policy.unit.test.ts` | P-06/D/E |
 | U-10 | retry exhaustion | 达到 attempt 或 elapsed budget 写稳定终态，不再 schedule | lifecycle unit | P-06/D |
-| U-11 | provider limiter | queue 上限快速拒绝；排队 deadline/AbortSignal 移除 item；不同 provider 不互阻 | `limiter.unit.test.ts` | P-06/P-08/E |
-| U-12 | 七家 adapter error mapping | 429/4xx/5xx/timeout 的 code/retryable/disposition/Retry-After 一致 | 各 adapter unit | P-06/E |
-| U-13 | dynamic Provider URL auth | 非配置 origin 不发送 Authorization 并拒绝 | fal/qwen/kling adapter tests（按实际动态 URL） | P-10/E |
+| U-11 | provider limiter | queue 上限快速拒绝；排队 deadline/AbortSignal 移除 item 且 Provider HTTP 0 调用；不同 provider 不互阻 | `limiter.unit.test.ts` | P-06/P-08/E |
+| U-12 | 七家 adapter error mapping | 429/4xx/5xx/timeout 的 code/retryable/disposition/Retry-After 一致；普通 Provider JSON > 2 MiB 被流式中止且 raw body 不泄漏 | 各 adapter/http-client unit | P-06/P-10/E |
+| U-13 | dynamic Provider URL auth | Fal 仅接受 exact configured origin 且 manual redirect；Qwen/Kling 从 base + external ID 重建；cross-origin 不请求/不转发 Authorization | fal/qwen/kling adapter tests | P-10/E |
 | U-14 | remote URL policy | 拒绝非法 scheme、userinfo、loopback/private/link-local/mapped IPv6、过多 redirect | storage policy unit | P-10/E |
-| U-15 | image bytes policy | 空 body、>25MiB、Content-Type/magic 不符、SVG/HTML 拒绝；四类 raster 通过 | storage unit | P-09/P-10/E |
-| U-16 | signed URL redaction | query/fragment/token 不出现在 exception/structured log | storage/observability unit | P-10/P-13/B/E |
+| U-15 | image bytes policy | 空 body、>25MiB、Content-Type/magic 不符、GIF/SVG/HTML 拒绝；仅 PNG/JPEG/WebP 通过 | storage unit | P-09/P-10/E |
+| U-15A | Base64 staging | ZenMux data URL 解码后执行 25 MiB/type/magic 限制，snapshot 仅 opaque staging ref；Doubao 意外 Base64 走同路径；清理覆盖终态/取消/失败 | storage/adapter unit | P-09/P-10/E |
+| U-16 | signed URL redaction | pathname/query/fragment/token 不出现在 exception/structured log，只保留 origin + URL digest | storage/observability unit | P-10/P-13/B/E |
 | U-17 | submit intent 生命周期 | 同 payload 复用 key；输入变化/过期/project-session 变化生成新 key；成功后清理 | Web Client intent unit | P-03/F |
 | U-18 | ApiClientError | 解析 code/retryable/requestId/Retry-After；兼容旧 string body | `api-client.unit.test.ts` | P-02/B |
 | U-19 | code → i18n/action | 中英文 keys 齐全；unknown 不提供盲目新建动作 | Generate error mapping/i18n tests | P-02/P-11/B/F |
@@ -88,7 +89,8 @@ tests/helpers/fake-provider-server.ts
 | ID | HTTP 场景 | 预期契约 | 建议文件 | 对应 |
 |---|---|---|---|---|
 | C-01 | `GET /api/health/live` | DB schema 坏也返回 200，仅 `{status:ok}`，不启动 worker | `health-api.contract.test.ts` | P-01/A |
-| C-02 | ready health | 200、schema/current version、enabled providers、request ID | 同上 | P-01/P-13/A |
+| C-02 | ready health（Batch A） | 200、schema/current version、enabled providers；不提前要求 correlation header | 同上 | P-01/A |
+| C-02A | health correlation（Batch B） | live/ready 与两类 503 均含合法 `X-Request-Id`，error envelope 的 requestId 一致 | 同上 | P-13/B |
 | C-03 | schema mismatch | 503 + `SCHEMA_NOT_READY` + required/current/missing 白名单 details | 同上 | P-01/A |
 | C-04 | DB unavailable | 503 + `DATABASE_UNAVAILABLE`，不泄露路径/SQL | 同上 | P-01/P-13/A |
 | C-05 | new Generation admission | 202、Location、X-Request-Id、`replayed=false`、原 id/status/links | `generations-api.contract.test.ts` | P-03/P-04/C/D |
@@ -101,7 +103,7 @@ tests/helpers/fake-provider-server.ts
 | C-12 | cancel | API 不等待远端即可返回 user cancelled；后续 detail 不复活 | 同上 | P-05/D |
 | C-13 | not found/unauthorized | stable 404/401，无资源或内部细节泄漏 | 同上 | P-02/B |
 
-每个 error contract 断言 `status/code/retryable/requestId`，并断言 response 文本不包含测试 secret、prompt、SQLite path、signed query。
+最终每个 error contract 断言 `status/code/retryable/requestId`，并断言 response 文本不包含测试 secret、prompt、SQLite path、signed query；Batch A 的 readiness 测试只承担 status/code/details，requestId 从 Batch B 起成为门禁。
 
 ## 5. Integration 测试矩阵
 
@@ -113,7 +115,6 @@ tests/helpers/fake-provider-server.ts
 | I-02 | 再次执行 migration | 无重复列/index/backup 覆盖；report from=to；数据不变 | 同上 |
 | I-03 | 迁移中断/非法 schema | 不设置目标 version，readiness 失败，原 backup 可读 | migration smoke |
 | I-04 | version 伪造为 latest 但缺 required index | health 503，证明 manifest 不是数字摆设 | readiness integration/contract |
-| I-05 | phase backfill | terminal、active+handle、active-no-handle 分别按 `02 §3.4` 落位 | migration smoke |
 
 ### 5.2 Idempotency/admission
 
@@ -130,14 +131,17 @@ tests/helpers/fake-provider-server.ts
 
 测试通过“持久化 checkpoint → 丢弃旧 engine instance → 新 worker/GET 恢复”模拟进程退出，不添加生产 test-only 分支。
 
+Batch D 的 lifecycle/retry 测试使用 typed fake Provider，只验证持久化 retry state、phase/lease/CAS 与重启预算；真实 HTTP classifier、七家 adapter 和 limiter 的接线由 Batch E 的 I-22… I-25 验收。
+
 | ID | 持久化检查点 | 重启后预期 | 对应 |
 |---|---|---|---|
+| I-05 | D migration phase backfill | terminal、active+handle、active-no-handle 分别按 `02 §3.4` 落位 | P-04/D |
 | I-11 | admission committed，phase queued | worker claim 后只 submit 一次 | P-04 |
 | I-12 | phase dispatching、lease 未过期 | 第二 worker 跳过，不并发 submit | P-04/P-08 |
 | I-13 | phase dispatching、lease 过期、无 result/handle | `outcome_unknown`，Provider 0 次重投 | P-03/P-04 |
 | I-14 | async handle 已持久化 | poll 恢复并完成，不重新 submit | P-04 |
-| I-15 | result snapshot 已持久化、0 images | storage 恢复全部 indexes，Provider 不重调 | P-04/P-09 |
-| I-16 | result snapshot + index0 已存在 | 仅补缺失 index；最终无重复 row/file | P-09 |
+| I-15 | result snapshot 已持久化、0 images | 每次 lease 只存一张缺失 image；多次 claim 后恢复全部 indexes，Provider 不重调 | P-04/P-09 |
+| I-16 | result snapshot + index0 已存在 | 下一次 lease 仅补一个缺失 index；最终无重复 row/file，单次外部时长不跨多图预算 | P-09 |
 | I-17 | poll Provider 先 running 后 pending | public status 保持 running；后续完成 | P-08 |
 | I-18 | Provider 返回空 refs | failed `PROVIDER_EMPTY_RESULT`，0 image，不 completed | P-09 |
 | I-19 | Provider 返回少/多 refs | 保留有界有效结果和 warning，永不超 requested count | P-09 |
@@ -148,10 +152,11 @@ tests/helpers/fake-provider-server.ts
 
 | ID | 场景 | 必须验证 | 对应 |
 |---|---|---|---|
-| I-22 | submit 429 两次后成功 | 最多 3 attempts、同 job/request ID、按 due 推进 | P-06 |
-| I-23 | submit timeout/connection reset/unknown 5xx | 一次调用后 unknown，不重投 | P-03/P-06 |
-| I-24 | poll timeout/5xx 后成功 | retry count/backoff 持久化，进程重启不重置预算，成功后归零 | P-06 |
-| I-25 | poll 连续失败耗尽 | terminal `RETRY_EXHAUSTED`，不再 due | P-06 |
+| I-22 | limiter queue/pre-send deadline 后成功 | 第一次 Provider server 0 请求、disposition `not_started`、同 job 按 due 安全重排；随后只发送一次 | P-06/E |
+| I-22A | submit 429 两次后成功 | real fake HTTP 最多 3 attempts、同 job/request ID、按 due 推进 | P-06/E |
+| I-23 | HTTP started 后 submit timeout/connection reset/unknown 5xx | fake server 可观测一次请求；随后 unknown，进程重启也不重投 | P-03/P-06/E |
+| I-24 | poll timeout/5xx 后成功 | real fake HTTP 接线；retry count/backoff 持久化，进程重启不重置预算，成功后归零 | P-06/E |
+| I-25 | poll 连续失败耗尽 | real fake HTTP 接线；terminal `RETRY_EXHAUSTED`，不再 due | P-06/E |
 | I-26 | cancel marker committed 后进程退出 | user 仍 cancelled；新 worker 有界 remote cancel 后 terminal | P-05 |
 | I-27 | remote cancel unsupported/fails | 本地不回退；warning 安全；预算后停止 | P-05/P-06 |
 | I-28 | due batch 前部均有 active lease | 后续 unleased due jobs 仍被扫描，稳定排序，无饥饿 | P-08 |
@@ -167,6 +172,9 @@ tests/helpers/fake-provider-server.ts
 | I-33 | `image/png` 返回 HTML/JSON | magic mismatch 拒绝，0 image | P-09/P-10 |
 | I-34 | signed URL download 500 | API/DB safe error/log 捕获中不含 query token | P-10/P-13 |
 | I-35 | duplicate storage attempt | 一个 row/一个最终文件；竞争 loser 清理 | P-09 |
+| I-36 | 普通 Provider JSON response > 2 MiB | 流式中止、bounded safe error、raw body 不进 DB/log；Base64 endpoint 改由 I-37 的独立 encoded/decoded 总预算验收 | P-10 |
+| I-37 | ZenMux/Doubao Base64 result | data URL 不进 snapshot；staging ref 可跨进程恢复，超限/非法类型被拒且 temp 清理 | P-09/P-10 |
+| I-38 | Fal/Qwen/Kling dynamic endpoint | Fal 非 exact-origin/redirect 被拒；Qwen/Kling 忽略任意 persisted URL 并从 base + external ID 重建；无跨 origin auth | P-10 |
 
 ## 6. Backend E2E
 
@@ -256,8 +264,10 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
 | A | compatibility unit + health contract + migration/readiness smoke + typecheck | 真实 `data/app.db` 副本迁移 report |
 | B | error handler/api-client/i18n unit + Generation/health contracts + typecheck | secret/redaction negative assertions |
 | C | idempotency unit + Generation contract + idempotency integration + typecheck | 并发 loser 只一单 |
-| D1/D2 | job-engine/db/worker unit + crash/retry/cancel integration + contract + typecheck | 每个 checkpoint 的 DB/file assertions |
-| E | 七 adapter + limiter + storage/security unit/integration + typecheck | submit unknown 调用次数为 1 |
+| D1/D2 | job-engine/db/worker unit + typed-fake crash/retry/cancel integration + contract + typecheck | 持久 retry state 与每个 checkpoint 的 DB/file assertions；不冒充真实 HTTP 接线 |
+| E1 | Provider HTTP/disposition + limiter unit/integration + typecheck | I-22… I-25；pre-send 0 请求，HTTP started unknown 调用次数为 1 |
+| E2 | 七 adapter mapping/dynamic URL/auth redirect unit/integration + typecheck | Fal exact origin；Qwen/Kling reconstructed URL；bounded JSON |
+| E3 | storage/staging/security unit/integration + typecheck | 每 lease 一张；PNG/JPEG/WebP；Base64 不进 SQLite；temp/loser cleanup |
 | F1 | Web Client/Generate/i18n unit + related integration + typecheck | Stage bootstrap 解耦测试 |
 | F2 | `npm run test:release` | Backend/Browser E2E traces/logs；production build |
 
@@ -282,7 +292,7 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
 
 - 同一次链路可用 `requestId/clientRequestId/generationId/jobId/provider/phase/attempt` 关联。
 - admission、replay、claim、retry schedule、phase transition、terminal/unknown、cancel cleanup 均有事件；正常 pending poll 不产生错误噪音。
-- log 不包含 API key、Authorization、Cookie、完整 prompt、request/result snapshot、data URL 或 URL query/fragment。
+- log 不包含 API key、Authorization、Cookie、完整 prompt、request/result snapshot、data URL 或 URL pathname/query/fragment；远端 URL 仅保留 origin + digest。
 - worker counters 与最终 DB 领域状态一致。
 - schema not ready 在用户提交之前通过 readiness 可见。
 
@@ -314,7 +324,7 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
 | Dispatch ambiguity | 崩溃发生在 lease 写入后/HTTP send 前或 Provider accept 后怎么办？ | expired dispatching 默认 unknown，不盲重投 | 可能出现保守 false-unknown；无厂商查询 API 时不可消除 |
 | Retry storm | 429/5xx 时多 job/多浏览器是否同步轰炸？ | full jitter、attempt/elapsed budget、queue cap、Retry-After | 单机无全局跨进程 budget；当前单实例范围接受 |
 | Cancel/storage race | cancel、lease 失效与图片文件/row 同时发生会否复活或泄漏？ | marker + CAS + temp/atomic file + attempt cleanup + orphan cleanup | 极端进程断电可留临时文件，cleanup/age 门槛后回收 |
-| SSRF/credential leak | Provider 返回 private redirect 或 poisoned status URL 会否访问内网/带出 key？ | scheme/DNS/IP/redirect 每跳校验；auth origin constraint | DNS/HTTP stack 细节需 integration 验证；不开放任意 allowlist |
+| SSRF/credential leak | Provider 返回 private redirect、poisoned status URL 或 DNS rebinding 会否访问内网/带出 key？ | scheme/DNS/IP 预检、manual redirect 每跳复核、exact auth origin；Fal URL 校验，Qwen/Kling URL 重建 | native fetch 在预检后自行解析存在 TOCTOU；MVP 明确接受且不宣称完全阻断 rebinding。需要更强保证时改用 pin 已校验地址的自定义 transport |
 | Sensitive diagnostics | raw vendor body、签名 URL、prompt 会否进入 DB/API/log？ | safe code registry、redaction、snapshot 非 DTO、终态清空 | SQLite 本身仍保存业务 prompt；全库加密 out of scope |
 | Schema/test drift | helper 最新 schema 是否继续掩盖真实 migration？ | exact previous-schema fixture + manifest + smoke + readiness | 每次新增列必须同时增 previous-schema fixture/manifest |
 | Frontend stale work | route change、hidden/offline、hung fetch、旧 response 会否覆盖新任务？ | abort/deadline/sequence/monotonic state/pause+resume | 浏览器被强杀后依赖 sessionStorage + server idempotency 找回 |
