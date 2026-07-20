@@ -187,3 +187,18 @@ UI 文案使用 Workspace，代码和 HTTP DTO 继续使用 Project/`projectId`�
 | 当前任务唯一性 | Generate 只保留最近一次成功提交；下一次 POST 成功后原子替换上一次 id/快照/订阅，Stage 只展示本次 Generation；POST 失败保留旧入口 |
 | Job 明细 | 只展示当前 Generation 的 Provider/model/status、实际图片数和安全错误摘要；默认可折叠，不加入 Session 历史 |
 | 后端边界 | 现有 `GenerationView.jobs` + `images[].jobId` 已足够；本批不新增 Job 字段，不伪造 expected total、百分比、队列位置或耗时 |
+
+## 0.13 第四轮视觉与实施确认（2026-07-20）
+
+本节覆盖 §0.10–§0.12 中与最新选择冲突的视觉介质、字体和实施状态描述；既有产品职责与 Compose/Stage 契约保持不变。
+
+| 议题 | 最终结论 |
+|---|---|
+| Accent | 使用青瓷绿/茉莉绿家族，画布为柔和微冷灰绿；不使用深青色、蓝紫或陶土作为主色 |
+| 渐变 | 禁止全部装饰渐变，包括背景渐变、按钮渐变、图片常驻 gradient overlay 与 gradient shimmer |
+| Glass / halo | 允许中性或单色绿色的克制 glass/halo，只用于 Prompt focus、活动任务、Dialog/图片浮动工具；必须有实色 fallback，不用于目录行或卡片墙 |
+| 中文字体 | 明确排除 HarmonyOS Sans SC；中文 UI 使用自托管 Noto Sans SC，Home/display 中文可小范围使用 LXGW WenKai；西文使用 SUSE，技术标识使用等宽 fallback |
+| 字体许可 | 字体资源必须附明确开源许可并以本地资源交付；只加载实际使用的字重/子集，避免无边界 CJK 字体负担 |
+| 实施顺序 | 先更新文档和承重边界，再删除 `PageFoundation` / `GenerateFoundation` 与旧 CSS；按 Generate → Provider 配置 → History/Gallery → Models/Providers → Dialogs 落地真实 TSX/业务状态，最后统一视觉收口 |
+| 页面验收 | 每完成一个板块即检查排版、颜色、密度、动效、空/错/loading、中英文与响应式；不等全部页面完成后才发现系统性偏差 |
+| 架构边界 | 保持 App Router + feature components + web-client；补 WorkspaceContext、统一 AbortSignal 和单例 poll runtime，不引入全局业务 store 或万能 Page/DataTable |

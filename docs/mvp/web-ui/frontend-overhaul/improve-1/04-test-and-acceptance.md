@@ -111,8 +111,11 @@
 | F08 | 视觉矩阵 | 人工 | 1440、1024、390 宽度关键页无溢出和空列 |
 | F09 | i18n 字典完整性 | unit | zh-CN 与 en 字典 key 集合一致；无互相缺失 |
 | F10 | 主题残留 | 静态/人工 | 无明暗切换入口与相关状态 |
-| F11 | 视觉语言 | 静态/人工 | 无蓝紫 AI 渐变、emoji UI、全 pill 按钮、卡片堆叠；每个可视区域最多一个实心 accent 主动作 |
+| F11 | 视觉语言 | 静态/人工 | 无任何装饰渐变/gradient shimmer、蓝紫或多色 AI glow、emoji UI、全 pill 按钮、卡片堆叠；每个可视区域最多一个实心 accent 主动作 |
 | F12 | CSS 分层 | 静态/人工 | `globals.css` 仅保留 tokens/reset/Tailwind 入口；页面私有布局位于对应 CSS Module；无旧卡片阴影体系 |
+| F13 | 字体资源 | build/人工 | 不含 HarmonyOS Sans SC；中文字体本地交付、许可明确、只加载实际使用字重；中英文切换无明显布局跳动 |
+| F14 | Glass fallback | 静态/人工 | 禁用/不支持 `backdrop-filter` 时文字、边界和操作仍清楚；halo 不替代 focus ring、状态文本或边界 |
+| F15 | Reduced motion | 人工 | `prefers-reduced-motion` 下关闭非必要位移/缩放；loading 无 gradient shimmer，仅静态或低幅 opacity pulse |
 
 ## 4.3 Provider 配置安全验证
 
@@ -147,7 +150,8 @@
 - 键盘：从返回入口到主内容、列表行、展开、Switch、密钥小眼睛、保存、预览/详情弹层均可达；焦点可见。
 - `prefers-reduced-motion`：无强制位移动画。
 - 200% zoom：不丢按钮、状态和错误信息。
-- 视觉抽查：颜色角色清晰且数量克制；无陶土主色预设、蓝紫渐变或多色 glow；目录页为 flat rows，Gallery 为图片优先；图标来自统一线性图标集而非 emoji。
+- 视觉抽查：颜色角色清晰且数量克制；画布柔和微冷、accent 属青瓷/茉莉绿；无任何渐变/shimmer、蓝紫或多色 glow；目录页为 flat rows，Gallery 图片优先；图标来自统一线性图标集而非 emoji。
+- Glass/halo 抽查：只出现在 Prompt focus、活动任务、Dialog 或图片浮动工具；禁用 `backdrop-filter` 后仍可读，且不会削弱键盘焦点。
 
 ## 4.6 回归清单
 
@@ -188,3 +192,20 @@ npm run build
 | History 无意推进外部任务 | fake poll spy + DB 状态前后断言 | 后台 worker 独立推进属于预期 |
 | cursor 与 filter/新数据竞争 | 稳定 tie-break、filter reset、无重漏断言 | 实时插入导致外层页移动，产品接受 |
 | 伪造健康/进度 | DTO/UI 字段白名单和视觉 review | 实际可用性只可由真实生成证明 |
+
+## 4.9 2026-07-20 当前验证记录
+
+本节记录当前会话中已经得到的实际结果，并保留 §4.7 发布门的范围边界；真实 Provider 外部 HTTP 与逐像素断言不在本轮验证范围内。
+
+| 检查 | 当前结果 | 说明 |
+|---|---|---|
+| `pnpm typecheck` | **通过** | 当前真实 TSX、typed client、i18n 与 API DTO 可完成 TypeScript 检查 |
+| `pnpm test:unit` | **通过：45 files / 217 tests** | 包含页面纯状态、i18n、web-client、单例 poll registry、Generation 快照单调仲裁、查询、Provider 配置与可访问文本截断覆盖 |
+| `pnpm test:contract` | **通过：7 files / 35 tests** | API shape、错误语义、secret-free DTO、env 冲突与生成 fanout 上限均通过 |
+| `pnpm test:integration` | **通过：5 files / 11 tests** | 临时 SQLite、原子 user-config、并发写入、加密文件与 API/console secret canary 均通过；未调用真实 Provider 外部 HTTP |
+| `pnpm test:verify` | **通过** | 顺序执行 typecheck、unit、contract、integration 的完整本地发布门 |
+| `pnpm build` | **通过** | Next.js 15.5.20 production build 成功 |
+| 浏览器人工 QA | **通过（本轮范围）** | 1440/1024/390px；中英文；Home、Generate Compose/Stage、Provider 目录/详情、History、Gallery、Models；移动导航；Preview → Generation Detail 互斥切换与焦点转移；模型开关写入/恢复；空凭证校验；干净导航后无新增 warning/error |
+| motion / glass 静态检查 | **通过** | 动效均有 `prefers-reduced-motion` 收敛；glass 有实色 token 或 `@supports not (backdrop-filter)` fallback；未做脆弱的逐像素或浏览器特性模拟断言 |
+
+当前发布门已完成。运行环境使用 Node 26.3.1 时 pnpm 会提示项目声明仅支持 Node 20/22/24；验证本身全部通过，但正式开发与 CI 应使用 Node 24 或 22 以消除 engine warning。

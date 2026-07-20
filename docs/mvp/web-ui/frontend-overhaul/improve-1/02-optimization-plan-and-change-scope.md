@@ -1,6 +1,6 @@
 # 2. 优化方案与改动面
 
-> 本文是后续实施会话的执行契约，不表示功能已经落地。<br>
+> 本文是实施执行契约；各阶段的实时状态以 §2.7 的 2026-07-20 检查点为准。<br>
 > 范围来源以 `00-discussion.md` 为准，验收以 `04-test-and-acceptance.md` 为准。
 
 ## 2.1 方案总览
@@ -60,27 +60,28 @@ App Router 和专用读模型均为可逐页迁移的可逆选择。Provider 配
 
 ### 2.1.1 交付顺序与视觉闸门
 
-本批不把页面视觉实现与 API 变化并行推进。先交付后端契约及其测试，再交付无需最终样式的浏览器 API 接线；二者都完成并能用真实数据验证后，才开启一次单独的视觉讨论与 UI 实现批次。这样避免临时 DOM、全局 CSS 和设计系统初始化在数据模型仍变化时反复推倒。
+本批保持“行为先于表现”，但 UI Implementation 再细分为真实语义 TSX 与正式视觉两层：先让页面在真实 API 上具备正常/空/loading/error/回滚状态，再用完成后的 DOM 校准 palette、密度与动效。禁止围绕 Foundation 占位组件制作一次性 CSS。
 
 | 顺序 | 交付 | 本批允许 | 明确延后 |
 |---|---|---|---|
 | 1 | Backend Contract | service、query、route、DTO、contract/integration test | 路由页面、最终样式 |
 | 2 | Frontend API Wiring | `web-client`、请求状态/hook、auth gate、poll registry、client unit | Tailwind/shadcn、页面布局、视觉 CSS |
-| 3 | Visual Decision Gate | 使用真实数据复核页面文档，冻结层级、密度、表面和禁用项；具体 accent hue 不做像素级冻结 | 代码式 UI 实现 |
-| 4 | UI Implementation | 路由壳、页面组件、i18n、Tailwind/shadcn、CSS Modules、人工视觉 QA | — |
+| 3 | Route/Foundation | App Router 壳、Tailwind/shadcn、基础 i18n、WorkspaceContext、AbortSignal、单例 poll runtime | Foundation 正式视觉 |
+| 4 | Real TSX | Generate → Provider 配置 → History/Gallery → Models/Providers → Dialogs；真实业务状态与中英文 | 页面最终调色 |
+| 5 | Visual Implementation | 青瓷/茉莉绿 tokens、自托管字体、页面 CSS Modules、动效、响应式与浏览器 QA | — |
 
-## 2.3 目标目录与职责
+## 2.3 当前实际目录与职责
 
-目标结构可在实现时做小幅命名调整，但职责不可重新合并回巨型组件：
+实现后的结构如下；相较早期目标结构增加了稳定的 `capabilities/` 与 `generation/` primitives，且没有保留 Foundation。职责不可重新合并回巨型组件：
 
 ```text
 src/app/
+├── layout.tsx
 ├── page.tsx
-├── home.module.css
+├── fonts.ts
 ├── workspace/[projectId]/
 │   ├── layout.tsx
-│   ├── error.tsx
-│   ├── not-found.tsx
+│   ├── page.tsx
 │   ├── generate/page.tsx
 │   ├── history/page.tsx
 │   ├── gallery/page.tsx
@@ -97,10 +98,13 @@ src/app/
         └── [providerId]/credential/route.ts
 
 src/components/
+├── auth/                        # API session gate
 ├── shell/                       # HomeShell 顶部品牌条、WorkspaceShell 侧栏
 ├── ui/                          # shadcn/ui 源码复制型 primitives
 ├── dialogs/                     # GenerationDetailDialog、ImagePreviewDialog（跨页面）
 ├── i18n/                        # LocaleProvider、语言切换控件
+├── capabilities/                # 稳定 capability 展示 primitive
+├── generation/                  # status、favorite、thumbnail 等跨页 primitive
 ├── home/
 ├── generate/
 ├── history/
@@ -109,13 +113,19 @@ src/components/
 └── providers/
 
 src/lib/
-├── web-client/
-├── library/
-├── provider-config/
-├── i18n/                        # 字典（zh-CN / en）与 t() 实现
-└── user-config/
+├── routes.ts                     # route builders
+├── i18n/
+│   ├── messages/                 # common + feature 双语消息
+│   └── translations.ts           # 类型化聚合
+├── provider-config/              # catalog application service
+└── web-client/
+    ├── browser-runtime.ts        # singleton client + poll registry
+    └── ...
 
-根级新增：tailwind.config、postcss 配置（Tailwind v4 则为 CSS 入口配置）
+src/lib/library/ 与 src/lib/db/queries/
+└── summaries/history/favorites 及批量 Job、Image、favorite membership 查询
+
+根级配置：`components.json`、`postcss.config.mjs` 与对应 package dependencies；Tailwind v4 入口位于 `src/app/globals.css`，无需独立 `tailwind.config`。
 ```
 
 `src/lib/provider-config/` 是浏览器用例的服务端 application service：组合固定 catalog、registry capability、model preference 与 user-config 摘要/写入；它不是新的 Provider adapter 层，也不拥有密钥存储。
@@ -323,9 +333,9 @@ Models 通过 Provider configuration/capabilities + Model Preferences 组成全�
 
 ## 2.7 分阶段实施
 
-状态说明：Phase 1（Backend Contract）与 Phase 2（Frontend API Wiring）已在 `mvp` 完成；Visual Decision Gate 已由第三轮 ASCII 排版讨论通过。以下 Phase 3–6 是下一阶段 UI 实施顺序。
+状态说明（2026-07-20）：Phase 1–7 的代码实施与最终验证均已完成；下列内容保留为实施记录与职责边界。`pnpm test:verify` 已通过 45 files / 217 unit、7 files / 35 contract、5 files / 11 integration，secret canary、production build 与 1440/1024/390px 浏览器矩阵亦已通过；详见 `04-test-and-acceptance.md` 的实际记录。
 
-### Phase 1：Backend Contract 与数据读模型
+### Phase 1：Backend Contract 与数据读模型（实现已完成）
 
 目标：在不改页面结构或视觉 CSS 的前提下，补齐行为所需的 server-side query/service/route/DTO，并用 contract/integration 测试封住只读、并发、安全和错误语义。
 
@@ -339,7 +349,7 @@ Models 通过 Provider configuration/capabilities + Model Preferences 组成全�
 
 DoD：新增接口可被 typed client 消费；没有 UI 直接导入 server module；History/list 仍不推进 poll；Gallery 过滤跨 cursor 正确；首个 Session 不重复；任何 credential 响应/错误不含 secret。对应验收 B01–B09、E01–E11、E16。
 
-### Phase 2：Frontend API Wiring 与行为基础
+### Phase 2：Frontend API Wiring 与行为基础（实现已完成）
 
 目标：把 Phase 1 的契约接入浏览器 typed client、auth gate、页面数据状态与轮询协调，但不创建最终页面 DOM、设计系统或视觉样式。
 
@@ -352,69 +362,73 @@ DoD：新增接口可被 typed client 消费；没有 UI 直接导入 server mod
 
 DoD：新 API 有完整 typed client；401、409、400、404、503 能以 code 驱动恢复状态；同一 Generation 至多一个 detail poll 调度器；关闭最后订阅者会停止浏览器轮询。对应 C02、C06–C07，以及 C08–C09 的 API/轮询基础；Detail 弹层、可见 Cancel 入口与其页面验收留待 Phase 3。
 
-### Visual Decision Gate（文档已完成，不写 UI 代码）
+### Visual Decision Gate（已完成并持续校准）
 
-使用 Phase 1–2 的真实数据与错误状态，逐页确认信息密度、布局、移动端收纳、空/错状态与中英文扩张。本闸门现已通过第三轮排版讨论完成：结构、尺寸区间、按钮/表面规则与视觉禁区已写入 `03`、`shared/01` 和各页面 `01`。具体 accent hue、灰阶冷暖与细节节奏刻意留给首个视觉实现提交校准，不构成实施阻塞。
+结构、尺寸区间、青瓷/茉莉绿色相家族、无渐变规则、受限 glass/halo 和字体边界已写入 `03`、`shared/01` 与各页面 `01`。页面完成后允许在该家族内微调 OKLCH，但不得改变信息架构或视觉禁区。
 
-### Phase 3：Home、Generate 与 Detail 弹层纵切（视觉确认后）
+### Phase 3：承重边界、Foundation 退出与 Generate（实现已完成）
 
-目标：在视觉确认后，把创作主路径迁移到真实路由，落地 Home/Workspace 两种壳与 Detail 弹层。
-
-改动：
-
-- Tailwind/PostCSS、shadcn/ui、locale context/dictionaries、`src/components/shell/`、`ui/`、`i18n/`。
-- `src/app/page.tsx`、`src/app/workspace/[projectId]/layout.tsx` 与 Generate 页面。
-- `src/components/home/`、`generate/`、`dialogs/`。
-- 对应 app pages 与 CSS Modules。
-- `GenerationView.projectId` 和必要 API/测试调整。
-- Session 自动创建与改名（复用已有 `PATCH /api/sessions/:id`）。
-
-DoD：选择/创建 Workspace → 自动获得首个 Session → Compose 多模型提交 → Stage 隐藏 Inspector并显示当前图片/Job 明细/Cancel → 返回 Compose 暂停 poll → 点击 current task 恢复 Stage/poll → 新 POST 成功替换旧 current task、失败保留旧入口 → Detail 弹层轮询/取消/收藏 → 结果图单图预览完整可走；仅可见 Stage 与弹层订阅 detail poll。对应 A01–A07、C01–C13。
-
-视觉基础按以下顺序落地，避免新旧 CSS 长期并存：
-
-1. 在 `globals.css` 建立语义 tokens、reset 与 Tailwind 入口，先不复制旧页面规则。
-2. 以 shadcn 默认 primitives 为可访问性基线，映射本项目 tokens；Button/Input 使用圆角矩形，不做全 pill 化。
-3. 先完成 HomeShell、WorkspaceShell 和 Home/Generate 页面 CSS Modules，分别验证 Compose 的 248px 侧栏 + 320–360px inspector，以及 Stage 隐藏 inspector 后的全宽图片画布与中英文排版。
-4. 再按 History/Gallery → Models/Providers/Provider Detail 的纵切顺序迁移页面布局。
-5. 每迁移一页即删除该页旧全局选择器；最终 `globals.css` 不保留页面私有 grid、卡片阴影体系、重复参数区或旧三栏壳规则。
-
-### Phase 4：History 与 Gallery 纵切（视觉确认后）
-
-目标：完成两类图片资产浏览页面。
+目标：闭合 WorkspaceContext、可取消请求和唯一 poll runtime；删除占位 Foundation，先落地完整创作主路径。
 
 改动：
 
-- `src/components/history/`、`gallery/`。
-- 对应 pages、查询参数同步与样式。
-- Gallery 预览弹层与 Detail 弹层的串联（一次只开一个）。
+- `src/components/shell/workspace-shell.tsx`、`src/lib/routes.ts`、`src/lib/web-client/browser-runtime.ts`；
+- 所有页面读取 API 的 AbortSignal；
+- `src/components/generate/` 的 Screen、Compose、Inspector、Stage 与纯状态函数；
+- Session 自动创建/选择/改名、多目标 capability 交集、提交、恢复、取消和当前任务替换；
+- 删除 `GenerateFoundation`，不得建立万能页面 renderer。
 
-DoD：History 5 组/页、10 条/组、批次缩略图条、组折叠默认最新展开；Gallery 顶部筛选、Load more、预览信息卡；空/错/加载状态完整；自动刷新无手动按钮。对应 D01–D11。
+DoD：Compose 多模型提交 → Stage 隐藏 Inspector并显示当前图片/Job明细/Cancel → 返回 Compose 停止订阅 → current task 恢复 → 新 POST 成功替换旧任务、失败保留旧入口；只有可见 Stage 订阅 detail poll。对应 A01–A07、C01–C07、C12–C13。
 
-### Phase 5：Models、Providers 与安全密钥纵切（视觉确认后）
+### Phase 4：Provider 配置（实现已完成）
 
-目标：完成模型启用与 Provider 配置。
-
-改动：
-
-- `src/lib/provider-config/`（含各家官方申请 key 链接的 catalog 数据）。
-- `src/app/api/provider-configurations/`。
-- `src/components/models/`、`providers/`。
-- `src/lib/user-config/` 只补安全服务能力和并发测试，不改变加密格式。
-
-DoD：固定七家；开关真实持久化；env 只读；user-config 可保存/替换/空值清除；成功 toast、失败就地；任何响应和日志无 secret；并发写不丢其他 key。对应 E01–E15。
-
-### Phase 6：删除旧壳、视觉收口与权威文档同步
-
-目标：移除双实现和全局样式债务，完成发布门。
+目标：先完成安全敏感的 Provider Detail，再用真实摘要支撑目录页。
 
 改动：
 
-- 删除或拆尽 `src/components/generate-workbench.tsx`、`library-pages.tsx`。
-- 删除失效全局选择器与主题切换残留，保留 tokens/reset/真正全局规则。
-- 更新 `docs/mvp/web-ui/`、`api/constraints.md`、`user-config/`、`library/`、`web-client/`。
+- Provider Detail 薄 Server route + `ProviderDetailScreen`；
+- env 只读、user-config password draft、eye、Save/空值 Clear、官方 key 链接；
+- 保存/删除成功反馈、失败就地状态和摘要刷新；secret 永不进入 URL、日志或响应。
 
-DoD：无 `activeView` 页面导航；无重复 Workspace 卡；未引用死 CSS；无明暗切换入口；中英字典完整；所有测试、构建、浏览器 QA 通过。对应 F01–F10。
+DoD：固定 catalog；env 不渲染输入；user-config 可保存/替换/清除；成功后 draft/eye 复位；任何响应和日志无 secret。对应 E01–E11、E13–E16。
+
+### Phase 5：History 与 Gallery（实现已完成）
+
+目标：完成两类图片资产浏览页面，列表仍保持只读。
+
+改动：
+
+- `src/components/history/`、`gallery/` 与薄 routes；
+- History Session 页码、组展开、组内 cursor append；
+- Gallery URL filter、全局收藏 cursor、取消收藏回滚；
+- 只在用户显式打开详情时进入 dialog 流程，不在列表预取 detail。
+
+DoD：History 5 组/页、10 条/组、批次缩略图条；Gallery 顶部筛选、Load more、图片优先；空/错/loading 完整；自动刷新无手动按钮。对应 D01–D11。
+
+### Phase 6：Models 与 Providers 目录（实现已完成）
+
+目标：完成全局模型偏好和固定 Provider 目录。
+
+改动：
+
+- `src/components/models/`、`providers/`；
+- Models 搜索/Provider 过滤/能力 disclosure/Switch 失败回滚；
+- Providers 固定七家、真实 source/configured/model count、官方申请链接和详情入口；
+- 删除 `PageFoundation` 与 `src/components/foundation/`。
+
+DoD：未配置 Provider 不进入 Models 主列表但有配置引导；Switch 持久化失败回滚；Providers 无 Add/Connected/Last checked/Refresh。对应 E01–E04、E12、E15。
+
+### Phase 7：Dialogs、视觉收口与权威文档同步（已完成）
+
+目标：完成跨页面 Detail/Preview，移除旧 CSS 与双实现，逐页浏览器验收。
+
+改动：
+
+- `GenerationDetailDialog`、`ImagePreviewDialog`、FavoriteButton 与唯一 poll registry；
+- self-hosted 字体、青瓷/茉莉绿 tokens、页面 CSS Modules、受限 glass/halo、无 shimmer motion；
+- `globals.css` 只保留 tokens/reset/字体/Tailwind；更新权威运行时文档。
+
+DoD：弹层一次只开一个；Stage/Detail 是仅有 poll 订阅入口；无 Foundation、死 CSS、渐变/shimmer、品牌中文字体或硬编码单语文案；测试、构建、1440/1024/390px 和中英文 QA 通过。对应 C06–C11、F01–F15。
 
 ## 2.8 按目录的改动面
 
@@ -425,9 +439,10 @@ DoD：无 `activeView` 页面导航；无重复 Workspace 卡；未引用死 CSS
 | `src/components/shell/`、`ui/` | 壳与 shadcn/ui primitives | — | — |
 | `src/components/dialogs/`、`i18n/` | Generation Detail/图片预览弹层、语言切换 | — | — |
 | `src/components/<page>/` | 7 页局部组件 | — | — |
-| `src/components/` 根 | — | — | 旧 workbench/library 聚合组件、主题开关 |
-| `src/lib/web-client/` | 新 DTO/client methods | types/api-client | 不保留旧 view-state helper |
-| `src/lib/i18n/` | zh-CN / en 字典与 t() | — | — |
+| `src/components/` 根 | — | — | 旧 workbench/library 聚合组件、Foundation、主题开关 |
+| `src/lib/web-client/` | browser runtime、新 DTO/client methods | types/api-client/AbortSignal | 旧 poll controller、view-state helper |
+| `src/lib/i18n/` | 按 feature 聚合的 zh-CN/en 消息与 t() | — | Foundation 占位文案 |
+| `src/app/fonts.ts` / font assets | SUSE、Noto Sans SC、LXGW WenKai 自托管入口与许可 | layout 字体变量 | HarmonyOS Sans SC、远程运行时字体请求 |
 | `src/lib/library/`、`db/queries/` | summary/history/filter queries | 导出与测试 | — |
 | `src/lib/provider-config/` | catalog application service（含申请链接） | — | — |
 | `src/lib/user-config/` | merge/remove/serialization 能力（如需要） | tests | 不改 envelope v1 |

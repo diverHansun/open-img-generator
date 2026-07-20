@@ -197,3 +197,25 @@ src/app/page.tsx
 ## 1.12 SWE 审视摘要
 
 当前实现是合理的 MVP 纵切，但已出现“因新增需求而自然长成的神文件”、按技术方便而非业务职责分组、全局 CSS 抽象泄漏和客户端聚合倾向。应在真实页面边界处拆分，而不是提前建立通用页面框架；共享层只收纳跨页面稳定的壳与控件。新 API 应围绕明确查询用例建立专用只读模型，不引入 GraphQL、状态管理库、微服务或设计系统包等与本批风险无关的复杂度。
+
+## 1.13 2026-07-20 实现后检查点
+
+§1.1–§1.12 保留为重构前基线，不再代表工作树实时状态。当前已完成：
+
+- `src/app/workspace/[projectId]/` 真实路由和 Home/Workspace 两层 shell；
+- `src/lib/web-client/` typed API、请求协调、capability helper 与 generation poll registry；
+- Tailwind v4、shadcn/ui 初始 primitives、CSS Modules 与 typed zh-CN/en 字典；
+- Generate、Provider Detail、History、Gallery、Models、Providers 与共享 Dialog 的真实 TSX、请求状态、空态/错误态和中英文文案；
+- 删除旧 `generate-workbench.tsx`、`library-pages.tsx`、`PageFoundation`、`GenerateFoundation` 与旧页面级全局 CSS。
+
+此前记录的阶段性风险已经按以下边界关闭：
+
+1. **占位抽象退出**：`src/components/foundation/` 与 Generate Foundation 已删除；页面代码按 `src/components/<feature>/` 高内聚组织，薄 route 不再依赖万能 renderer。
+2. **Shell 请求生命周期闭合**：`WorkspaceShell` 提供只读 Workspace 上下文，并在路由身份变化或卸载时清理陈旧请求，避免旧 Project 响应覆盖新页面。
+3. **轮询入口统一**：浏览器通过 `src/lib/web-client/browser-runtime.ts` 取得单例 `GenerationPollRegistry`；Stage 与打开中的 Detail Dialog 是订阅入口。`polling.ts` 只保留终态判定等纯函数，不再是第二套调度器。
+4. **视觉基础对齐**：全局 token 已切换为柔和冷灰绿画布与青瓷/茉莉绿强调；旧 gradient shimmer 已移除，loading 仅使用受 reduced-motion 约束的低幅 opacity pulse。
+5. **字体与 i18n 对齐**：`src/app/fonts.ts` 自托管 SUSE、Noto Sans SC 与 LXGW WenKai，不含 HarmonyOS Sans SC；`src/lib/i18n/messages/` 按 common/home/generate/history/gallery/models/providers/dialogs 聚合双语消息，`translations.ts` 只负责类型化汇总。
+6. **收藏真相进入 DTO**：`GenerationView.images[].favorited` 由服务端真实 Favorite membership 生成，Stage/Dialog 的乐观更新失败会回滚，不通过客户端猜测状态。
+7. **批量查询消除热点 N+1**：图片收藏 membership 使用批量 image-id 查询；History 聚合按 generation/job 集合批量读取 Job 与 Image，而不是逐条 Generation 查询。
+
+Foundation 承重、旧 CSS 双轨和最终验证闭环均已退出风险清单：contract、integration、secret canary、production build 与 1440/1024/390px 中英文浏览器矩阵结果已回填 `04-test-and-acceptance.md`。后续残余风险主要是接入真实 Provider 后的厂商侧可用性与极大图库/历史库的性能测量，不属于本地 UI 重构发布门。

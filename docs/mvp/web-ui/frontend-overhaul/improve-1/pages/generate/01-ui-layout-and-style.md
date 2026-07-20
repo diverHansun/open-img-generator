@@ -87,5 +87,5 @@ Inspector 仅属于 Compose，顺序为 Selected models → shared parameters �
 
 - 主区依靠间距与 1px hairline 分层，常规 section 无阴影。
 - Compose 一屏只有 Generate 是实心主动作；Stage 非终态只有 danger-outline Cancel，返回编辑为普通导航动作。
-- 使用少量统一线性图标，不使用 emoji、AI 渐变、glassmorphism 或装饰光效。
-- 具体 accent hue、Prompt 高度、图片 gap 与画布最大宽度可在实现时校准；Compose/Stage 分离、Inspector 可见性和当前任务唯一性不可改变。
+- 使用少量统一线性图标，不使用 emoji、任何渐变或 gradient shimmer。Prompt focus/活动任务允许单色低幅 halo；Stage 不做玻璃大卡，局部浮动工具可用有实色 fallback 的轻 glass。
+- 青瓷/茉莉绿家族内的具体明度、Prompt 高度、图片 gap 与画布最大宽度可在实现时校准；Compose/Stage 分离、Inspector 可见性和当前任务唯一性不可改变。

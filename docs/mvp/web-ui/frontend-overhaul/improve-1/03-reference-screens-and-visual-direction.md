@@ -8,11 +8,11 @@
 
 方向短句：**Human clarity / Tool density / Flat hierarchy / Image first**。
 
-固定的是层级、密度、表面和禁用项，不固定某个品牌色：
+固定的是层级、密度、表面和色相家族，不复制任何品牌视觉：
 
 - 只维护亮色主题；背景可以是偏中性或微冷的浅色，但不是刺眼纯白堆叠。
-- 不把陶土色作为主色，也不使用蓝紫渐变、霓虹外发光和多色光晕制造“AI 感”。
-- 主强调色是单一纯色，需清爽、有辨识度、能与状态色区分；具体 hue/hex/OKLCH 在首个视觉实现提交中用真实页面校准。
+- 不把陶土色作为主色，不使用任何装饰渐变或 gradient shimmer，也不使用蓝紫、多色光晕制造“AI 感”。
+- 主强调色限定为青瓷绿/茉莉绿家族；建议起始关系为冷灰绿 canvas、近白 surface、中等植物绿 accent 与更浅茉莉绿 soft surface，最终 OKLCH 通过真实页面校准。
 - success、warning、danger 是状态语义，不参与品牌装饰；任何状态同时提供文本或图标，不能只靠颜色。
 - 一屏最多一个实心 accent 主动作；accent 不作为大面积背景、正文色或每行装饰。
 
@@ -25,8 +25,13 @@
 | Linear | 扁平行列表、表面阶梯、稳定列对齐、无卡片堆叠 | 近黑主画布、过度产品化动效 |
 | Replicate | 图片优先、模型目录行、浅画布上的清晰 surface | 128px 展示字、全圆角 pill 按钮、品牌外形复制 |
 | Runway | 图片即 UI、界面 chrome 后退 | 全黑电影感、沉浸效果压过可读性 |
+| Krea 公开 Image 产品界面 | 左侧持久导航、大画布、单一 Prompt surface、参数逐步展开 | 纯黑舞台、蓝色工具图标、倾斜卡片和强烈营销效果 |
+| Replicate FLUX.2 Playground | Input/Output 关系、次要参数折叠、图片与运行状态清楚 | 开发者表单式硬边框、过多协议标签与品牌外形 |
+| Color Hunt Green Pastel | 从 `#A1BC98` / `#A2CB8B` 提炼柔和植物绿关系 | 整套甜腻粉彩或黄绿红同时进入产品 UI |
+| Fontpair | SUSE 与系统等宽 fallback 的角色化搭配方法 | 为工具正文加入装饰性 serif；不采用品牌绑定中文字体 |
+| Land-book / Clarion | 大留白、非对称节奏、`#F4F6F1` / `#C9CAC4` / `#8CC2B9` 的冷静关系 | pill 墙、营销卡片墙、深蓝/深青扩展色 |
 
-本项目不是营销站，也不是 IDE。参考的价值在于“怎么组织内容”，而不是“长得像谁”。
+本项目不是营销站，也不是 IDE。参考的价值在于“怎么组织内容”，而不是“长得像谁”。上述外部基准于 2026-07-19/20 以当时无需私有登录即可访问的公开页面检查；其中 Krea 仅指公开 Image 产品界面/产品入口所呈现的信息关系，不声称检查了其私有、登录后或内部工作台。实现只采用结构关系，不复制品牌资产。
 
 ## 3.3 页面结构来源
 
@@ -182,7 +187,7 @@ API key  [password draft                         show/hide]
 
 ## 3.4 统一排版与表面规则
 
-- Home 的 Display 为 32–40px；Workspace 页面 H1 为 24–28px；不使用 serif 展示标题。
+- Home 的 Display 为 32–40px；Workspace 页面 H1 为 24–28px；中文 Home/display 可小范围使用 LXGW WenKai，工具正文保持 Noto Sans SC，西文使用 SUSE。
 - 目录主行高 48–52px；常规控件高 40px；间距以 4/8/12/16/24/32/48px 建立节奏。
 - ID、credential name、session 名与计数可使用等宽字体和 tabular nums；正文保持 sans-serif。
 - chip 约 6px、Button/Input 约 8px、Card/Dialog 约 12px、图片预览/Workspace card 约 16px；按钮是圆角矩形，不做全 pill 化。
@@ -192,7 +197,7 @@ API key  [password draft                         show/hide]
 
 ## 3.5 视觉禁区
 
-1. 蓝紫渐变、霓虹光晕、玻璃拟态和大面积品牌色背景。
+1. 任何装饰渐变、gradient shimmer、蓝紫/多色 AI 光效和大面积品牌色背景。
 2. 用十几个相近白色卡片制造层级，或卡片内再嵌同等级卡片。
 3. 将所有按钮做成 pill，或一屏出现多个实心 accent 主按钮。
 4. 把 accent 当正文色、面积背景或每行固定装饰。
@@ -200,15 +205,16 @@ API key  [password draft                         show/hide]
 6. 显示后端未提供的 Connected、Last checked、duration、进度百分比、价格或模型能力。
 7. 用 emoji 代替产品图标；用 hover 作为唯一信息入口。
 8. 为追求参差图片墙破坏 DOM 阅读顺序、焦点顺序或布局稳定性。
+9. 把 glass/halo 铺满列表、卡片墙和 Stage；局部使用时缺少实色 fallback，或用光晕替代 focus ring/状态文本。
 
 ## 3.6 允许实现模型发挥的范围
 
 在不违反以上契约时，实施可以自主调整：
 
-- 主强调色的具体 hue、明度与饱和度；canvas 的中性/微冷倾向；
+- 青瓷/茉莉绿色相家族内的具体明度、饱和度；canvas 的微冷程度；
 - 8–12px 范围内的局部圆角、1px 边界透明度、页面间具体留白；
 - Home Workspace cover 的占位构图与 Gallery 网格的列宽算法；
-- 字体实际 fallback、轻量 hover/press 过渡和图标尺寸；
+- 字体字重/加载子集、轻量 hover/press 过渡和图标尺寸；不得改回 HarmonyOS Sans SC 或其他品牌绑定中文字体；
 - 中英文不同字长下的列宽和换行策略。
 
 任何调整都必须先满足可读性、真实状态和可访问性，再评价“高级感”。不以参考图像素相似度作为验收目标。
@@ -217,5 +223,6 @@ API key  [password draft                         show/hide]
 
 - 在 1440、1024、390px 三档对 Home、Generate、History、Gallery、Models、Providers、Provider Detail 截图走查。
 - 同时检查正常、空、loading、error、长 Prompt/模型名和中英文状态。
-- 重点寻找：卡片堆叠、过多 accent、蓝紫渐变、emoji、pill 泛滥、空白 inspector、常驻 Gallery 标签和虚假字段。
+- 重点寻找：卡片堆叠、过多 accent、任何渐变/shimmer、蓝紫或多色 glow、emoji、pill 泛滥、空白 inspector、常驻 Gallery 标签和虚假字段。
+- 关闭 `backdrop-filter` 或模拟不支持时，glass 区域仍有可读实色面；`prefers-reduced-motion` 下 opacity pulse、位移和缩放均不影响操作。
 - 不建立依赖字体抗锯齿或固定色值的像素快照；用层级、密度、语义和交互行为验收。

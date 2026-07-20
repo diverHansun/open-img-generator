@@ -44,4 +44,4 @@ PageHeader 提供返回 Providers、Provider mark/name、固定 credential name 
 - 桌面表单保持适中宽度，不把 password input 拉满整个主区；Save 与表单对齐。
 - 移动端 input/action 纵向排列，eye 保持输入尾部 icon button；帮助文案不截断删除语义。
 - 常规 section 无阴影；Dialog 仅用于真正的共享 Detail/Preview，不为 Provider 配置再套弹层。
-- 具体 accent hue、表单宽度和 section 间距可校准，env 只读和 secret 不回显不可改变。
+- 青瓷/茉莉绿家族内的具体明度、表单宽度和 section 间距可校准，env 只读和 secret 不回显不可改变。

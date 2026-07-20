@@ -45,7 +45,7 @@ Home 使用独立 `HomeShell`，不渲染 Workspace 完整侧栏。
 
 ## 5. 样式边界
 
-- 使用共享亮色 canvas 与单一纯色 accent；不固定陶土色，不使用蓝紫渐变、光晕或玻璃拟态。
+- 使用柔和微冷 canvas 与青瓷/茉莉绿单色 accent；不使用任何渐变。允许创建 surface 在 focus-within 时出现单色低幅 halo，品牌条或浮层可用有实色 fallback 的轻 glass，但 Recent 不做玻璃卡片墙。
 - 页面留白多于 Workspace 内页面，但控件仍使用 40px 高和圆角矩形。
 - 无 Backend connected、主题切换、无功能顶部图标或 emoji。
 - 具体 cover 占位构图、accent hue 和卡片细节留给视觉实现校准，但不得增加第二个主动作或卡片嵌套。

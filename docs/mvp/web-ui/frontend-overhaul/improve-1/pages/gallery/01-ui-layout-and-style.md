@@ -43,5 +43,5 @@ Load more 位于网格底部中央；加载/失败不清空已有图片。无收
 
 - 桌面列宽根据可用主区自适应；小屏通常 2 列，极窄或大图场景可 1 列。
 - filters 可换行或横向滚动，不引入首批范围外的 filter drawer 字段。
-- 不使用常驻文字标签、AI 渐变/光晕、emoji Favorite 或厚卡片。
+- 不使用常驻文字标签、任何渐变/gradient shimmer、蓝紫或多色 AI 光效、emoji Favorite 或厚卡片；仅 hover/focus/预览工具可使用单色局部 halo/glass 反馈。
 - 实施模型可以调整列宽算法、圆角和 hover 过渡，但必须保留图片优先、细 gutter、可访问顺序和无常驻标签。

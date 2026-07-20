@@ -1,9 +1,9 @@
 # Web UI 多页面重构 · improve-1
 
-> 状态：产品、契约与视觉排版文档已收敛，待 UI 实施<br>
-> 日期：2026-07-19（视觉排版决策见 `00-discussion.md` §0.11）<br>
+> 状态：产品与契约、真实路由、真实 TSX 页面、业务状态与正式视觉均已在工作树落地；最终自动化验证与浏览器矩阵已完成<br>
+> 日期：2026-07-20（最新视觉与实施决策见 `00-discussion.md` §0.13）<br>
 > 文档落点：`docs/mvp/web-ui/frontend-overhaul/improve-1/`<br>
-> 实施状态：**Backend Contract 与 Frontend API Wiring 已在 `mvp` 落地；本轮视觉文档已收敛，页面 UI 尚未实施**
+> 实施状态：**Backend Contract、Frontend API Wiring、App Router 壳、Tailwind v4、shadcn/ui primitives、模块化 i18n、七类真实页面与共享 Dialog 已在工作树落地；`PageFoundation` / `GenerateFoundation` 及旧页面 CSS 已删除。`pnpm test:verify`（45 files / 217 unit、7 files / 35 contract、5 files / 11 integration）、production build 与 1440/1024/390px 浏览器 QA 均通过。**
 
 ## 1. 本批目标
 
@@ -22,7 +22,7 @@
 5. Gallery 保持全局收藏；图片无常驻标签，来源信息在预览弹层右侧信息卡展示。
 6. Models 使用真实语义的启用开关；Providers 展示固定 Provider 目录并允许进入详情配置密钥，catalog 含各家官方申请 key 链接。
 7. `.env` 凭证来源只读；浏览器永不读取已保存密钥明文，小眼睛只显示当前新输入。
-8. 视觉层级统一、减少无意义卡片与阴影；采用清爽克制的亮色工具界面、单一纯色强调色与明确语义色，不把陶土色或蓝紫渐变固定为品牌主色。
+8. 视觉层级统一、减少无意义卡片与阴影；采用柔和微冷画布、青瓷绿/茉莉绿单色强调与明确语义色；不使用任何装饰渐变或 gradient shimmer。
 9. UI 默认中文，可切换英文；不做明暗主题切换。
 
 ## 2. 已确认的产品决策
@@ -44,7 +44,9 @@
 | Generation 详情 | 共享卡片弹层（无独立路由）；从 History 行 / Gallery 预览进入；与可见 Generate Stage 互为仅有的 poll 持有方 |
 | Settings | 未定义前从导航移除，不保留 disabled 占位 |
 | 参考图 | 只作为布局、信息密度和视觉语言的输入，不是最终稿或逐像素实现目标 |
-| 视觉自由度 | 固定层级、密度、表面与禁用项；具体 accent hue、灰阶冷暖和细节比例由首个视觉实现提交用真实页面校准 |
+| 视觉自由度 | accent 色相家族固定为青瓷绿/茉莉绿；层级、密度、表面与禁用项固定，具体 OKLCH、灰阶冷暖和细节比例由真实页面逐页校准 |
+| 字体 | 不使用 HarmonyOS Sans SC 或其他品牌绑定的中文字体；正文 UI 自托管 Noto Sans SC，中文展示位可小范围使用 LXGW WenKai，西文使用 SUSE，ID 使用等宽 fallback |
+| 光晕/玻璃 | 允许单色、低饱和、功能性的局部 halo 和 glass；禁止蓝紫、多色与渐变式 AI 装饰，禁止列表卡片墙玻璃化 |
 
 ## 3. 页面与数据作用域
 
@@ -85,7 +87,7 @@ Generation Detail 不是路由页面，而是共享弹层组件（见 `shared/07
 
 ### 4.2 Out of scope
 
-- 本规划会话内的 React、CSS、API、数据库或测试代码实施。
+- SaaS 部署、在线托管和与本地产品无关的营销页建设；本批只在当前 Next.js 工程内实施。
 - 把 Provider API key 迁入业务数据库；本批仅保持未来可替换的服务端边界。
 - 动态添加未知 Provider；Provider catalog 仍是代码内固定的七家。
 - 对 Provider 发起真实“连接测试”或伪造健康时间；没有真实探测能力时只显示 Configured/Not configured。
@@ -109,7 +111,7 @@ Generation Detail 不是路由页面，而是共享弹层组件（见 `shared/07
 | 5 | `03-reference-screens-and-visual-direction.md` | 五张参考图的可借鉴点、禁用照抄项与视觉方向 | 已完成 |
 | 6 | `04-test-and-acceptance.md` | 跨页面测试策略、关键风险与总体验收门槛 | 已完成 |
 
-根级 `02` 与 `04` 是实施执行契约；Phase 1–2 已落地，下一阶段按这些文档实施页面 UI。
+根级 `02` 与 `04` 是实施执行契约；Phase 1–7 的代码实现已按 Generate → Provider 配置 → History/Gallery → Models/Providers → Dialogs 顺序落地，自动化验证、响应式、中英文与关键弹层流程的浏览器矩阵结果已回填到 `04`。
 
 ### 5.2 共享设计文档
 
@@ -186,8 +188,8 @@ README.md
 
 本目录按以下阶段推进：
 
-1. 根级 `00`–`04`、`shared/` 与七个页面文档集已完成三轮收敛（视觉排版见 `00-discussion.md` §0.11）。
-2. Backend Contract 与 Frontend API Wiring 已分批落地并提交；页面 UI 仍保持现状。
-3. Visual Decision Gate 已冻结结构、密度、表面、组件和禁用项；具体 palette 细节留给首个视觉提交校准。
-4. 下一阶段按根级 `02` 的 Phase 3–6 实施 App Shell、页面、Tailwind/shadcn、CSS Modules 与 i18n，并按根级 `04` 和页面级 `06` 验收。
-5. 页面实施完成后同步改写既有权威运行时文档；未落地部分仍不得写成现有运行时事实。
+1. 根级 `00`–`04`、`shared/` 与七个页面文档集已完成收敛（最新视觉与实施决策见 `00-discussion.md` §0.13）。
+2. Backend Contract、Frontend API Wiring、App Router 壳、Tailwind/shadcn、基础 CSS Modules 与 typed i18n 已落地；旧巨型 workbench 已删除。
+3. Visual Decision Gate 已冻结结构、密度、青瓷/茉莉绿色相家族、无渐变规则、受限 glass/halo 与字体边界。
+4. Generate → Provider 配置 → History/Gallery → Models/Providers → Dialogs 的真实 TSX 与业务状态已按顺序落地，Foundation 与旧页面 CSS 已删除。
+5. `pnpm test:verify`、secret canary、production build，以及 1440/1024/390px、中英文与关键正常/校验错误状态的浏览器验收已完成；验证证据记录在 `04-test-and-acceptance.md`。
