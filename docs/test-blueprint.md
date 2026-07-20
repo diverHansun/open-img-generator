@@ -18,7 +18,7 @@
 | Backend E2E | `.e2e.test.ts` | 真实 Next HTTP 服务的关键路径是否可用？ | 后续按需实施 |
 | Smoke | `.smoke.test.ts` | 构建、迁移、启动等部署前提是否可用？ | 已实施 |
 
-浏览器 E2E 不属于当前自动化范围。重要界面通过人工验收；当交互稳定且收益足够时，再单独评估是否引入浏览器脚本。
+浏览器 E2E 不属于当前固定自动化范围。重要界面通过受控浏览器验收；只有用户显式授权真实 Provider 调用时，才使用当前本地环境完成一次 live flow，并记录 generation ID、终态和可见结果，不把付费调用放进 CI 或固定脚本。
 
 ### 1.1 Unit
 
@@ -44,10 +44,12 @@
 
 ### 1.4 Backend E2E（后续）
 
+以下是未来独立评估时的候选约定，不是 improve-1 的遗留待办或当前发布门禁；是否继续使用 local fake provider 需在届时重新确认。
+
 - 通过真实的 Next 服务 HTTP 入口访问应用，不直接 import route handler。
 - 厂商侧使用独立的本地 fake provider HTTP server，验证应用的 HTTP client、超时、重试/错误映射和完整运行时配置。
 - 不访问真实 vendor API；不会因为缺少 `.env` key 而跳过核心 E2E。
-- 当前只保留目录和 `test:e2e:backend` 命令约定，尚不添加空洞或“永远绿”的用例。
+- 当前只保留目录约定，尚不添加空洞命令或“永远绿”的用例。
 
 ### 1.5 Smoke
 
@@ -178,12 +180,11 @@ makeProviderCapabilities(overrides)
   "test:unit": "vitest run .unit.test.ts",
   "test:contract": "vitest run .contract.test.ts",
   "test:integration": "vitest run .integration.test.ts",
-  "test:e2e:backend": "vitest run .e2e.test.ts --passWithNoTests",
   "test:smoke": "vitest run .smoke.test.ts",
   "test:fast": "npm run test:unit && npm run test:contract",
   "preflight": "npm run typecheck && npm run test:fast",
   "test:verify": "npm run typecheck && npm run test:fast && npm run test:integration",
-  "test:release": "npm run test:verify && npm run test:e2e:backend && npm run test:smoke"
+  "test:release": "npm run test:verify && npm run test:smoke"
 }
 ```
 
@@ -195,7 +196,7 @@ CI 平台尚未配置；先将以下命令作为团队规则：
 | 提交前 | `npm run preflight` | typecheck + unit + contract 必须通过 |
 | PR | `npm run test:verify` | 加上 integration，阻断合入 |
 | 合并到主线 | `npm run test:verify && npm run build` | 验证可构建 |
-| 发布前 | `npm run test:release` | 加 smoke 与未来 backend E2E |
+| 发布前 | `npm run test:release` | 加 smoke；当前 `build.smoke.test.ts` 会执行 production build |
 
 目标时长：unit < 30s、contract < 60s、integration < 3min、backend E2E（启用后）< 5min、smoke < 5min。发现 flaky 测试后先隔离，再在一周内修复或删除；不得长期容忍随机失败。
 

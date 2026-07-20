@@ -1,7 +1,7 @@
 # 测试与验收标准
 
 > 验收对象：`02-optimization-plan-and-change-scope.md` 定义的 Batch A–F
-> 项目级规则：以 `docs/test-blueprint.md` 为基础；本批新增真实 Backend E2E 和最小 Playwright Browser E2E，并在实施时同步测试蓝图。
+> 项目级规则：以 `docs/test-blueprint.md` 为基础；本批不新增一次性 E2E runner，浏览器验收按用户显式授权使用本会话启动的真实 Next 与真实 Provider。
 > 原则：测试围绕 P-01…P-14 的风险与副作用，不以覆盖率数字、测试数量或“没有抛错”代替可信行为。
 
 ## 1. 验收结论的定义
@@ -14,7 +14,7 @@
 4. submit 不盲目重投结果未知请求；poll/cancel/download 的重试具有分类、预算、退避与 jitter。
 5. Provider/远端图片不可信边界、敏感信息脱敏和资源上限通过对抗性测试。
 6. Generate 可显示可行动的中英文错误；已知 Generation 的 Stage 可独立恢复，单次请求不会无限挂起。
-7. unit、contract、integration、backend E2E、browser E2E、smoke、typecheck、production build 全部通过，E2E 不允许空 suite 假绿。
+7. unit、contract、integration、smoke、typecheck、production build 全部通过；真实 Provider 浏览器 live flow 完成 submit → Stage → image → preview → favorite → refresh → Gallery，且不以空 E2E suite 冒充验证。
 8. 多个只读子代理复审后无未处理的 Blocker/High；Medium 若暂缓必须有明确残余风险、负责人语义和后续触发条件。
 
 ## 2. 测试分层与边界
@@ -24,10 +24,9 @@
 | Unit | canonical hash、state transition、retry policy、schema checker、adapter mapping、URL/bytes policy、intent/error/poll state | 单个被测模块；必要时内存 SQLite | clock/RNG/DNS/fetch/直接依赖用 typed fake | 全套 < 30s |
 | Contract | Health/Generation HTTP status、DTO、headers、stable error codes、202/replay/conflict/cancel | Next route handler、Request/Response 转换 | job-engine/DB 可 fake，但契约层真实 | 全套 < 60s |
 | Integration | job-engine + SQLite + storage + Provider HTTP 协作；迁移和崩溃 checkpoint | 临时 SQLite 文件、真实 transaction、真实临时文件、MSW | 仅 vendor HTTP/DNS 等不可控外部边界 | 全套 < 3min |
-| Backend E2E | 真实 Next HTTP、临时数据库/存储、进程重启、fake Provider | 真 Node/Next server、Web Client 所用 API、migration/startup | Vendor 使用本地 fake HTTP/data image，不用真实 key | 全套 < 5min |
-| Browser E2E | 用户从 Generate submit 到 Stage、刷新恢复、终态图片 | Playwright Chromium + 真 Next + 真 API/DB/storage | Vendor 使用本地 fake；不 mock应用 API | 全套 < 5min |
+| Live browser E2E | 用户从 Generate submit 到 Stage、刷新恢复、预览/收藏/图库 | 本会话启动的真 Next、当前本地 DB/storage、用户已配置且明确授权的真实 Provider | 不进入 CI；每次只选一个模型、count=1，避免意外 fan-out | 受 Provider 时延影响 |
 | Smoke | build、migration、startup/readiness、数据库前提 | 命令/进程/临时文件 | 不替换核心基础设施 | 全套 < 5min |
-| Manual | 文案可读性、中英文动作、unknown/partial 视觉语义 | 本地浏览器 | 不产生真实付费调用 | 10–15min |
+| Manual | 文案可读性、中英文动作、unknown/partial 视觉语义 | 本地浏览器 | 除上述受控 live flow 外不产生额外真实调用 | 10–15min |
 
 ### 2.1 测试目录与命名
 
@@ -37,24 +36,18 @@
 src/**/<subject>.unit.test.ts
 tests/contract/<subject>.contract.test.ts
 tests/integration/<subject>.integration.test.ts
-tests/e2e/backend/<subject>.e2e.test.ts
-tests/e2e/browser/<subject>.e2e.spec.ts
 tests/smoke/<subject>.smoke.test.ts
-tests/helpers/next-server.ts
-tests/helpers/fake-provider-server.ts
 ```
 
-- Vitest 不应发现 Playwright `.e2e.spec.ts`；Playwright 只发现 browser 目录。
-- 单文件 helper 留在用例内；真实 Next/fake Provider 进程编排放最小公共 `tests/helpers/`。
+- 不为本轮受控浏览器验收新增 Playwright 依赖、fake Provider server 或固定脚本。
 - 不批量移动无关旧测试；修改到的 integration 若仍直接覆盖 `global.fetch`，按现有测试蓝图迁到 MSW。
 
 ### 2.2 测试数据和时间
 
-- 每个 integration/E2E 文件独立创建临时 DB 和 storage，清理 `.db/-wal/-shm`、图片目录、server process 和临时 env。
+- 每个 integration 文件独立创建临时 DB 和 storage，清理 `.db/-wal/-shm`、图片目录和临时 env。
 - clock、random jitter、UUID 通过生产可用的依赖参数或纯函数输入控制；不在生产代码增加 test-only route/flag。
 - async test 使用 fake timer 时必须推进到明确状态并恢复 timer；不得真实 sleep 等退避。
-- fake Provider 记录 request ID/调用次数/时序，但断言重点是 DB、API、文件和用户可见结果。
-- 自动化禁止读取用户真实 `.env` key，禁止真实 fal/ZenMux 等付费调用。
+- 自动化禁止读取用户真实 `.env` key，禁止真实 fal/ZenMux 等付费调用；只有用户显式授权的 live browser flow 由正常应用进程读取既有配置，验收记录不得输出 key 或签名 URL。
 
 ## 3. Unit 测试矩阵
 
@@ -177,48 +170,24 @@ Batch D 的 lifecycle/retry 测试使用 typed fake Provider，只验证持久�
 | I-37 | ZenMux/Doubao Base64 result | 当前单图 endpoint 的 encoded JSON 固定上限 36 MiB、decoded 图片上限 25 MiB；data URL 不进 snapshot；staging ref 可跨进程恢复，超限/非法类型被拒且 temp 清理 | P-09/P-10 |
 | I-38 | Fal/Qwen/Kling dynamic endpoint | Fal 非 exact-origin/redirect 被拒；Qwen/Kling 忽略任意 persisted URL 并从 base + external ID 重建；无跨 origin auth | P-10 |
 
-## 6. Backend E2E
+## 6. 固定 Backend E2E 的处理
 
-### 6.1 运行拓扑
+本轮按 KISS 原则不新增 Next 进程编排、fake Provider server 或空 E2E 命令。HTTP contract、真实 SQLite/storage 协作、Provider HTTP 错误与故障窗口已分别由 contract/integration/smoke 覆盖；未来只有出现“必须经过真实 Next socket 才能复现”的稳定回归时，才为该风险增加最小 Backend E2E。
 
-```text
-Vitest E2E runner
-  ├─ temp SQLite + temp local storage
-  ├─ local fake Provider HTTP server（固定、无付费）
-  └─ real Next process on random localhost port
-       └─ 浏览器/API 均只通过 HTTP 访问
-```
+## 7. 真实 Provider 浏览器 E2E
 
-`tests/helpers/next-server.ts` 必须：使用动态端口、限定启动 deadline、捕获 stdout/stderr、测试结束发送 SIGTERM 后有界等待，最后确保无孤儿进程。环境显式传递临时 `DATABASE_URL/LOCAL_STORAGE_DIR`、fake Provider base URL/key、auth 与 worker flag；不得继承真实 Provider secrets。
-
-### 6.2 场景
-
-| ID | 场景 | 端到端断言 |
-|---|---|---|
-| E-B01 | 启动 + readiness | migration 完成后 real `/api/health` 200，schema/version ready；live 始终 200 |
-| E-B02 | sync happy path | HTTP POST 202 → detail completed → image HTTP 可读，DB/文件各一份 |
-| E-B03 | API replay | 同 key POST 两次返回同 ID，fake Provider submit 仅一次 |
-| E-B04 | 进程重启恢复 queued | worker disabled 启动并 admission；停止进程；同 DB worker enabled 重启；任务完成 |
-| E-B05 | async poll transient | fake Provider 先 503/Retry-After 再 running/completed；最终完成且调用次数不超预算 |
-| E-B06 | submit outcome unknown | fake server 接收后断开；API 已返回 ID；Job unknown，重启也不重复 submit |
-| E-B07 | cancel restart | 取消后立即 HTTP 视图 cancelled；重启后远端 cancel 收口，晚到 complete 不复活 |
-
-Backend E2E 文件至少有上述 7 个实际用例；`test:e2e:backend` 移除 `--passWithNoTests`。可以在一个 server 生命周期内组合不会相互污染的场景，但每个断言使用独立 Session/intent。
-
-## 7. Browser E2E
-
-浏览器自动化只覆盖用户价值最高且跨层风险最大的 Generate/Stage 流，不扩展为全站视觉回归。
+用户已明确授权本轮使用真实 Provider。验收只选择一个模型且 `count=1`，由本会话启动并持有 `npm run dev`，浏览器不读取或显示 API key。
 
 | ID | 浏览器场景 | 用户可见断言 |
 |---|---|---|
-| E-W01 | 中文 Generate 提交 | 默认仅一个模型；输入 prompt；点击后进入带 generation URL 的 Stage；无通用红色提交失败 |
-| E-W02 | Stage 刷新恢复 | Provider 尚在 running 时 reload；无需等待 Compose providers/preferences 即显示当前任务；最终出现图片 |
-| E-W03 | response/replay recovery | 模拟首次 POST response 在浏览器侧 abort；同一 intent 重试找回同 ID；fake Provider 仅一次 |
-| E-W04 | transient detail failure | 短时 503 后保留最后快照并恢复；不会把任务显示 failed |
-| E-W05 | English actionable error | 切 EN；配置/schema fake error 显示对应英文动作和短 request ID，不展示 raw exception |
-| E-W06 | unknown safety | outcome unknown 显示“可能已受理”语义；页面不自动创建新 Generation |
+| L-W01 | Generate 提交 | 默认仅一个模型；输入 prompt；点击后进入带 generation URL 的 Stage |
+| L-W02 | 真实终态图片 | Stage 从 Pending 到 Completed，出现一张真实图片且 `/api/images/:id` 可读 |
+| L-W03 | 预览与收藏 | 打开 Image Preview；Provider/model/prompt 正确；收藏按钮进入 pressed 状态 |
+| L-W04 | Stage 刷新恢复 | reload 后仍直接显示同 generation 的 Completed、图片和收藏状态 |
+| L-W05 | Gallery 浏览与筛选 | Gallery 出现该图片；按 Workspace + Provider 筛选后仍保留，query 与控件状态一致 |
+| L-W06 | 失败安全 | 若真实 Provider/转存失败，任务进入明确终态，不自动创建第二单；记录安全 code 与环境边界，不记录密钥/签名 URL |
 
-Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文本和真实图片响应断言。Playwright 重试默认 0（若未来 CI 设 1，仍要保留 trace 且最终本地零重试通过）。
+本轮实测：ZenMux `generation=0d545f04-9925-4579-86f6-9c9af4bf2ca0` 完成 L-W01…L-W05。fal.ai `generation=92f098a6-413e-4dde-9734-81eac0120101` 已由 Provider 生成有效 JPEG，但本机 TUN/fake-IP 将 `v3b.fal.media` 解析到 `198.18.0.125`，触发默认 SSRF 非公网地址拒绝并安全收口为 `STORAGE_ERROR`；这是安全默认与本机代理的兼容边界，不通过放宽生产地址策略掩盖。
 
 ## 8. 回归清单
 
@@ -246,16 +215,13 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
   "test:unit": "vitest run .unit.test.ts",
   "test:contract": "vitest run .contract.test.ts",
   "test:integration": "vitest run .integration.test.ts",
-  "test:e2e:backend": "vitest run tests/e2e/backend",
-  "test:e2e:browser": "playwright test",
-  "test:e2e": "npm run test:e2e:backend && npm run test:e2e:browser",
   "test:smoke": "vitest run .smoke.test.ts",
   "test:verify": "npm run typecheck && npm run test:unit && npm run test:contract && npm run test:integration",
-  "test:release": "npm run test:verify && npm run build && npm run test:e2e && npm run test:smoke"
+  "test:release": "npm run test:verify && npm run test:smoke"
 }
 ```
 
-若 Vitest CLI 对目录 filter 的实际行为需要更具体 glob，可调整命令实现，但语义和“空 E2E 不得通过”不变。
+`test:release` 中的 `build.smoke.test.ts` 会执行 production build；真实 Provider 浏览器 E2E 是本轮受控验收步骤，不伪装为可重复的自动化命令。
 
 ### 9.1 分批门禁
 
@@ -270,7 +236,7 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
 | E2 | 七 adapter mapping/dynamic URL/auth redirect unit/integration + typecheck | Fal exact origin；Qwen/Kling reconstructed URL；bounded JSON |
 | E3 | storage/staging/security unit/integration + typecheck | 每 lease 一张；PNG/JPEG/WebP；Base64 不进 SQLite；temp/loser cleanup |
 | F1 | Web Client/Generate/i18n unit + related integration + typecheck | Stage bootstrap 解耦测试 |
-| F2 | `npm run test:release` | Backend/Browser E2E traces/logs；production build |
+| F2 | `npm run test:release` | build smoke、本会话服务日志、真实 Provider 浏览器 flow 与 generation ID |
 
 ### 9.2 最终必跑顺序
 
@@ -278,14 +244,12 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
 2. `npm run test:unit`
 3. `npm run test:contract`
 4. `npm run test:integration`
-5. `npm run build`
-6. `npm run test:e2e:backend`
-7. `npm run test:e2e:browser`
-8. `npm run test:smoke`
-9. `git diff --check`
-10. `git status --short` 核对生成链路 commits 未混入 Gallery/locale 旧改动
+5. `npm run test:smoke`（包含 production build）
+6. 由本会话启动 `npm run dev`，执行 §7 真实 Provider 浏览器 E2E
+7. `git diff --check`
+8. `git status --short` 核对生成链路 commits 未混入 Gallery/locale 旧改动
 
-任何失败必须修复并从受影响层级向上重跑；不能以“重跑一次绿了”接受 flaky。真实付费 Provider 不属于默认或最终自动门禁。
+任何失败必须修复并从受影响层级向上重跑；不能以“重跑一次绿了”接受 flaky。真实付费 Provider 不属于默认自动化门禁，本轮仅因用户显式授权进入受控验收。
 
 ## 10. 可观测与数据验收
 
@@ -302,7 +266,7 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
 1. migration 前已有文件有 backup；
 2. required manifest 和 foreign key check 通过；
 3. 现有 Projects/Sessions/Generations 行数没有非预期减少；
-4. 不用真实 Provider 做“验收生成”，避免未授权费用；功能 E2E 使用 temp DB/fake Provider。
+4. 真实 Provider 只在用户显式授权的浏览器验收中调用；记录 generation/终态，不记录 key、Authorization 或签名 URL。
 
 ## 11. 手工验收
 
@@ -332,7 +296,7 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
 
 ## 13. 子代理审查门禁
 
-实现和首次 `test:release` 通过后，同时启动三名只读子代理：
+实现、`test:release`（含 production build）与受控浏览器 E2E 完成后，同时启动三名只读子代理：
 
 1. **DB/job lifecycle reviewer**：migration、transaction、idempotency、phase transition、lease、crash/cancel、worker fairness。
 2. **Provider/storage security reviewer**：retry disposition、deadline/queue、SSRF/redirect/auth forwarding、size/type/magic、redaction/file cleanup。
@@ -350,22 +314,22 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
 
 ## 14. P-01…P-14 验收追踪
 
-| 风险 | 最低自动化证据 |
+| 风险 | 最低验收证据 |
 |---|---|
-| P-01 | U-01/02、C-01…04、I-01…05、E-B01 |
-| P-02 | U-18/19、C-09/13、E-W05 |
-| P-03 | U-03/04/17、C-05…08、I-06…10、E-B03、E-W03 |
-| P-04 | U-05、I-11…16、E-B04/06 |
-| P-05 | U-05/06、C-12、I-21/26/27、E-B07 |
-| P-06 | U-08…12、I-22…29、E-B05 |
+| P-01 | U-01/02、C-01…04、I-01…05、smoke |
+| P-02 | U-18/19、C-09/13、L-W06 |
+| P-03 | U-03/04/17、C-05…08、I-06…10、L-W01 |
+| P-04 | U-05、I-11…16、L-W01/02 |
+| P-05 | U-05/06、C-12、I-21/26/27 |
+| P-06 | U-08…12、I-22…29 |
 | P-07 | I-09、I-10A |
 | P-08 | U-05…07/22、I-12/17/28 |
-| P-09 | U-07/15、I-15…21/32/33/35、E-B02 |
+| P-09 | U-07/15、I-15…21/32/33/35、L-W02/06 |
 | P-10 | U-13…16、I-31…34 |
-| P-11 | U-17…20、E-W02/04/06 |
-| P-12 | U-21、I-30、E-W01 |
+| P-11 | U-17…20、L-W04 |
+| P-12 | U-21、I-30、L-W01 |
 | P-13 | U-16/18/22、C-02/04/09、I-34、日志验收 |
-| P-14 | I-01…05、I-11…35、E-B01…07、E-W01…06、build/smoke |
+| P-14 | I-01…05、I-11…35、L-W01…06、build/smoke |
 
 ## 15. 发布/完成门
 
@@ -376,7 +340,7 @@ Browser E2E 不做像素截图阈值；用可访问 role/name、URL、状态文�
 | 一致性 | idempotency/crash/cancel/storage 场景通过 | 任一可复现重复 Provider submit/终态复活 |
 | 安全 | remote ingestion/redaction tests 通过 | SSRF、credential/signed URL 泄漏、无界 body |
 | UX | actionable i18n、Stage refresh/recovery、unknown 语义通过 | 仍只显示通用错误或自动新建任务 |
-| 自动化 | 最终必跑 10 项全绿，E2E 非空、无真实付费调用 | skip 核心 E2E、flaky 重跑才绿、build 失败 |
+| 验证 | 非空自动化门禁全绿、build 通过、真实 Provider 浏览器 flow 有明确 generation/终态 | 空命令假绿、flaky 重跑才绿、build 或 live flow 失败且无解释 |
 | 审查 | 三类子代理审查完成且无未处理 Blocker/High | 高风险发现未处理或无法解释 |
 | Git | 每批原子 commit、无 Gallery/locale 混入 | commit 混杂或用户已有修改丢失 |
 

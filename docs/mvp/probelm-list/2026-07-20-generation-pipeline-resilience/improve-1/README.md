@@ -1,6 +1,6 @@
 # 图片生成链路鲁棒性改造 · improve-1
 
-> 状态：实施中；Batch A–E 与 Batch F1 已完成并独立验证，Batch F2 端到端验收进行中
+> 状态：已完成；Batch A–F 已分批提交、验证并完成只读子代理复审
 > 日期：2026-07-20
 > 文档落点：`docs/mvp/probelm-list/2026-07-20-generation-pipeline-resilience/improve-1/`
 > 触发事件：Generate 提交因运行中 SQLite schema 缺少 `generation_jobs.next_poll_at` 而返回 500；事务已回滚，Provider 未被调用。
@@ -14,7 +14,7 @@
 3. 同一用户提交在响应丢失或重复请求时不会创建重复 Generation，也不会因浏览器盲目重试放大 Provider 费用。
 4. 任务在进程重启、Provider 短暂故障、轮询失败和取消竞态后可以恢复，或进入明确、可诊断的终态；不允许永久无解释地停在 `pending`。
 5. Provider submit、poll 与图片下载采用与副作用语义匹配的超时、重试和退避策略；不对结果不确定的非幂等提交做通用自动重试。
-6. 单元、合同、集成、E2E/浏览器测试覆盖真实故障窗口；每个实施批次独立提交，并在最终验收前由子代理执行代码与契约复审。
+6. 单元、合同、集成与 smoke 覆盖可重复故障窗口，本轮另以一次受控真实 Provider 浏览器 flow 验收跨层主路径；每个实施批次独立提交，并在最终验收前由子代理执行代码与契约复审。
 
 ## 2. 成功标准
 
@@ -27,7 +27,7 @@
 | 瞬时故障 | 可安全重试的 poll/download/明确未受理请求使用有上限的退避与抖动；不可重试错误快速终结 |
 | 用户体验 | Submit 与 Stage 使用稳定错误 code 的中英文文案和操作；不会只显示单一“提交失败” |
 | 可观测性 | 日志可按 correlation/request/generation/job/provider/phase/attempt 串联，且不泄露密钥、Prompt 或签名 URL 查询参数 |
-| 验证 | 相关 unit、contract、integration、E2E 与生产构建全部通过；子代理复审无未处理的阻断项 |
+| 验证 | 相关 unit、contract、integration、smoke/生产构建通过；受控真实 Provider 浏览器验收通过；子代理复审无未处理的阻断项 |
 
 ## 3. improve-1 范围
 
@@ -41,7 +41,7 @@
 - 图片返回值校验、下载边界、敏感 URL 脱敏、取消/租约失败后的文件与 image row 一致性。
 - Generate Submit/Stage 的错误分类、结果未知恢复、轮询 deadline/退避、刷新恢复和中英文文案。
 - 默认多模型 fan-out 与参数“共同能力/部分生效”语义的产品护栏复核。
-- 与改动对应的权威 MVP 文档同步、分批 Git commit、自动化测试、浏览器 E2E 和子代理复审。
+- 与改动对应的权威 MVP 文档同步、分批 Git commit、自动化测试、本轮受控真实 Provider 浏览器验收和子代理复审。
 
 ### 3.2 Out of scope
 
@@ -73,7 +73,7 @@
 | C | 幂等接纳 | clientRequestId、payload hash、唯一约束与重复/并发提交测试 | 已完成 |
 | D | 持久化 lifecycle | 请求/结果快照、dispatch/poll/store/cancel phase、状态单调、worker、崩溃恢复与 poll/cancel 有界 retry | 已完成（D1/D2） |
 | E | Provider 与 storage 韧性 | 副作用感知重试、队列上限、远端图片安全、脱敏与副作用补偿 | 已完成（E1/E2/E3） |
-| F | 前端与端到端收口 | Generate/Stage 恢复、成本护栏、unit/integration/E2E/build、文档对齐和子代理复审 | F1 已完成；F2 进行中 |
+| F | 前端与端到端收口 | Generate/Stage 恢复、成本护栏、unit/integration/build、受控 live browser flow、文档对齐和子代理复审 | 已完成（F1 `f3497b0`；审查修复 `03e4330`） |
 
 具体提交边界以 `02` 为准；若某批无法保持可独立验证，应继续拆小，而不是把多种风险混入一个提交。
 
@@ -101,6 +101,6 @@
 1. 规划阶段已按 `README → 00 → 01 → 02 → 04` 顺序完成；用户已授权连续完成全部文档，下一阶段从 Batch A 开始实施。
 2. `02` 是实施改动边界，`04` 是测试与验收门槛；规划文档本身不等于代码已修复。
 3. 实施阶段按批次逐项修复，每批先做针对性测试，再形成单一逻辑目的的原子 commit。
-4. 最终必须执行项目约定的 unit、contract、integration、E2E/smoke、typecheck 与 production build；真实 Provider 付费调用不作为默认自动化测试。
+4. 最终必须执行项目约定的 unit、contract、integration、smoke、typecheck 与 production build；浏览器 E2E 按用户本轮授权使用真实 Provider 受控执行，不进入默认自动化或 CI。
 5. 子代理只做只读审查与发现反馈，主代理负责消歧、修复、验证和最终交付判断。
 6. 完成后重新以 `plan-code-improvement` 验收模式对照 `02`/`04` 检查实施对齐；自检和子代理 transcript 不写入仓库。

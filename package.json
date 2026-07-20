@@ -21,12 +21,11 @@
     "test:unit": "vitest run .unit.test.ts",
     "test:contract": "vitest run .contract.test.ts",
     "test:integration": "vitest run .integration.test.ts",
-    "test:e2e:backend": "vitest run .e2e.test.ts --passWithNoTests",
     "test:smoke": "vitest run .smoke.test.ts",
     "test:fast": "npm run test:unit && npm run test:contract",
     "preflight": "npm run typecheck && npm run test:fast",
     "test:verify": "npm run typecheck && npm run test:fast && npm run test:integration",
-    "test:release": "npm run test:verify && npm run test:e2e:backend && npm run test:smoke"
+    "test:release": "npm run test:verify && npm run test:smoke"
   },
   "dependencies": {
     "@fontsource-variable/noto-sans-sc": "5.3.0",

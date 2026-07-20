@@ -52,7 +52,7 @@ flowchart LR
 | 前端恢复 | submission intent 写 sessionStorage；Stage 与 Compose bootstrap 解耦 | 响应丢失/刷新后可用同 key 找回；已知 ID 不受配置列表故障影响 | 只保留 React state | 需要过期和 payload-hash 清理规则 | P-02/P-03/P-11 |
 | 默认 fan-out | 默认仅选择 1 个已启用模型；多选时展示调用数/预计图片数 | 降低无意成本且不增加首次使用摩擦 | 默认 0 个；默认最多 8 个 | 用户要主动增加多 Provider 比较 | P-12 |
 | Seed 语义 | 只有所有 targets 支持时可用；服务端也拒绝部分生效 | 共享参数必须具有可预测含义 | 继续 `some` 并静默裁剪 | 原有“部分 Provider 应用 seed”行为被收紧 | P-12 |
-| E2E | 真实 Next HTTP + 本地 fake Provider；另加最小 Playwright 浏览器流 | 用户明确要求 E2E，现有空命令不能充当验证 | 只 import route；只人工点页面 | 新增测试依赖、进程编排和少量运行时成本 | P-14 |
+| E2E | 本会话启动真实 Next，并在浏览器使用已配置的真实 Provider 完成受控 live flow | 用户明确要求真实 Provider 浏览器操作；避免为一次验收引入固定脚本和新测试依赖 | 空 E2E 命令；本地 fake Provider 冒充 live 验收 | 有真实调用成本且不适合作为 CI 门禁；自动化故障矩阵仍由 unit/contract/integration 承担 | P-14 |
 
 ### 2.1 不可逆/高成本决策说明
 
@@ -401,11 +401,11 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 
 - Stage 解耦、GET deadline/offline/visibility/manual recovery、unknown UI。
 - 默认单模型、fan-out 数量提示、Seed capability intersection。
-- 新增 backend + browser E2E；同步权威 MVP 文档与测试蓝图。
+- 由本会话持有真实 Next 进程并执行真实 Provider 浏览器 E2E；不新增固定 E2E runner。
 - DoD：`04` 全部门禁通过，浏览器真实走通 submit → Stage → refresh → completed；子代理审查无未处理 blocker/high。
 - 对应：P-11、P-12、P-14，以及全部回归。
 
-**实施状态（2026-07-20）**：F1 已实现 Stage 与 Compose bootstrap 解耦、Generation API 有界 deadline、离线/隐藏暂停、连续 6 次失败后手动恢复、默认单模型、调用量提示，以及前后端一致的 Seed capability 交集校验；unit、contract、integration 已通过。F2 正在补真实 Next + 本地 fake Provider 的端到端流与生产构建验收。
+**实施状态（2026-07-20）**：F1 已实现 Stage 与 Compose bootstrap 解耦、Generation API 有界 deadline、离线/隐藏暂停、连续 6 次失败后手动恢复、默认单模型、调用量提示，以及前后端一致的 Seed capability 交集校验；审查后补齐 detail 通用网络/deadline 错误的 Stage 就地“重新检查”动作。F2 按用户最新决定使用本会话启动的真实 Next 与真实 Provider 完成浏览器 live flow，不添加本地 fake Provider/Playwright 固定脚本；自动化、build smoke 与子代理复审均已完成。
 
 ## 9. 按目录的具体改动面
 
@@ -425,9 +425,8 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 | `src/lib/i18n/messages/generate.ts` | error/action/unknown messages | 中英文对齐 | 仅单一提交失败文案 |
 | `tests/contract/` | readiness/idempotency/error cases | health/generations contracts | 201-only 断言 |
 | `tests/integration/` | migration-current、idempotency、crash checkpoints、retry/storage | generation flows 改用 MSW | 新改测试不再使用直接 global fetch mock |
-| `tests/e2e/backend/` | real Next + fake Provider flow | — | 空目录/空门禁 |
-| `tests/e2e/browser/` | Playwright Generate/Stage flow | — | 仅人工 E2E 作为唯一证据 |
-| `package.json`/config | Playwright scripts/config；predev/prestart | test/release commands | `--passWithNoTests` 充当 E2E 成功 |
+| `tests/e2e/backend/` | — | 保留为未来按需自动化目录 | 空目录不再由 `--passWithNoTests` 冒充成功 |
+| `package.json`/config | — | release 只运行已有非空自动化门禁 | 空 E2E 命令与一次性 Playwright 依赖 |
 | `docs/mvp/**` | 必要的 ADR/迁移说明 | db/api/job-engine/providers/web-client/Generate/test blueprint | 旧“不重试”“POST 同步 dispatch”等事实 |
 
 文件新增遵循“职责清楚才拆”：`state-machine`、`retry-policy`、remote image policy 和 compatibility 属于独立、可测试规则；不为每个 phase/provider 建一套类层级。
@@ -495,7 +494,7 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 - Provider 计费对账 API；结果未知只能显式呈现，无法凭空查询厂商未提供的事实。
 - 全站通用 observability 平台、Prometheus/Grafana/OTel collector；本批只建立安全 structured logs 和领域 counters。
 - 文件级加密、SQLite 全库加密、多用户权限隔离。
-- 自动真实付费 Provider E2E；自动化只使用 fake/MSW/data image。
+- 自动/CI 真实付费 Provider E2E；本轮仅按用户显式授权执行一次受控浏览器 live flow。
 - 对所有页面做通用 request/retry 框架重写；只抽取 Generation 链路有实际复用的规则。
 - 删除物理 `poll_lease_until/next_poll_at` 旧列；语义 rename 留给需要独立 worker 的后续版本。
 
