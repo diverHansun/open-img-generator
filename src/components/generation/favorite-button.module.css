@@ -1,0 +1,47 @@
+.button {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in oklch, var(--color-line) 88%, transparent);
+  background: color-mix(in oklch, var(--color-surface) 88%, transparent);
+  color: var(--color-ink-muted);
+  backdrop-filter: blur(12px);
+}
+
+.button:hover,
+.button[aria-pressed='true'] {
+  color: var(--color-accent-strong);
+}
+
+.button svg[data-filled] {
+  fill: currentColor;
+}
+
+.spinner {
+  animation: favorite-spin 1s linear infinite;
+}
+
+@keyframes favorite-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (hover: none) {
+  .button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .button {
+    background: var(--color-surface);
+  }
+}

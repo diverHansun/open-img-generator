@@ -1,5 +1,10 @@
-import { GenerateWorkbench } from '@/components/generate-workbench';
+import { HomeScreen } from '@/components/home/home-screen';
+import { HomeShell } from '@/components/shell/home-shell';
 
 export default function HomePage() {
-  return <GenerateWorkbench />;
+  return (
+    <HomeShell>
+      <HomeScreen />
+    </HomeShell>
+  );
 }

@@ -1,0 +1,684 @@
+.composeLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(19.5rem, 25vw, 22rem);
+  gap: clamp(2rem, 4vw, 4.5rem);
+  min-height: calc(100vh - 6rem);
+}
+
+.composeMain {
+  min-width: 0;
+  max-width: 58rem;
+}
+
+.pageToolbar,
+.stageToolbar {
+  display: flex;
+  min-height: 3.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.compactTitle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.compactTitle span {
+  color: var(--color-accent-text);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.compactTitle h1 {
+  margin: 0;
+  font-size: clamp(1.3rem, 2.2vw, 1.65rem);
+  font-weight: 620;
+  letter-spacing: -0.025em;
+}
+
+.sessionTools {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.sessionSelect select,
+.parameterGrid select {
+  width: 100%;
+  height: 2.5rem;
+  padding: 0 2rem 0 0.75rem;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.sessionSelect select {
+  width: min(15rem, 28vw);
+  color: var(--color-ink-muted);
+}
+
+.sessionEditor {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.promptArea {
+  position: relative;
+  margin-top: clamp(2rem, 5vw, 4.5rem);
+}
+
+.promptArea > label {
+  display: block;
+  margin-bottom: var(--space-3);
+  font-size: clamp(1rem, 1.5vw, 1.25rem);
+  font-weight: 590;
+  letter-spacing: -0.012em;
+}
+
+.promptArea textarea {
+  display: block;
+  width: 100%;
+  min-height: 13rem;
+  max-height: 24rem;
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+  padding-bottom: 2.5rem;
+  resize: vertical;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-size: 1rem;
+  line-height: 1.75;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.promptArea textarea:focus {
+  border-color: var(--color-control-border);
+  box-shadow: var(--shadow-focus, 0 0 0 4px var(--color-accent-soft));
+}
+
+.promptArea textarea:focus-visible {
+  outline: 2px solid var(--color-accent-strong);
+  outline-offset: 2px;
+}
+
+:global(html:lang(zh-CN)) .compactTitle h1,
+:global(html:lang(zh-CN)) .promptArea > label {
+  font-family: var(--font-display-zh);
+  font-weight: 500;
+  letter-spacing: -0.008em;
+}
+
+.promptCount {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-3);
+  color: var(--color-ink-faint);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.composeActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.inlineError {
+  margin: var(--space-3) 0 0;
+  color: var(--color-danger);
+  font-size: 0.78rem;
+}
+
+.currentTask {
+  display: flex;
+  width: 100%;
+  min-height: 4.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: clamp(2rem, 5vw, 4rem);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+  background: transparent;
+  text-align: left;
+  transition: background-color 160ms ease, color 160ms ease;
+}
+
+.currentTask:hover,
+.currentTask:focus-visible {
+  color: var(--color-accent-text);
+}
+
+.currentTask > span:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.currentTask strong {
+  font-size: 0.875rem;
+}
+
+.currentTask small {
+  color: var(--color-ink-muted);
+}
+
+.currentTaskAction {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+
+.currentTaskAction svg {
+  width: 1rem;
+}
+
+.inspector {
+  min-width: 0;
+  padding-left: clamp(1.5rem, 3vw, 2.5rem);
+  border-left: 1px solid var(--color-line);
+}
+
+.inspectorSummary {
+  display: none;
+}
+
+.inspectorBody {
+  position: sticky;
+  top: var(--space-5);
+}
+
+.inspectorHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-line-strong);
+}
+
+.inspectorHeading h2 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 650;
+}
+
+.inspectorHeading span,
+.inspectorEmpty,
+.modelCopy small {
+  color: var(--color-ink-muted);
+  font-size: 0.72rem;
+}
+
+.modelList {
+  display: grid;
+  max-height: min(37vh, 21rem);
+  overflow: auto;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.modelRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  min-height: 3.25rem;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.modelRow:last-child {
+  border-bottom: 0;
+}
+
+.modelRow input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--color-accent-strong, var(--color-accent));
+}
+
+.modelCopy {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.modelCopy strong {
+  overflow: hidden;
+  font-size: 0.8rem;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspectorEmpty {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.inspectorEmpty p {
+  margin: 0 0 var(--space-2);
+}
+
+.textLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.textLinks a {
+  color: var(--color-accent-text);
+  font-weight: 650;
+}
+
+.parameterGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+}
+
+.parameterGrid label,
+.advancedFields label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-ink-muted);
+  font-size: 0.72rem;
+}
+
+.advanced {
+  border-top: 1px solid var(--color-line);
+}
+
+.advanced > summary,
+.jobDetails > summary {
+  padding: var(--space-3) 0;
+  color: var(--color-ink-muted);
+  font-size: 0.78rem;
+  font-weight: 620;
+}
+
+.advancedFields {
+  display: grid;
+  gap: var(--space-3);
+  padding-bottom: var(--space-4);
+}
+
+.advancedFields textarea {
+  width: 100%;
+  padding: var(--space-3);
+  resize: vertical;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.stage {
+  width: 100%;
+}
+
+.stageToolbar {
+  position: sticky;
+  z-index: 10;
+  top: 0;
+  background: var(--color-canvas);
+}
+
+.stageStatus {
+  display: grid;
+  justify-items: center;
+  gap: 0.1rem;
+  font-size: 0.8rem;
+}
+
+.stageStatus span {
+  color: var(--color-ink-muted);
+  font-size: 0.7rem;
+}
+
+.imageStage {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: clamp(0.75rem, 1.6vw, 1.25rem);
+  width: min(100%, 78rem);
+  margin: clamp(1.5rem, 4vw, 3.5rem) auto;
+  align-items: start;
+}
+
+.imageStage[data-count='1'] {
+  max-width: 44rem;
+}
+
+.stageImage {
+  position: relative;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-subtle);
+}
+
+.previewTrigger {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.previewTrigger:focus-visible {
+  outline: 2px solid var(--color-accent-strong);
+  outline-offset: -2px;
+}
+
+.previewTrigger img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.favoriteButton {
+  position: absolute;
+  right: var(--space-3);
+  bottom: var(--space-3);
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid color-mix(in oklch, var(--color-line-strong) 70%, transparent);
+  background: color-mix(in oklch, var(--color-surface) 88%, transparent);
+  color: var(--color-accent-strong);
+  backdrop-filter: blur(10px);
+}
+
+.jobPlaceholder {
+  display: grid;
+  min-height: clamp(18rem, 40vw, 32rem);
+  place-content: center;
+  gap: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-subtle);
+  color: var(--color-ink-muted);
+  text-align: center;
+  animation: placeholder-pulse 1.6s ease-in-out infinite alternate;
+}
+
+.jobPlaceholder svg,
+.stageMessage svg {
+  justify-self: center;
+}
+
+.noImages {
+  margin: var(--space-7) auto;
+  color: var(--color-ink-muted);
+  text-align: center;
+}
+
+.jobDetails {
+  width: min(100%, 78rem);
+  margin-inline: auto;
+  border-top: 1px solid var(--color-line-strong);
+  border-bottom: 1px solid var(--color-line-strong);
+}
+
+.jobDetails > summary > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.jobDetails small {
+  color: var(--color-ink-muted);
+  font-weight: 450;
+}
+
+.jobList {
+  border-top: 1px solid var(--color-line);
+}
+
+.jobRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2) var(--space-5);
+  align-items: center;
+  min-height: 3.5rem;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.jobRow:last-child {
+  border-bottom: 0;
+}
+
+.jobRow > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.jobRow strong {
+  overflow: hidden;
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobRow small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobResult {
+  justify-items: end;
+}
+
+.jobError {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 0.72rem;
+}
+
+.stageMessage,
+.loadingState,
+.errorState {
+  display: grid;
+  width: min(100%, 36rem);
+  min-height: 14rem;
+  place-content: center;
+  gap: var(--space-3);
+  margin: clamp(2rem, 8vw, 7rem) auto;
+  color: var(--color-ink-muted);
+  text-align: center;
+}
+
+.stageMessage small,
+.errorState small {
+  max-width: 32rem;
+  overflow-wrap: anywhere;
+}
+
+.errorState button {
+  justify-self: center;
+}
+
+.loadingMark {
+  width: 2.5rem;
+  height: 2.5rem;
+  justify-self: center;
+  border-radius: 50%;
+  background: var(--color-accent-soft);
+  box-shadow: var(--shadow-focus, 0 0 0 6px var(--color-accent-soft));
+  animation: placeholder-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.spin {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes placeholder-pulse {
+  to {
+    opacity: 0.58;
+  }
+}
+
+@media (max-width: 1179px) {
+  .composeLayout {
+    grid-template-columns: 1fr;
+    gap: var(--space-5);
+  }
+
+  .composeMain {
+    max-width: none;
+  }
+
+  .inspector {
+    padding: 0;
+    border-top: 1px solid var(--color-line-strong);
+    border-left: 0;
+  }
+
+  .inspectorSummary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-4) 0;
+    font-weight: 650;
+  }
+
+  .inspectorSummary span:last-child {
+    color: var(--color-ink-muted);
+    font-size: 0.72rem;
+    font-weight: 450;
+  }
+
+  .inspectorBody {
+    position: static;
+    display: grid;
+    grid-template-columns: minmax(15rem, 1fr) minmax(18rem, 1fr);
+    gap: var(--space-5);
+    padding-bottom: var(--space-5);
+  }
+
+  .inspectorHeading {
+    display: none;
+  }
+
+  .modelList,
+  .inspectorEmpty {
+    grid-row: 1 / span 2;
+  }
+}
+
+@media (max-width: 919px) {
+  .stageToolbar {
+    top: 3.5rem;
+  }
+}
+
+@media (max-width: 700px) {
+  .pageToolbar,
+  .stageToolbar {
+    flex-wrap: wrap;
+  }
+
+  .sessionTools {
+    width: 100%;
+  }
+
+  .sessionSelect {
+    flex: 1;
+  }
+
+  .sessionSelect select {
+    width: 100%;
+  }
+
+  .sessionEditor {
+    grid-template-columns: 1fr auto;
+  }
+
+  .sessionEditor > button:last-child {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .promptArea {
+    margin-top: var(--space-6);
+  }
+
+  .promptArea textarea {
+    min-height: 11rem;
+  }
+
+  .inspectorBody {
+    display: block;
+  }
+
+  .modelList {
+    max-height: none;
+  }
+
+  .parameterGrid {
+    margin-top: var(--space-3);
+  }
+
+  .stageToolbar > span:empty {
+    display: none;
+  }
+
+  .stageStatus {
+    order: 3;
+    width: 100%;
+    justify-items: start;
+  }
+
+  .imageStage {
+    grid-template-columns: 1fr;
+  }
+
+  .jobDetails > summary > span {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promptArea textarea,
+  .currentTask,
+  .jobPlaceholder,
+  .loadingMark,
+  .spin {
+    animation: none;
+    transition: none;
+  }
+}

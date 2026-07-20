@@ -1,0 +1,333 @@
+.dialog {
+  display: block;
+  width: min(94vw, 70rem);
+  max-width: none;
+  max-height: min(90dvh, 54rem);
+  overflow: auto;
+  padding: 0;
+  border-color: color-mix(in oklch, var(--color-line) 78%, transparent);
+  background: color-mix(in oklch, var(--color-surface) 96%, transparent);
+  box-shadow:
+    0 1.5rem 4rem color-mix(in oklch, var(--color-ink) 15%, transparent),
+    0 0 2.25rem color-mix(in oklch, var(--color-accent) 6%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+.detailView {
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.header {
+  display: flex;
+  min-height: 2.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding-right: 2.75rem;
+}
+
+.titleBlock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.titleBlock > span {
+  font-size: 1.125rem;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+
+.prompt {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding-block: var(--space-5);
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.prompt > p,
+.timestamps,
+.timestamps dt,
+.timestamps dd,
+.section h3,
+.jobError,
+.cancelError,
+.noImages,
+.state h2,
+.state p,
+.imageFavoriteError {
+  margin: 0;
+}
+
+.prompt > p {
+  max-width: 78ch;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.timestamps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+}
+
+.timestamps > div {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.timestamps dt,
+.timestamps dd {
+  font-size: 0.75rem;
+}
+
+.timestamps dt {
+  color: var(--color-ink-muted);
+}
+
+.inlineNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--color-warning);
+  background: var(--color-surface-subtle);
+  color: var(--color-ink-muted);
+  font-size: 0.8125rem;
+}
+
+.cancelError,
+.imageFavoriteError {
+  margin-top: var(--space-3);
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+}
+
+.section {
+  margin-top: var(--space-6);
+}
+
+.section h3 {
+  margin-bottom: var(--space-3);
+  font-size: 0.8125rem;
+  font-weight: 680;
+  letter-spacing: 0.02em;
+}
+
+.jobList {
+  border-top: 1px solid var(--color-line);
+}
+
+.jobRow {
+  display: grid;
+  grid-template-columns: minmax(13rem, 1fr) 8.5rem 5rem;
+  gap: var(--space-4);
+  align-items: center;
+  min-height: 4rem;
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.jobIdentity {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.jobIdentity strong {
+  font-size: 0.8125rem;
+}
+
+.jobIdentity span {
+  overflow: hidden;
+  color: var(--color-ink-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobCount {
+  color: var(--color-ink-muted);
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.jobError {
+  grid-column: 1 / -1;
+  color: var(--color-danger);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.resultGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: var(--space-2);
+}
+
+.resultItem {
+  position: relative;
+  min-width: 0;
+}
+
+.resultButton {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  padding: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-subtle);
+}
+
+.resultButton img,
+.resultImageError {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  place-items: center;
+  object-fit: cover;
+}
+
+.resultImageError {
+  color: var(--color-ink-faint);
+}
+
+.resultImageError svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.resultFavorite {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+
+.resultError {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-danger);
+  font-size: 0.6875rem;
+}
+
+.noImages {
+  padding-block: var(--space-5);
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+  color: var(--color-ink-muted);
+}
+
+.state,
+.loading {
+  display: grid;
+  min-height: 23rem;
+  align-content: center;
+  justify-items: start;
+  gap: var(--space-3);
+  padding: clamp(1.5rem, 4vw, 3rem);
+}
+
+.state p {
+  max-width: 42rem;
+  color: var(--color-ink-muted);
+}
+
+.loading span {
+  width: min(32rem, 70vw);
+  height: 0.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-subtle);
+}
+
+.loading span:first-child {
+  width: min(12rem, 40vw);
+  height: 1.25rem;
+}
+
+.loading span:last-child {
+  width: min(24rem, 60vw);
+}
+
+.singleImageView {
+  position: relative;
+  display: grid;
+  min-height: min(86dvh, 48rem);
+  place-items: center;
+  padding: 4rem 1.25rem 1.25rem;
+  background: var(--color-media-backdrop);
+}
+
+.singleImageView > img,
+.singleImageView > .resultImageError {
+  max-width: 100%;
+  max-height: calc(86dvh - 6rem);
+  border-radius: var(--radius-md);
+  object-fit: contain;
+}
+
+.backButton {
+  position: absolute;
+  top: var(--space-4);
+  left: var(--space-4);
+  background: color-mix(in oklch, var(--color-surface) 90%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.singleFavorite {
+  position: absolute;
+  top: var(--space-4);
+  right: 3.5rem;
+}
+
+.imageFavoriteError {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .dialog,
+  .backButton {
+    background: var(--color-surface);
+  }
+}
+
+@media (max-width: 680px) {
+  .dialog {
+    width: calc(100vw - 1rem);
+    max-height: calc(100dvh - 1rem);
+  }
+
+  .detailView {
+    padding: var(--space-4);
+  }
+
+  .header {
+    padding-right: 2.5rem;
+  }
+
+  .jobRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .jobCount {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+
+  .resultGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

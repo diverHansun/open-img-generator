@@ -1,0 +1,54 @@
+.status {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--color-ink-muted);
+  font-size: 0.8125rem;
+  font-weight: 620;
+  line-height: 1.25;
+}
+
+.status svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex: 0 0 auto;
+  stroke-width: 2;
+}
+
+.status[data-status='completed'] {
+  color: var(--color-success);
+}
+
+.status[data-status='pending'],
+.status[data-status='running'] {
+  color: var(--color-warning);
+}
+
+.status[data-status='failed'] {
+  color: var(--color-danger);
+}
+
+.status[data-status='partial'] {
+  color: var(--color-ink);
+}
+
+.status[data-compact] {
+  font-size: 0.75rem;
+}
+
+.runningIcon {
+  animation: status-spin 1.1s linear infinite;
+}
+
+@keyframes status-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runningIcon {
+    animation: none;
+  }
+}
