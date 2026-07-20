@@ -1,3 +1,5 @@
+import type { ProviderDiagnostic } from '../providers/error-diagnostics';
+
 export type ProviderId =
   | 'fal'
   | 'zenmux'
@@ -98,7 +100,12 @@ export type JobView = {
   provider: ProviderId;
   model: string;
   status: GenerationStatus;
-  error?: { code: string; message: string; retryable: boolean };
+  error?: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    diagnostic?: ProviderDiagnostic;
+  };
 };
 
 export type ImageView = {

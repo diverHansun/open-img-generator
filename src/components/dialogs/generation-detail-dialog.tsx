@@ -5,6 +5,7 @@ import { ArrowLeft, ImageOff } from 'lucide-react';
 
 import { FavoriteButton } from '@/components/generation/favorite-button';
 import {
+  getJobErrorDiagnosticReference,
   getJobErrorMessageKey,
   shouldShowJobError,
 } from '@/components/generation/job-error';
@@ -334,6 +335,7 @@ export function GenerationDetailDialog({
                   const visibleError = shouldShowJobError(job.status, job.error)
                     ? job.error
                     : undefined;
+                  const diagnosticReference = getJobErrorDiagnosticReference(visibleError);
                   return (
                     <article key={job.id} className={styles.jobRow}>
                       <div className={styles.jobIdentity}>
@@ -347,8 +349,19 @@ export function GenerationDetailDialog({
                       {visibleError ? (
                         <p className={styles.jobError}>
                           {t('dialogs.jobError', {
-                            message: t(getJobErrorMessageKey(visibleError.code)),
+                            message: t(getJobErrorMessageKey(
+                              visibleError.code,
+                              visibleError.diagnostic,
+                            )),
                           })}
+                          {diagnosticReference ? (
+                            <small>
+                              {' '}
+                              {t('generation.jobError.reference', {
+                                reference: diagnosticReference,
+                              })}
+                            </small>
+                          ) : null}
                         </p>
                       ) : null}
                     </article>

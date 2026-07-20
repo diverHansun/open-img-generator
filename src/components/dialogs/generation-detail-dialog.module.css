@@ -167,6 +167,11 @@
   overflow-wrap: anywhere;
 }
 
+.jobError small {
+  color: var(--color-ink-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
 .resultGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));

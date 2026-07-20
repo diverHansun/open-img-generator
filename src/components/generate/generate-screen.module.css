@@ -528,6 +528,11 @@
   font-size: 0.72rem;
 }
 
+.jobError small {
+  color: var(--color-ink-muted);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
 .stageMessage,
 .loadingState,
 .errorState {

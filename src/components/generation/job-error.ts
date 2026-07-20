@@ -25,11 +25,43 @@ const JOB_ERROR_MESSAGE_KEYS = {
   LEGACY_DISPATCH_STATE_UNKNOWN: 'generation.jobError.generic',
 } as const satisfies Record<string, TranslationKey>;
 
-export function getJobErrorMessageKey(code: string): TranslationKey {
+const DIAGNOSTIC_CATEGORY_MESSAGE_KEYS = {
+  authentication: 'generation.jobError.authentication',
+  billing_or_access: 'generation.jobError.billingOrAccess',
+  model_or_endpoint: 'generation.jobError.modelOrEndpoint',
+  input_invalid: 'generation.jobError.inputInvalid',
+  content_policy: 'generation.jobError.contentPolicy',
+  remote_asset_unavailable: 'generation.jobError.referenceImage',
+  rate_limited: 'generation.jobError.rateLimited',
+  provider_unavailable: 'generation.jobError.providerUnavailable',
+  request_timeout: 'generation.jobError.timeout',
+  no_result: 'generation.jobError.emptyResult',
+  upstream_rejected: 'generation.jobError.rejected',
+} as const satisfies Partial<Record<
+  NonNullable<NonNullable<JobView['error']>['diagnostic']>['category'],
+  TranslationKey
+>>;
+
+export function getJobErrorMessageKey(
+  code: string,
+  diagnostic?: NonNullable<JobView['error']>['diagnostic'],
+): TranslationKey {
+  if (diagnostic && Object.hasOwn(DIAGNOSTIC_CATEGORY_MESSAGE_KEYS, diagnostic.category)) {
+    return DIAGNOSTIC_CATEGORY_MESSAGE_KEYS[
+      diagnostic.category as keyof typeof DIAGNOSTIC_CATEGORY_MESSAGE_KEYS
+    ];
+  }
   if (Object.hasOwn(JOB_ERROR_MESSAGE_KEYS, code)) {
     return JOB_ERROR_MESSAGE_KEYS[code as keyof typeof JOB_ERROR_MESSAGE_KEYS];
   }
   return 'generation.jobError.generic';
+}
+
+/** A provider request id or recognised provider code is safe to show/copy. */
+export function getJobErrorDiagnosticReference(
+  error: JobView['error'],
+): string | undefined {
+  return error?.diagnostic?.providerRequestId ?? error?.diagnostic?.providerCode;
 }
 
 /**

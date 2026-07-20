@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { ImagePreviewDialog } from '@/components/dialogs/image-preview-dialog';
 import { FavoriteButton } from '@/components/generation/favorite-button';
 import {
+  getJobErrorDiagnosticReference,
   getJobErrorMessageKey,
   shouldShowJobError,
 } from '@/components/generation/job-error';
@@ -433,6 +434,7 @@ export function GenerateStage({
                 const visibleError = shouldShowJobError(job.status, job.error)
                   ? job.error
                   : undefined;
+                const diagnosticReference = getJobErrorDiagnosticReference(visibleError);
                 return (
                   <div className={styles.jobRow} key={job.id}>
                     <span>
@@ -447,7 +449,18 @@ export function GenerateStage({
                     </span>
                     {visibleError ? (
                       <p className={styles.jobError}>
-                        {t(getJobErrorMessageKey(visibleError.code))}
+                        {t(getJobErrorMessageKey(
+                          visibleError.code,
+                          visibleError.diagnostic,
+                        ))}
+                        {diagnosticReference ? (
+                          <small>
+                            {' '}
+                            {t('generation.jobError.reference', {
+                              reference: diagnosticReference,
+                            })}
+                          </small>
+                        ) : null}
                       </p>
                     ) : null}
                   </div>

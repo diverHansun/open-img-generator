@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { getJobErrorMessageKey, shouldShowJobError } from './job-error';
+import {
+  getJobErrorDiagnosticReference,
+  getJobErrorMessageKey,
+  shouldShowJobError,
+} from './job-error';
 
 describe('job error presentation', () => {
   it.each([
@@ -27,6 +31,29 @@ describe('job error presentation', () => {
 
     expect(messageKey).toBe('generation.jobError.generic');
     expect(messageKey).not.toContain(canary);
+  });
+
+  it('uses the provider diagnostic category and only exposes safe references', () => {
+    expect(
+      getJobErrorMessageKey('INVALID_REQUEST', {
+        providerId: 'kling',
+        category: 'content_policy',
+        providerCode: '1301',
+      }),
+    ).toBe('generation.jobError.contentPolicy');
+    expect(
+      getJobErrorDiagnosticReference({
+        code: 'INVALID_REQUEST',
+        message: 'internal',
+        retryable: false,
+        diagnostic: {
+          providerId: 'kling',
+          category: 'content_policy',
+          providerCode: '1301',
+          providerRequestId: 'req-123',
+        },
+      }),
+    ).toBe('req-123');
   });
 
   it('does not present transient retry diagnostics as a failed active job', () => {
