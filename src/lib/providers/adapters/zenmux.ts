@@ -5,7 +5,12 @@ import type {
   ProviderImageRef,
   SubmitResult,
 } from '../types';
-import { postJson, ProviderHttpError, createProviderError } from '../http-client';
+import {
+  createProviderError,
+  createProviderErrorFromHttpError,
+  postJson,
+  ProviderHttpError,
+} from '../http-client';
 import { zenmuxCapabilities } from '../capabilities/zenmux';
 import { resolveCredential } from '../../user-config';
 
@@ -124,10 +129,12 @@ export class ZenmuxProvider implements ImageProvider {
         body && 'error' in body && body.error && typeof body.error === 'object'
           ? String((body.error as Record<string, unknown>).message ?? err.message)
           : err.message;
-      return createProviderError(err.status, message, err.status === 429);
+      return createProviderErrorFromHttpError(err, message);
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return createProviderError(0, err.message, true);
+      return createProviderError(0, err.message, true, {
+        disposition: 'unknown',
+      });
     }
     return createProviderError(0, err instanceof Error ? err.message : String(err), false);
   }

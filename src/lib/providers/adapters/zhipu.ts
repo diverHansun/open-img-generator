@@ -9,6 +9,7 @@ import {
   postJson,
   ProviderHttpError,
   createProviderError,
+  createProviderErrorFromHttpError,
 } from '../http-client';
 import { zhipuCapabilities } from '../capabilities/zhipu';
 import { resolveCredential } from '../../user-config';
@@ -130,14 +131,12 @@ export class ZhipuProvider implements ImageProvider {
         errorBody && typeof errorBody.message === 'string'
           ? errorBody.message
           : err.message;
-      return createProviderError(
-        err.status,
-        message,
-        err.status === 429 || err.status >= 500,
-      );
+      return createProviderErrorFromHttpError(err, message);
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return createProviderError(0, err.message, true);
+      return createProviderError(0, err.message, true, {
+        disposition: 'unknown',
+      });
     }
     return createProviderError(
       0,

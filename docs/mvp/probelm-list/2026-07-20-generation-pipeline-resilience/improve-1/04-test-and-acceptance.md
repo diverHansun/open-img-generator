@@ -69,7 +69,7 @@ tests/helpers/fake-provider-server.ts
 | U-07 | aggregate/partial/unknown | active 优先；完成+失败为 completed/partial；unknown 不被当普通可重试失败 | generation query/status tests | P-08/P-09/D/F |
 | U-08 | retry classifier | queue/pre-send timeout/abort 为 `not_started` 可重排；明确 429 为 `rejected`；HTTP started 后 timeout/reset/未知 5xx 为 `unknown`；poll 5xx/timeout retryable | retry policy/provider tests | P-06/E |
 | U-09 | retry schedule/runtime guard | D2：attempt/elapsed cap、full jitter 下界/上界、损坏 state 与畸形 poll/cancel result 安全收口、成功重置；Retry-After 留 E | `retry-policy.unit.test.ts`、lifecycle/cancel unit | P-06/D/E |
-| U-10 | retry exhaustion | D2：poll 第 6 次、cancel 第 3 次 retryable failure 写稳定终态且不再 due；submit 不进入 retry | lifecycle/cancel unit | P-06/D |
+| U-10 | retry exhaustion | poll 第 6 次、cancel 第 3 次 retryable failure 写稳定终态且不再 due；E1 的 safe submit 最多总计 3 次，只有 `not_started`/retryable `rejected` 可进入该预算 | lifecycle/cancel unit | P-06/D/E |
 | U-11 | provider limiter | queue 上限快速拒绝；排队 deadline/AbortSignal 移除 item 且 Provider HTTP 0 调用；不同 provider 不互阻 | `limiter.unit.test.ts` | P-06/P-08/E |
 | U-12 | 七家 adapter error mapping | 429/4xx/5xx/timeout 的 code/retryable/disposition/Retry-After 一致；普通 Provider JSON > 2 MiB 被流式中止且 raw body 不泄漏 | 各 adapter/http-client unit | P-06/P-10/E |
 | U-13 | dynamic Provider URL auth | Fal 仅接受 exact configured origin 且 manual redirect；Qwen/Kling 从 base + external ID 重建；cross-origin 不请求/不转发 Authorization | fal/qwen/kling adapter tests | P-10/E |

@@ -5,7 +5,12 @@ import type {
   ProviderImageRef,
   SubmitResult,
 } from '../types';
-import { postJson, ProviderHttpError, createProviderError } from '../http-client';
+import {
+  createProviderError,
+  createProviderErrorFromHttpError,
+  postJson,
+  ProviderHttpError,
+} from '../http-client';
 import { doubaoCapabilities } from '../capabilities/doubao';
 import { resolveCredential } from '../../user-config';
 
@@ -157,10 +162,12 @@ export class DoubaoProvider implements ImageProvider {
             : typeof err.body === 'string'
               ? err.body
             : err.message;
-      return createProviderError(err.status, message, err.status === 429 || err.status >= 500);
+      return createProviderErrorFromHttpError(err, message);
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return createProviderError(0, err.message, true);
+      return createProviderError(0, err.message, true, {
+        disposition: 'unknown',
+      });
     }
     return createProviderError(0, err instanceof Error ? err.message : String(err), false);
   }

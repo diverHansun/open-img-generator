@@ -50,11 +50,25 @@ export type ProviderErrorCode =
   | 'TIMEOUT'
   | 'UNKNOWN';
 
+/**
+ * Whether a provider submit can be safely attempted again.
+ *
+ * This is intentionally separate from `retryable`: a request that may be
+ * transiently failing can still have reached a billable provider endpoint.
+ */
+export type ProviderRequestDisposition =
+  | 'not_started'
+  | 'rejected'
+  | 'unknown';
+
 export type ProviderError = {
   code: ProviderErrorCode;
   message: string;
   retryable: boolean;
   httpStatus?: number;
+  disposition?: ProviderRequestDisposition;
+  /** A bounded, parsed provider Retry-After value. It is never persisted raw. */
+  retryAfterMs?: number;
 };
 
 export type SubmitResult =

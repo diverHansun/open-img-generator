@@ -7,7 +7,13 @@ import type {
   ProviderImageRef,
   SubmitResult,
 } from '../types';
-import { getJson, postJson, ProviderHttpError, createProviderError } from '../http-client';
+import {
+  createProviderError,
+  createProviderErrorFromHttpError,
+  getJson,
+  postJson,
+  ProviderHttpError,
+} from '../http-client';
 import { klingCapabilities } from '../capabilities/kling';
 import { resolveCredential } from '../../user-config';
 
@@ -206,10 +212,12 @@ export class KlingProvider implements ImageProvider {
     if (err instanceof ProviderHttpError) {
       const body = err.body as Record<string, unknown> | null;
       const message = body && typeof body.message === 'string' ? body.message : err.message;
-      return createProviderError(err.status, message, err.status === 429 || err.status >= 500);
+      return createProviderErrorFromHttpError(err, message);
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return createProviderError(0, err.message, true);
+      return createProviderError(0, err.message, true, {
+        disposition: 'unknown',
+      });
     }
     return createProviderError(0, err instanceof Error ? err.message : String(err), false);
   }

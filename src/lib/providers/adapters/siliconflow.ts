@@ -9,6 +9,7 @@ import {
   postJson,
   ProviderHttpError,
   createProviderError,
+  createProviderErrorFromHttpError,
 } from '../http-client';
 import { siliconflowCapabilities } from '../capabilities/siliconflow';
 import { resolveCredential } from '../../user-config';
@@ -118,11 +119,7 @@ export class SiliconFlowProvider implements ImageProvider {
   private mapError(err: unknown): ReturnType<typeof createProviderError> {
     if (err instanceof ProviderHttpError) {
       if (typeof err.body === 'string' && err.body.length > 0) {
-        return createProviderError(
-          err.status,
-          err.body,
-          err.status === 429 || err.status >= 500,
-        );
+        return createProviderErrorFromHttpError(err, err.body);
       }
       const body = err.body as Record<string, unknown> | null;
       const message =
@@ -131,14 +128,12 @@ export class SiliconFlowProvider implements ImageProvider {
           : body && typeof body.data === 'string'
             ? body.data
             : err.message;
-      return createProviderError(
-        err.status,
-        message,
-        err.status === 429 || err.status >= 500,
-      );
+      return createProviderErrorFromHttpError(err, message);
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return createProviderError(0, err.message, true);
+      return createProviderError(0, err.message, true, {
+        disposition: 'unknown',
+      });
     }
     return createProviderError(
       0,

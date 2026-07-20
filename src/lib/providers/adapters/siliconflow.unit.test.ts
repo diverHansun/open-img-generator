@@ -130,14 +130,15 @@ describe('SiliconFlowProvider', () => {
     }
   });
 
-  it('keeps non-timeout transport failures as UNKNOWN', async () => {
+  it('treats ambiguous transport failures as retryable TIMEOUT outcomes', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('socket closed'));
 
     const result = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
     expect(result.kind).toBe('failed');
     if (result.kind === 'failed') {
-      expect(result.error.code).toBe('UNKNOWN');
-      expect(result.error.retryable).toBe(false);
+      expect(result.error.code).toBe('TIMEOUT');
+      expect(result.error.retryable).toBe(true);
+      expect(result.error.disposition).toBe('unknown');
     }
   });
 });

@@ -375,7 +375,7 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 - DoD：所有 crash checkpoint 在重启后恢复或明确 unknown；无永久无解释 pending；终态不可逆；每个 commit 都有 fault-injection integration。
 - 对应：P-04、P-05、P-07、P-08、P-09。
 
-**实施状态（2026-07-20）**：D1 与 D2 已实现、复审并独立验证。D1 覆盖 schema v3/backfill、202 durable admission、版本化 request/result snapshot、phase/lease worker、late-handle cancellation CAS、fan-out 原子取消、lease-guarded image checkpoint、终态快照清理与有界 inline-image staging（raw Base64 不入 SQLite）。D2 新增集中 `retry-policy`：已有 handle 的 typed-retryable poll（最多 6 次/10 分钟）和 remote cancel（最多 3 次/30 秒）以 full jitter、due/lease CAS 与重启延续收口；只有远端 `cancelled` 确认 remote cancel，`pending/running` 重排、`completed` 以安全诊断收口，畸形 runtime result 也写有界 checkpoint。所有新写入的 job 诊断、详情与 History read model 只使用 allowlisted code、固定文案和 retryable 布尔值，绝不暴露 Provider 原始 message/body/prompt/URL；成功/phase 切换/终态/本地取消清空 retry state，submit 仍不重放。D2 使用 unit + file-backed SQLite typed-fake integration 验证，不宣称真实 HTTP classifier、Retry-After、limiter queue 或 adapter mapping 已由本批闭合。
+**实施状态（2026-07-20）**：D1 与 D2 已实现、复审并独立验证。D1 覆盖 schema v3/backfill、202 durable admission、版本化 request/result snapshot、phase/lease worker、late-handle cancellation CAS、fan-out 原子取消、lease-guarded image checkpoint、终态快照清理与有界 inline-image staging（raw Base64 不入 SQLite）。D2 新增集中 `retry-policy`：已有 handle 的 typed-retryable poll（最多 6 次/10 分钟）和 remote cancel（最多 3 次/30 秒）以 full jitter、due/lease CAS 与重启延续收口；只有远端 `cancelled` 确认 remote cancel，`pending/running` 重排、`completed` 以安全诊断收口，畸形 runtime result 也写有界 checkpoint。所有新写入的 job 诊断、详情与 History read model 只使用 allowlisted code、固定文案和 retryable 布尔值，绝不暴露 Provider 原始 message/body/prompt/URL；成功/phase 切换/终态/本地取消清空 retry state。E1 已为七家 adapter 的 HTTP error 统一 `not_started / rejected / unknown`、有界 `Retry-After`、caller signal/deadline 和默认 submit/poll/cancel timeout；并为每 provider 的进程内 limiter 增加队列上限、deadline、AbortSignal 移除。只有明确未开始或 retryable rejected 的 submit 可 `dispatching → queued` 有界重排（总计最多 3 次/30 秒）；已进入 fetch 的 timeout/reset/5xx 仍保守进入 unknown。E1 的 unit 覆盖不把它误报为真实 HTTP/完整安全闭环：2 MiB 流式 JSON、manual redirect、dynamic endpoint trust 与图片 download/inline Base64 边界仍在 E2/E3。
 
 ### Batch E — Provider、队列与 storage 边界
 
@@ -385,8 +385,8 @@ Provider adapter 的 submit error 新增副作用判定 `disposition: not_starte
 2. `fix(providers): constrain adapter urls and responses`
 3. `fix(storage): stage and validate remote images`
 
-- E1：Provider HTTP body/deadline、`not_started/rejected/unknown`、Retry-After 与 limiter queue 上限/deadline/abort。
-- E2：七家 adapter 逐家对齐；Fal exact-origin/manual redirect；Qwen/Kling 从 base + external ID 重建 URL；auth redirect 与日志脱敏。
+- E1：Provider HTTP caller deadline、`not_started/rejected/unknown`、Retry-After 与 limiter queue 上限/deadline/abort；已实现。普通 JSON 的 2 MiB streaming reader 归入 E2，避免把 Base64 endpoint 当成普通 JSON 误处理。
+- E2：七家 adapter 逐家对齐；普通 JSON 2 MiB streaming reader；Fal exact-origin/manual redirect；Qwen/Kling 从 base + external ID 重建 URL；auth redirect 与日志脱敏。
 - E3：storage URL/redirect/IP/size/type/magic-byte/temp-file；ZenMux Base64 有界 staging 与 Doubao 防御分支；每 lease 一张缺失 image。
 - DoD：真实本地 fake HTTP 串起 I-22… I-25；pre-send 可安全重排，HTTP started unknown 不重投；poll/download transient 按预算恢复；SSRF/超大 JSON/Base64/非图片/签名 URL 测试通过。
 - 对应：P-06、P-10、P-13。

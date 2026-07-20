@@ -59,7 +59,7 @@
 4. **不定义 db schema**: schema 定义是 db 模块的职责。job-engine 通过 db 查询/写入函数操作数据。
 5. **不处理 HTTP 路由**: API 层负责解析 HTTP 请求和返回 JSON。job-engine 不感知 Request/Response 对象。
 6. **不计算「前端交集」**: 多模型宽高比交集是 web-ui 的职责。服务端只校验「每个 target 是否支持提交的 aspectRatio」。
-7. **不重放不确定的 submit，也不把所有失败都重试**: submit 发送后异常/租约过期仍进入 `outcome_unknown`。D2 只重试已有 handle 的 typed-retryable poll/cancel（poll 最多 6 次且总窗口 10 分钟；cancel 最多 3 次且总窗口 30 秒）；storage、HTTP disposition/Retry-After 与 Provider-specific 规则仍由 E 收口。
+7. **不重放不确定的 submit，也不把所有失败都重试**: E1 仅在 limiter 明确未开始，或 adapter 标记为 `not_started`/retryable `rejected` 时，把 `dispatching` 安全回写为 `queued`（submit 总计最多 3 次、30 秒）。已进入 fetch 后的 timeout/reset/5xx 为 `unknown`，以及租约过期都进入 `outcome_unknown`，绝不盲重投。已有 handle 的 typed-retryable poll/cancel 仍分别最多 6 次/10 分钟和 3 次/30 秒；response-size、redirect、Provider URL 与 storage 规则继续由 E2/E3 收口。
 8. **不做跨进程限流/熔断或外部队列**: 当前依赖单进程 worker、SQLite lease 和 per-provider semaphore；多实例共享限流仍不在 MVP 范围。
 9. **不优化 prompt**: prompt 预处理是 prompt 模块的职责。
 10. **不定义厂商取消协议**: 取消入口与本地状态机归 job-engine；providers 只负责在官方支持时实现 `cancel(handle)`。不支持时 job-engine 仍完成本地取消，不能承诺远端停止或不计费。

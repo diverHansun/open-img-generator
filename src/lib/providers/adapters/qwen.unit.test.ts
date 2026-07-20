@@ -139,4 +139,25 @@ describe('QwenProvider', () => {
       expect(timedOut.error.retryable).toBe(true);
     }
   });
+
+  it('keeps an unreadable successful submit response ambiguous', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => {
+        throw new Error('truncated response');
+      },
+    } as unknown as Response);
+
+    const result = await provider.submit(makeNormalizedRequest(), 'qwen-image-plus');
+    expect(result.kind).toBe('failed');
+    if (result.kind === 'failed') {
+      expect(result.error).toMatchObject({
+        code: 'UNKNOWN',
+        retryable: true,
+        disposition: 'unknown',
+      });
+    }
+  });
 });

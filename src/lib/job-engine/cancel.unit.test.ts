@@ -201,6 +201,8 @@ describe('durable cancellation', () => {
             code: 'TIMEOUT',
             message: 'temporary outage',
             retryable: true,
+            disposition: 'rejected',
+            retryAfterMs: 5_000,
           },
         })
         .mockResolvedValueOnce({ status: 'cancelled' });
@@ -223,7 +225,7 @@ describe('durable cancellation', () => {
         pollLeaseUntil: null,
         attemptCount: 1,
         retryStartedAt: '2026-07-20T00:00:00.000Z',
-        nextPollAt: '2026-07-20T00:00:00.250Z',
+        nextPollAt: '2026-07-20T00:00:05.000Z',
         error: expect.stringContaining('TIMEOUT'),
       });
 

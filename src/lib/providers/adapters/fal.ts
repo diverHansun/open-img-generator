@@ -7,7 +7,14 @@ import type {
   PollResult,
   JobHandle,
 } from '../types';
-import { getJson, postJson, putJson, ProviderHttpError, createProviderError } from '../http-client';
+import {
+  createProviderError,
+  createProviderErrorFromHttpError,
+  getJson,
+  postJson,
+  ProviderHttpError,
+  putJson,
+} from '../http-client';
 import { falCapabilities } from '../capabilities/fal';
 import { resolveCredential } from '../../user-config';
 
@@ -166,7 +173,7 @@ export class FalProvider implements ImageProvider {
     }
 
     try {
-      await putJson(handle.cancelUrl, this.authHeaders(), 15_000);
+      await putJson(handle.cancelUrl, this.authHeaders());
       return { status: 'cancelled' };
     } catch (err) {
       return { status: 'failed', error: this.mapError(err) };
@@ -179,10 +186,12 @@ export class FalProvider implements ImageProvider {
         typeof err.body === 'object' && err.body && 'detail' in err.body
           ? String((err.body as Record<string, unknown>).detail)
           : err.message;
-      return createProviderError(err.status, message, err.status === 429);
+      return createProviderErrorFromHttpError(err, message);
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return createProviderError(0, err.message, true);
+      return createProviderError(0, err.message, true, {
+        disposition: 'unknown',
+      });
     }
     return createProviderError(0, err instanceof Error ? err.message : String(err), false);
   }

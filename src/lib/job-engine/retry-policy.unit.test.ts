@@ -51,6 +51,28 @@ describe('retry policy', () => {
     )).toEqual({ kind: 'exhausted', reason: 'attempt_limit' });
   });
 
+  it('only permits two safe submit replays and honors a Retry-After floor', () => {
+    expect(decideRetry(
+      'submit',
+      { attemptCount: 0, retryStartedAt: null },
+      { now: () => nowMs, random: () => 0, minimumDelayMs: 5_000 },
+    )).toMatchObject({
+      kind: 'scheduled',
+      attemptCount: 1,
+      delayMs: 5_000,
+    });
+    expect(decideRetry(
+      'submit',
+      { attemptCount: 2, retryStartedAt: '2026-07-20T00:00:00.000Z' },
+      { now: () => nowMs, random: () => 0 },
+    )).toEqual({ kind: 'exhausted', reason: 'attempt_limit' });
+    expect(decideRetry(
+      'submit',
+      { attemptCount: 0, retryStartedAt: null },
+      { now: () => nowMs, random: () => 0, minimumDelayMs: 30_001 },
+    )).toEqual({ kind: 'exhausted', reason: 'elapsed_budget' });
+  });
+
   it('exhausts elapsed windows and corrupt persisted retry state safely', () => {
     expect(decideRetry(
       'poll',

@@ -12,6 +12,7 @@ import {
   postJson,
   ProviderHttpError,
   createProviderError,
+  createProviderErrorFromHttpError,
 } from '../http-client';
 import { qwenCapabilities } from '../capabilities/qwen';
 import { resolveCredential } from '../../user-config';
@@ -206,10 +207,12 @@ export class QwenProvider implements ImageProvider {
           : body && typeof body.error === 'string'
             ? body.error
             : err.message;
-      return createProviderError(err.status, message, err.status === 429 || err.status >= 500);
+      return createProviderErrorFromHttpError(err, message);
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return createProviderError(0, err.message, true);
+      return createProviderError(0, err.message, true, {
+        disposition: 'unknown',
+      });
     }
     return createProviderError(0, err instanceof Error ? err.message : String(err), false);
   }

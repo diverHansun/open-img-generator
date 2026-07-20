@@ -439,7 +439,7 @@ pool = registry.enabledModels
 ## 17. 运行时控制（2026-07-16）
 
 - `POST /api/generations/:id/cancel` 是幂等的本地取消入口。一个短 transaction 批量写取消标记、phase 与 Generation 聚合，并清除此前 poll retry/error；worker 之后才对已有 handle 尽力调用 provider cancel。retryable remote cancel 最多 3 次、总窗口 30 秒，穷尽后仍保持本地 `cancelled` 并写 `RETRY_EXHAUSTED`；Kling 标准图片 API 没有远程取消端点，因此保留 `CANCEL_UNSUPPORTED` 诊断而不伪造成功。
-- `MAX_INFLIGHT_PER_PROVIDER` 限制同一 provider 的 submit/poll/cancel 并发。`MAX_INFLIGHT_GENERATIONS` 的旧内存 admission helper 已不在 durable POST 路径使用；队列上限、deadline 与 admission backpressure 由后续 Batch E 统一收口，不能把当前实现误表述为已提供 429 队列保护。
+- `MAX_INFLIGHT_PER_PROVIDER` 限制同一 provider 的 submit/poll/cancel 并发；`MAX_QUEUED_PER_PROVIDER`（默认 32）限制每个 provider 的**进程内等待队列**，`PROVIDER_QUEUE_TIMEOUT_MS`（默认 30 秒）限制尚未开始的等待。满队、排队超时或排队 abort 都不会发出 Provider HTTP，worker 将其作为 `not_started` 的有界 submit retry；它们不是 POST admission 的同步 429，也不提供跨进程 backpressure。`MAX_INFLIGHT_GENERATIONS` 的旧内存 admission helper 仍不在 durable POST 路径使用。
 - Node worker 默认启动；只有 `JOB_WORKER_ENABLED=false` 才关闭。它在 generation **POST** durable admission 后首次进入 Node 进程时 bootstrap（不依赖 Next instrumentation 的 Edge bundle），generation/session/history 列表 GET 不因读取而启动 worker。`WORKER_INTERVAL_MS`、`WORKER_BATCH_SIZE` 控制扫描，`IMAGE_CLEANUP_INTERVAL_MS` 触发清理。关闭 worker 时仍可由详情 GET 按 due/lease 规则辅助推进。
 - `IMAGE_RETENTION_DAYS=30`（设为 `0` 禁用）删除过期且未收藏图片；文件缺失会被视为已清理。孤儿文件需超过 `IMAGE_ORPHAN_GRACE_MS` 才删除，收藏永不因保留期被删除。
 - `APP_AUTH_TOKEN` 未配置时保持本地开发兼容；配置后 API middleware 要求 Bearer 或 `/api/auth/session` 建立的 HttpOnly cookie，health 与 session bootstrap 路由公开。

@@ -19,6 +19,10 @@ const SAFE_JOB_ERRORS = {
     message: 'Provider rate limit was reached',
     retryable: true,
   },
+  QUEUE_SATURATED: {
+    message: 'Provider queue is busy; the job will be retried',
+    retryable: true,
+  },
   PROVIDER_ERROR: {
     message: 'Provider could not complete the job',
     retryable: true,

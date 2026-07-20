@@ -27,9 +27,10 @@ import { getById } from '../providers';
 import type {
   JobHandle,
   ProviderImageRef,
+  ProviderRequestDisposition,
   SubmitResult,
 } from '../providers';
-import { withProviderLimit } from '../providers/limiter';
+import { ProviderQueueError, withProviderLimit } from '../providers/limiter';
 import * as storage from '../storage';
 import { serializeSafeJobError } from './job-error';
 import { parseRequestSnapshot } from './request-snapshot';
@@ -96,6 +97,8 @@ function safeRecordValue(value: object, key: string): unknown {
 function providerFailureDiagnostic(error: unknown): {
   diagnostic: string;
   retryable: boolean;
+  disposition?: ProviderRequestDisposition;
+  retryAfterMs?: number;
 } {
   if (
     typeof error !== 'object' ||
@@ -113,6 +116,8 @@ function providerFailureDiagnostic(error: unknown): {
     };
   }
   const retryable = safeRecordValue(error, 'retryable') as boolean;
+  const disposition = safeRecordValue(error, 'disposition');
+  const retryAfterMs = safeRecordValue(error, 'retryAfterMs');
   return {
     diagnostic: serializeSafeJobError(
       safeRecordValue(error, 'code'),
@@ -120,6 +125,16 @@ function providerFailureDiagnostic(error: unknown): {
       'PROVIDER_ERROR',
     ),
     retryable,
+    ...(disposition === 'not_started' ||
+    disposition === 'rejected' ||
+    disposition === 'unknown'
+      ? { disposition }
+      : {}),
+    ...(typeof retryAfterMs === 'number' &&
+    Number.isFinite(retryAfterMs) &&
+    retryAfterMs >= 0
+      ? { retryAfterMs: Math.min(60_000, Math.ceil(retryAfterMs)) }
+      : {}),
   };
 }
 
@@ -127,7 +142,15 @@ type NormalizedPollResult =
   | { status: 'pending' }
   | { status: 'running' }
   | { status: 'completed'; images: unknown[] | null }
-  | { status: 'failed'; error: { code: unknown; retryable: unknown } }
+  | {
+      status: 'failed';
+      error: {
+        code: unknown;
+        retryable: unknown;
+        disposition: unknown;
+        retryAfterMs: unknown;
+      };
+    }
   | { status: 'cancelled' };
 
 function normalizeProviderImageRefs(value: unknown): unknown[] | null {
@@ -179,8 +202,15 @@ function normalizePollResult(value: unknown): NormalizedPollResult | null {
               ? {
                   code: safeRecordValue(error, 'code'),
                   retryable: safeRecordValue(error, 'retryable'),
+                  disposition: safeRecordValue(error, 'disposition'),
+                  retryAfterMs: safeRecordValue(error, 'retryAfterMs'),
                 }
-              : { code: undefined, retryable: undefined },
+              : {
+                  code: undefined,
+                  retryable: undefined,
+                  disposition: undefined,
+                  retryAfterMs: undefined,
+                },
         };
       }
     case 'cancelled':
@@ -649,9 +679,8 @@ function finishCancellation(
 }
 
 /**
- * Poll and remote-cancellation are safe to retry because both target a
- * durable provider handle. Dispatch intentionally never enters this path:
- * replaying an ambiguous submit could create a second billable job.
+ * Poll/cancel target durable handles. Submit joins this path only after an
+ * explicit not-started/rejected classification; ambiguous submits never do.
  */
 function scheduleRetryOrFinish(
   job: GenerationJob,
@@ -659,18 +688,27 @@ function scheduleRetryOrFinish(
   error: string,
   client: DbClient,
   expectedPollLeaseUntil: string,
+  minimumDelayMs?: number,
 ): AdvanceOutcome {
   const decision = decideRetry(operation, {
     attemptCount: job.attemptCount,
     retryStartedAt: job.retryStartedAt,
-  });
+  }, { minimumDelayMs });
   const expectedPhase: GenerationJobPhase =
-    operation === 'poll' ? 'polling' : 'cancelling';
+    operation === 'submit'
+      ? 'dispatching'
+      : operation === 'poll'
+        ? 'polling'
+        : 'cancelling';
 
   if (decision.kind === 'exhausted') {
     const exhausted = jobDiagnostic(
       'RETRY_EXHAUSTED',
-      `${operation === 'poll' ? 'Provider poll' : 'Remote cancellation'} retry budget was exhausted (${decision.reason})`,
+      `${operation === 'submit'
+        ? 'Provider submit'
+        : operation === 'poll'
+          ? 'Provider poll'
+          : 'Remote cancellation'} retry budget was exhausted (${decision.reason})`,
       false,
     );
     if (operation === 'cancel') {
@@ -695,7 +733,9 @@ function scheduleRetryOrFinish(
     {
       status:
         operation === 'cancel' ? 'cancelled' : (job.status as GenerationStatus),
-      phase: expectedPhase,
+      // A verified pre-send/rejected submit returns to the durable queue so a
+      // fresh dispatch lease is recorded before its next Provider call.
+      phase: operation === 'submit' ? 'queued' : expectedPhase,
       error,
       pollLeaseUntil: null,
       nextPollAt: decision.nextAttemptAt,
@@ -851,6 +891,37 @@ function applyOutcomeUnknown(job: GenerationJob, client: DbClient): boolean {
   );
   if (changed) syncGenerationStatus(job.generationId, client);
   return changed;
+}
+
+/** Records an ambiguous submit while its dispatch lease is still current. */
+function applyDispatchOutcomeUnknown(
+  job: GenerationJob,
+  client: DbClient,
+  expectedPollLeaseUntil: string,
+): boolean {
+  return updateJobAndGeneration(
+    job.id,
+    job.generationId,
+    {
+      status: 'failed',
+      phase: 'outcome_unknown',
+      error: jobDiagnostic(
+        'PROVIDER_OUTCOME_UNKNOWN',
+        'Provider dispatch outcome is unknown',
+        false,
+      ),
+      pollLeaseUntil: null,
+      nextPollAt: null,
+      resultSnapshot: null,
+      requestSnapshot: null,
+      requestSnapshotVersion: null,
+      ...resetRetryState(),
+      updatedAt: nowIso(),
+    },
+    client,
+    expectedPollLeaseUntil,
+    { expectedPhase: 'dispatching' },
+  );
 }
 
 async function persistProviderImages(
@@ -1064,32 +1135,24 @@ async function dispatchQueuedJob(
         return provider.submit(request, claimed.model);
       },
     );
-  } catch {
-    // Batch D deliberately treats a started request whose result is unknown as
-    // non-replayable. Batch E will classify pre-send vs. remote outcomes.
-    return updateJobAndGeneration(
-      claimed.id,
-      claimed.generationId,
-      {
-        status: 'failed',
-        phase: 'outcome_unknown',
-        error: jobDiagnostic(
-          'PROVIDER_OUTCOME_UNKNOWN',
-          'Provider dispatch outcome is unknown',
-          false,
-        ),
-        pollLeaseUntil: null,
-        nextPollAt: null,
-        resultSnapshot: null,
-        requestSnapshot: null,
-        requestSnapshotVersion: null,
-        ...resetRetryState(),
-        updatedAt: nowIso(),
-      },
-      client,
-      claimedUntil,
-      { expectedPhase: 'dispatching' },
-    )
+  } catch (error) {
+    if (error instanceof ProviderQueueError) {
+      const code =
+        error.code === 'QUEUE_SATURATED'
+          ? 'QUEUE_SATURATED'
+          : 'PROVIDER_TIMEOUT';
+      return scheduleRetryOrFinish(
+        claimed,
+        'submit',
+        jobDiagnostic(code, 'Provider dispatch did not enter the queue', true),
+        client,
+        claimedUntil,
+      );
+    }
+    // Once the task started, a local throw cannot prove that the provider did
+    // not receive the request. Never turn generic throw/rejection into a
+    // replayable submit.
+    return applyDispatchOutcomeUnknown(claimed, client, claimedUntil)
       ? 'unknown'
       : 'skipped';
   }
@@ -1143,6 +1206,25 @@ async function dispatchQueuedJob(
       );
     case 'failed': {
       const failure = providerFailureDiagnostic(result.error);
+      if (
+        failure.retryable &&
+        (failure.disposition === 'not_started' ||
+          failure.disposition === 'rejected')
+      ) {
+        return scheduleRetryOrFinish(
+          claimed,
+          'submit',
+          failure.diagnostic,
+          client,
+          claimedUntil,
+          failure.retryAfterMs,
+        );
+      }
+      if (failure.disposition === 'unknown') {
+        return applyDispatchOutcomeUnknown(claimed, client, claimedUntil)
+          ? 'unknown'
+          : 'skipped';
+      }
       return applyTerminalFailure(
         claimed,
         failure.diagnostic,
@@ -1294,6 +1376,7 @@ async function pollJob(
           failure.diagnostic,
           client,
           claimedUntil,
+          failure.retryAfterMs,
         );
       }
       return applyTerminalFailure(
@@ -1520,6 +1603,7 @@ async function finishCancellingJob(
         failure.diagnostic,
         client,
         claimedUntil,
+        failure.retryAfterMs,
       );
     }
     return finishCancellation(claimed, client, claimedUntil, failure.diagnostic)

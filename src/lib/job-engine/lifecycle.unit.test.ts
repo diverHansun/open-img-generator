@@ -9,7 +9,7 @@ import {
   generationJobs,
   updateGenerationJob,
 } from '../db';
-import type { ImageProvider, PollResult } from '../providers';
+import type { ImageProvider, PollResult, SubmitResult } from '../providers';
 import * as providers from '../providers';
 import * as storage from '../storage';
 import {
@@ -170,6 +170,90 @@ describe('durable lifecycle', () => {
     });
   });
 
+  it('requeues only an explicitly rejected retryable submit and honors Retry-After', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { db } = createTestDb();
+      const submit = vi
+        .fn<() => Promise<SubmitResult>>()
+        .mockResolvedValueOnce({
+          kind: 'failed',
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'retry later',
+            retryable: true,
+            disposition: 'rejected',
+            retryAfterMs: 5_000,
+          },
+        })
+        .mockResolvedValueOnce({
+          kind: 'async',
+          handle: {
+            providerId: 'fal',
+            model: 'fal-ai/flux/schnell',
+            externalId: 'accepted-after-wait',
+            statusUrl: 'https://status.example.test/accepted-after-wait',
+            responseUrl: 'https://response.example.test/accepted-after-wait',
+            cancelUrl: null,
+            submittedAt: now,
+          },
+        });
+      vi.mocked(providers.getById).mockReturnValue(provider({ submit }));
+      const job = seedJob(db);
+
+      await expect(advance(job, db)).resolves.toBe('retried');
+      const scheduled = getGenerationJob(job.id, db)!;
+      expect(scheduled).toMatchObject({
+        phase: 'queued',
+        status: 'pending',
+        attemptCount: 1,
+        nextPollAt: '2026-07-20T00:00:05.000Z',
+        error: expect.stringContaining('RATE_LIMITED'),
+      });
+      expect(submit).toHaveBeenCalledOnce();
+
+      await expect(advance(scheduled, db)).resolves.toBe('skipped');
+      vi.setSystemTime(new Date(scheduled.nextPollAt!));
+      await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('advanced');
+      expect(submit).toHaveBeenCalledTimes(2);
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        phase: 'polling',
+        attemptCount: 0,
+        retryStartedAt: null,
+      });
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not replay a submit whose provider outcome is unknown', async () => {
+    const { db } = createTestDb();
+    const submit = vi.fn<() => Promise<SubmitResult>>().mockResolvedValue({
+      kind: 'failed',
+      error: {
+        code: 'PROVIDER_ERROR',
+        message: 'connection failed after send',
+        retryable: true,
+        disposition: 'unknown',
+      },
+    });
+    vi.mocked(providers.getById).mockReturnValue(provider({ submit }));
+    const job = seedJob(db);
+
+    await expect(advance(job, db)).resolves.toBe('unknown');
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      phase: 'outcome_unknown',
+      status: 'failed',
+      nextPollAt: null,
+      error: expect.stringContaining('PROVIDER_OUTCOME_UNKNOWN'),
+    });
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('skipped');
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
   it('does not regress public running status when a poll returns pending', async () => {
     const { db } = createTestDb();
     const job = seedJob(db, {
@@ -226,6 +310,8 @@ describe('durable lifecycle', () => {
             message:
               'temporary outage prompt=private https://signed.example/image?token=secret',
             retryable: true,
+            disposition: 'rejected',
+            retryAfterMs: 5_000,
           },
         } as PollResult)
         .mockResolvedValueOnce({ status: 'running' } as PollResult);
@@ -239,7 +325,7 @@ describe('durable lifecycle', () => {
         pollLeaseUntil: null,
         attemptCount: 1,
         retryStartedAt: '2026-07-20T00:00:00.000Z',
-        nextPollAt: '2026-07-20T00:00:00.250Z',
+        nextPollAt: '2026-07-20T00:00:05.000Z',
         error: expect.stringContaining('TIMEOUT'),
       });
       expect(scheduled.error).not.toContain('prompt=private');
@@ -258,7 +344,7 @@ describe('durable lifecycle', () => {
         error: null,
         attemptCount: 0,
         retryStartedAt: null,
-        nextPollAt: '2026-07-20T00:00:05.250Z',
+        nextPollAt: '2026-07-20T00:00:10.000Z',
       });
       expect(poll).toHaveBeenCalledTimes(2);
     } finally {

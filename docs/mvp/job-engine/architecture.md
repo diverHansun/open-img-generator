@@ -195,7 +195,7 @@ provider limiter 当前限制同一 provider 的 submit/poll/cancel 并发，不
 - typed `ProviderError.retryable === true` 或 poll/cancel 调用异常才进入 retry；成功 pending/running 与进入 storing 会清空 transient error 和 retry state，任何终态/取消切换都会清空 retry state，而终态会保留对应的**安全**诊断（如 `RETRY_EXHAUSTED`）。
 - Provider adapter 的运行时返回会先安全归一化为 plain snapshot；`null`、未知 status 或 poll 的不可读 completed result 以有界 `PROVIDER_ERROR` retry checkpoint 收口。cancel 的不可读附加字段也不会让 lease 悬挂或复活本地状态。
 - 外部错误的原始 message/body/prompt/URL 不写入 job row；持久化与 DTO 只使用 allowlisted code、固定安全文案和已验证的 retryable 布尔值。
-- D2 不改变 adapter 的 HTTP disposition/Retry-After 判定，也不对 storage/download 重试；这些与 limiter queue deadline 一并属于 Batch E。
+- E1 已为 HTTP error 记录有界 `Retry-After`、`not_started / rejected / unknown` disposition，并为每 provider 的进程内 limiter 增加 32 条默认等待上限、30 秒默认等待 deadline 与 AbortSignal 移除。只有确定未开始或 retryable rejected submit 可以 `dispatching → queued` 有界重排；已开始网络调用仍 unknown。E2/E3 继续负责 bounded JSON、auth redirect/endpoint trust、下载/存储重试与图片安全。
 
 ---
 

@@ -1,4 +1,4 @@
-export type RetryOperation = 'poll' | 'cancel';
+export type RetryOperation = 'submit' | 'poll' | 'cancel';
 
 export type PersistedRetryState = {
   attemptCount: number;
@@ -13,6 +13,14 @@ export type RetryPolicy = {
 };
 
 export const RETRY_POLICIES: Readonly<Record<RetryOperation, RetryPolicy>> = {
+  // `maxAttempts` includes the initial safe-to-replay submit attempt. Only a
+  // verified `not_started`/retryable `rejected` result may enter this policy.
+  submit: {
+    maxAttempts: 3,
+    baseDelayMs: 1_000,
+    capDelayMs: 15_000,
+    elapsedBudgetMs: 30_000,
+  },
   poll: {
     maxAttempts: 6,
     baseDelayMs: 2_000,
@@ -43,6 +51,8 @@ export type RetryDecision =
 export type RetryDecisionOptions = {
   now?: () => number;
   random?: () => number;
+  /** Parsed Retry-After lower bound; still constrained by the elapsed budget. */
+  minimumDelayMs?: number;
 };
 
 const JITTER_FLOOR_MS = 250;
@@ -121,7 +131,14 @@ export function decideRetry(
     policy.capDelayMs,
     policy.baseDelayMs * (2 ** (attemptCount - 1)),
   );
-  const delayMs = fullJitterDelayMs(upperBoundMs, (options.random ?? Math.random)());
+  const jitterDelayMs = fullJitterDelayMs(
+    upperBoundMs,
+    (options.random ?? Math.random)(),
+  );
+  const minimumDelayMs = Number.isFinite(options.minimumDelayMs)
+    ? Math.max(0, Math.ceil(options.minimumDelayMs!))
+    : 0;
+  const delayMs = Math.max(jitterDelayMs, minimumDelayMs);
   const deadlineMs = retryStartedAtMs + policy.elapsedBudgetMs;
   const nextAttemptMs = nowMs + delayMs;
   if (nextAttemptMs > deadlineMs) {
