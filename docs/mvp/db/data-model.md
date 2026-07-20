@@ -235,9 +235,9 @@ adapter 负责 `NormalizedRequest` ↔ 厂商 JSON 的双向翻译；此层结�
 
 ### 3.4 内联图片与 staging 边界
 
-当 Provider 返回 Base64/data URL 时，D1 先在服务端将其解码至私有 `.staging/`，以 25 MiB 硬上限和 Provider metadata content-type 一致性作为准入条件；`result_snapshot` 只写 `staging:<uuid>`。物化正式图片时先复制 staging 内容，直到 lease-guarded DB checkpoint 成功才删除 staging 源，避免“文件移动后、DB 写前”崩溃丢失唯一恢复来源。
+当 Provider 返回 Base64/data URL 时，storage 会分块解码至私有 `.staging/`，以每张 25 MiB 硬上限、Provider metadata content-type 与 PNG/JPEG/WebP magic-byte 一致性作为准入条件；`result_snapshot` 只写 `staging:<uuid>`。物化正式图片时先复制 staging 内容，直到 lease-guarded DB checkpoint 成功才删除 staging 源，避免“文件移动后、DB 写前”崩溃丢失唯一恢复来源。
 
-不保存 raw Base64/data URL、Provider 原始响应或 credential 到 SQLite、日志、错误 DTO 或 UI。D1 **尚不**承诺 magic-byte 校验、远端 URL/redirect/私网限制、流式解码、总预算和完整跨崩溃 reconciliation；这些是 E3 的明确改动面，不能由本表的 staging 字段误解为已完成。
+不保存 raw Base64/data URL、Provider 原始响应或 credential 到 SQLite、日志、错误 DTO 或 UI。远端图片 URL 在下载时逐跳执行 HTTPS/DNS/IP/redirect 检查，响应以 25 MiB 流式临时文件处理；任何失败不会把原 URL 写入 job diagnostic。普通 Provider JSON 仍受 E2 的 2 MiB 上限；当前单图 sync Base64 endpoint 只通过不可调高的 36 MiB 专用 reader 进入，随后立即在 25 MiB decoded 边界内暂存。未来若放开 sync 多图，必须先重新设计 encoded 总预算或采用成熟 streaming parser，不能提升通用上限。
 
 ### 3.5 设计边界：snapshot 不等于历史回放 API
 
@@ -319,6 +319,6 @@ src/lib/db/
 - **project_id / session_id 均为 NOT NULL**（2026-07-16；旧「独立生成」作废）
 - 每个 target 只短期持久化版本化、白名单 `NormalizedRequest` snapshot（可含 width/count/seed 等），不是原始 POST body；job 终态清理 snapshot
 - `phase` / 物理 lease-due 列 / cancellation marker 支持默认 worker 与详情辅助的可恢复推进；公开 API 仍只暴露五种 status
-- inline data 只以 25 MiB 边界后的 opaque staging ref 进入 result snapshot；magic-byte 与远端 URL 安全策略明确留给 E3
+- inline data 只以 25 MiB、MIME/magic-byte 校验后的 opaque staging ref 进入 result snapshot；远端 URL 在 storage 下载边界执行逐跳安全策略
 - 字段与 library / job-engine dfd-interface 一致
 - **迁移实现**: `npm run db:migrate` 将旧 Session 挂到迁移 Project；按用户确认删除无有效 Session 的 generation，再收紧约束并执行外键检查

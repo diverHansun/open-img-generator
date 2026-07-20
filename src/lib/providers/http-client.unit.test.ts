@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_PROVIDER_JSON_RESPONSE_BYTES,
   getJson,
+  MAX_PROVIDER_INLINE_JSON_RESPONSE_BYTES,
   parseRetryAfter,
   postJson,
+  postJsonWithInlineImageResponse,
   ProviderHttpError,
   putJson,
 } from './http-client';
@@ -195,6 +197,43 @@ describe('provider HTTP boundary', () => {
       retryable: true,
     } satisfies Partial<ProviderHttpError>);
 
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('uses a separate fixed ceiling for a one-image Base64 response', async () => {
+    const payload = { data: [{ b64_json: 'a'.repeat(DEFAULT_PROVIDER_JSON_RESPONSE_BYTES) }] };
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+
+    await expect(postJsonWithInlineImageResponse(
+      'https://provider.example/inline-image',
+      {},
+      {},
+    )).resolves.toEqual(payload);
+  });
+
+  it('does not let the dedicated Base64 response exceed its fixed ceiling', async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({
+        'content-length': String(MAX_PROVIDER_INLINE_JSON_RESPONSE_BYTES + 1),
+      }),
+      body: { cancel },
+      json: vi.fn(),
+    } as unknown as Response);
+
+    await expect(postJsonWithInlineImageResponse(
+      'https://provider.example/inline-image',
+      {},
+      {},
+    )).rejects.toMatchObject({
+      disposition: 'unknown',
+      retryable: true,
+    } satisfies Partial<ProviderHttpError>);
     expect(cancel).toHaveBeenCalledOnce();
   });
 

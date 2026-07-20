@@ -46,8 +46,20 @@ export class DatabaseUnavailableError extends AppError {
 export class StorageError extends AppError {
   constructor(
     message: string,
-    public readonly cause?: unknown,
+    options: {
+      cause?: unknown;
+      retryable?: boolean;
+      retryAfterMs?: number;
+    } = {},
   ) {
     super(message);
+    this.cause = options.cause;
+    this.retryable = options.retryable ?? false;
+    this.retryAfterMs = options.retryAfterMs;
   }
+
+  public readonly cause: unknown;
+  /** Only a safe read/download failure may re-enter the storing retry budget. */
+  public readonly retryable: boolean;
+  public readonly retryAfterMs: number | undefined;
 }

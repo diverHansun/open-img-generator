@@ -31,7 +31,10 @@ describe('sync generation end-to-end (zenmux)', () => {
   });
 
   it('durably admits first, then completes through detail-driven lifecycle checkpoints', async () => {
-    const imageBuffer = Buffer.from('fake-image-bytes');
+    const imageBuffer = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ...Buffer.from('fake-image-bytes'),
+    ]);
     server.use(
       http.post('https://zenmux.ai/api/v1/images/generations', () =>
         HttpResponse.json({
@@ -108,7 +111,10 @@ describe('sync generation end-to-end (zenmux)', () => {
   });
 
   it('stages ZenMux b64_json without persisting the data URL in SQLite', async () => {
-    const imageBuffer = Buffer.from('base64-zenmux-image');
+    const imageBuffer = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ...Buffer.from('base64-zenmux-image'),
+    ]);
     server.use(
       http.post('https://zenmux.ai/api/v1/images/generations', () =>
         HttpResponse.json({

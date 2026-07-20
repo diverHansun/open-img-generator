@@ -6,6 +6,9 @@ import type {
 
 export const MAX_PROVIDER_RETRY_AFTER_MS = 60_000;
 export const DEFAULT_PROVIDER_JSON_RESPONSE_BYTES = 2 * 1_024 * 1_024;
+// A 25 MiB binary image expands to about 33.4 MiB in Base64. The current sync
+// contract permits one image, so 36 MiB leaves bounded room for JSON metadata.
+export const MAX_PROVIDER_INLINE_JSON_RESPONSE_BYTES = 36 * 1_024 * 1_024;
 
 export type ProviderHttpRequestOptions = {
   /** A caller-owned cancellation signal. A signal already aborted before fetch is safe to replay. */
@@ -342,6 +345,7 @@ type JsonRequest = {
   options: ProviderHttpRequestOptions;
   defaultTimeoutMs: number;
   allowEmptySuccessBody?: boolean;
+  inlineImageResponse?: boolean;
 };
 
 async function requestJson(request: JsonRequest): Promise<unknown> {
@@ -386,7 +390,9 @@ async function requestJson(request: JsonRequest): Promise<unknown> {
     return readSuccessJson(
       response,
       request.allowEmptySuccessBody ?? false,
-      normalizeResponseLimitBytes(request.options.maxResponseBytes),
+      request.inlineImageResponse
+        ? MAX_PROVIDER_INLINE_JSON_RESPONSE_BYTES
+        : normalizeResponseLimitBytes(request.options.maxResponseBytes),
     );
   } finally {
     requestSignal.cleanup();
@@ -406,6 +412,29 @@ export async function postJson(
     headers: { 'Content-Type': 'application/json', ...headers },
     options: normalizeRequestOptions(optionsOrTimeout, 30_000),
     defaultTimeoutMs: 30_000,
+  });
+}
+
+/**
+ * A narrowly scoped POST helper for the current one-image sync adapters whose
+ * success payload may contain `b64_json`. It uses a fixed 36 MiB ceiling; the
+ * lifecycle immediately stages and validates the decoded image before any
+ * durable snapshot is written.
+ */
+export async function postJsonWithInlineImageResponse(
+  url: string,
+  body: unknown,
+  headers: Record<string, string>,
+  optionsOrTimeout?: number | ProviderHttpRequestOptions,
+): Promise<unknown> {
+  return requestJson({
+    method: 'POST',
+    url,
+    body,
+    headers: { 'Content-Type': 'application/json', ...headers },
+    options: normalizeRequestOptions(optionsOrTimeout, 30_000),
+    defaultTimeoutMs: 30_000,
+    inlineImageResponse: true,
   });
 }
 

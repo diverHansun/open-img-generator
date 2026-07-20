@@ -38,7 +38,7 @@ describe('retry policy', () => {
     expect(fullJitterDelayMs(60_000, -1)).toBe(250);
   });
 
-  it('does not schedule provider call seven for poll or call four for cancel', () => {
+  it('does not schedule calls beyond the poll, cancel, or download budgets', () => {
     expect(decideRetry(
       'poll',
       { attemptCount: 5, retryStartedAt: '2026-07-20T00:00:00.000Z' },
@@ -46,6 +46,11 @@ describe('retry policy', () => {
     )).toEqual({ kind: 'exhausted', reason: 'attempt_limit' });
     expect(decideRetry(
       'cancel',
+      { attemptCount: 2, retryStartedAt: '2026-07-20T00:00:00.000Z' },
+      { now: () => nowMs, random: () => 0 },
+    )).toEqual({ kind: 'exhausted', reason: 'attempt_limit' });
+    expect(decideRetry(
+      'download',
       { attemptCount: 2, retryStartedAt: '2026-07-20T00:00:00.000Z' },
       { now: () => nowMs, random: () => 0 },
     )).toEqual({ kind: 'exhausted', reason: 'attempt_limit' });

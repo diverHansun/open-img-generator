@@ -24,9 +24,10 @@
 ```
 job-engine
   → storage.downloadAndStore(remoteUrl)
-    → HTTP GET remoteUrl → 图片二进制
-    → 生成 storagePath（如 "2026/07/{uuid}.png"）
-    → 写入 LOCAL_STORAGE_DIR/storagePath
+    → 校验 HTTPS、无 userinfo、DNS/IP 非私网（每次 redirect 重新校验）
+    → manual redirect（最多 3 跳）→ 流式读取图片二进制（25 MiB 硬上限）
+    → 校验 PNG/JPEG/WebP 的 Content-Type 与 magic bytes 一致
+    → 先写 LOCAL_STORAGE_DIR/.tmp/{uuid}.tmp，再原子移动为 storagePath
   → 返回 { storagePath, contentType, sizeBytes }
 → job-engine 将 storagePath 写入 db image 记录
 ```
@@ -48,10 +49,12 @@ API 层: GET /api/images/:id
 
 | 属性 | 值 |
 |------|-----|
-| 输入 | 远程 HTTPS URL |
+| 输入 | 远程 HTTPS URL；`data:` 仅限内部 Provider Base64 staging 路径 |
 | 输出 | `{ storagePath: string; contentType: string; sizeBytes: number }` |
-| 失败 | 下载失败抛 StorageError（网络错误、404、超时） |
+| 失败 | 下载/URL/DNS/redirect/大小/类型/signature 任一失败均抛不含原 URL 的 `StorageError` |
 | 超时 | 建议 60s（图片文件可能较大） |
+| 网络安全 | 默认拒绝 `http:`、userinfo、localhost、loopback、RFC1918、link-local、multicast、IPv4-mapped IPv6；只有显式本地开发开关才允许 `http` + private fake provider |
+| 内容边界 | `Content-Length` 预检 + 流式计数均限制为 25 MiB；只接受 PNG/JPEG/WebP，MIME 与 magic bytes 必须匹配 |
 
 ### storage.getReadStream(storagePath)
 
@@ -85,3 +88,5 @@ worker 定期调用 `cleanupStoredImages()`；该调用只删除过期未收藏�
 |------|--------|------|
 | STORAGE_PROVIDER | `local` | v1 仅支持 local |
 | LOCAL_STORAGE_DIR | `./data/images` | 本地存储根目录 |
+| ALLOW_INSECURE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许 `http:`；生产保持关闭 |
+| ALLOW_PRIVATE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许私网/loopback 地址；生产保持关闭 |

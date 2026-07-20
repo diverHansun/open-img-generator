@@ -25,23 +25,27 @@ describe('fan-out generation (Fal + ZenMux)', () => {
   });
 
   it('submits independent jobs, omits ZenMux seed, and aggregates both results', async () => {
-    const imageBuffer = Buffer.from('fanout-image');
+    const imageBuffer = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ...Buffer.from('fanout-image'),
+    ]);
     let falRequest: Record<string, unknown> | undefined;
     let zenmuxRequest: Record<string, unknown> | undefined;
 
-    global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      if (url.includes('/status')) {
+    global.fetch = vi.fn().mockImplementation((url: string | URL, init?: RequestInit) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes('/status')) {
         return Promise.resolve(jsonResponse({ status: 'COMPLETED' }));
       }
-      if (url.includes('/response')) {
+      if (requestUrl.includes('/response')) {
         return Promise.resolve(jsonResponse({
           images: [{ url: 'https://cdn.fal.ai/fal.png', width: 1024, height: 1024, content_type: 'image/png' }],
         }));
       }
-      if (url.includes('cdn.')) {
+      if (requestUrl.includes('cdn.')) {
         return Promise.resolve(binaryResponse(imageBuffer));
       }
-      if (url.includes('queue.fal.run')) {
+      if (requestUrl.includes('queue.fal.run')) {
         falRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
         return Promise.resolve(jsonResponse({
           request_id: 'req-fal',
@@ -118,10 +122,10 @@ function jsonResponse(payload: unknown): Response {
 }
 
 function binaryResponse(buffer: Buffer): Response {
-  return {
-    ok: true,
+  const body = new Uint8Array(buffer.byteLength);
+  body.set(buffer);
+  return new Response(body, {
     status: 200,
-    headers: new Headers({ 'content-type': 'image/png' }),
-    arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
-  } as Response;
+    headers: { 'content-type': 'image/png' },
+  });
 }

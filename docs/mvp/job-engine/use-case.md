@@ -94,4 +94,4 @@
 
 - 每个用例可映射到 goals-duty 的 Duties
 - `202`、idempotency、默认 worker、due/lease、poll/cancel retry 和取消竞态均有可追踪主路径
-- inline staging 只承诺 D1 的 25 MiB/metadata 边界；magic-byte 与远端 URL 安全策略留给 E3
+- inline staging 以 25 MiB、metadata 与 magic-byte 边界落盘；远端 URL 下载由 storage 的 HTTPS/DNS/IP/redirect policy 收口

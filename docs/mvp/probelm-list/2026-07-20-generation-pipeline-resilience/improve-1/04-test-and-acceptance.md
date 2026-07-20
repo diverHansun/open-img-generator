@@ -76,7 +76,7 @@ tests/helpers/fake-provider-server.ts
 | U-14 | remote URL policy | 拒绝非法 scheme、userinfo、loopback/private/link-local/mapped IPv6、过多 redirect | storage policy unit | P-10/E |
 | U-15 | image bytes policy | 空 body、>25MiB、Content-Type/magic 不符、GIF/SVG/HTML 拒绝；仅 PNG/JPEG/WebP 通过 | storage unit | P-09/P-10/E |
 | U-15A | Base64 staging | ZenMux data URL 解码后执行 25 MiB/type/magic 限制，snapshot 仅 opaque staging ref；Doubao 意外 Base64 走同路径；清理覆盖终态/取消/失败 | storage/adapter unit | P-09/P-10/E |
-| U-16 | signed URL redaction | pathname/query/fragment/token 不出现在 exception/structured log，只保留 origin + URL digest | storage/observability unit | P-10/P-13/B/E |
+| U-16 | signed URL redaction | pathname/query/fragment/token 不出现在 exception/structured log；当前 storage 不记录 URL，未来关联日志最多 origin + digest | storage/observability unit | P-10/P-13/B/E |
 | U-17 | submit intent 生命周期 | 同 payload 复用 key；输入变化/过期/project-session 变化生成新 key；成功后清理 | Web Client intent unit | P-03/F |
 | U-18 | ApiClientError | 解析 code/retryable/requestId/Retry-After；兼容旧 string body | `api-client.unit.test.ts` | P-02/B |
 | U-19 | code → i18n/action | 中英文 keys 齐全；unknown 不提供盲目新建动作 | Generate error mapping/i18n tests | P-02/P-11/B/F |
@@ -174,7 +174,7 @@ Batch D 的 lifecycle/retry 测试使用 typed fake Provider，只验证持久�
 | I-34 | signed URL download 500 | API/DB safe error/log 捕获中不含 query token | P-10/P-13 |
 | I-35 | duplicate storage attempt | 一个 row/一个最终文件；竞争 loser 清理 | P-09 |
 | I-36 | 普通 Provider JSON response > 2 MiB | 流式中止、bounded safe error、raw body 不进 DB/log；Base64 endpoint 改由 I-37 的独立 encoded/decoded 总预算验收 | P-10 |
-| I-37 | ZenMux/Doubao Base64 result | data URL 不进 snapshot；staging ref 可跨进程恢复，超限/非法类型被拒且 temp 清理 | P-09/P-10 |
+| I-37 | ZenMux/Doubao Base64 result | 当前单图 endpoint 的 encoded JSON 固定上限 36 MiB、decoded 图片上限 25 MiB；data URL 不进 snapshot；staging ref 可跨进程恢复，超限/非法类型被拒且 temp 清理 | P-09/P-10 |
 | I-38 | Fal/Qwen/Kling dynamic endpoint | Fal 非 exact-origin/redirect 被拒；Qwen/Kling 忽略任意 persisted URL 并从 base + external ID 重建；无跨 origin auth | P-10 |
 
 ## 6. Backend E2E

@@ -1,4 +1,4 @@
-export type RetryOperation = 'submit' | 'poll' | 'cancel';
+export type RetryOperation = 'submit' | 'poll' | 'cancel' | 'download';
 
 export type PersistedRetryState = {
   attemptCount: number;
@@ -32,6 +32,12 @@ export const RETRY_POLICIES: Readonly<Record<RetryOperation, RetryPolicy>> = {
     baseDelayMs: 1_000,
     capDelayMs: 10_000,
     elapsedBudgetMs: 30_000,
+  },
+  download: {
+    maxAttempts: 3,
+    baseDelayMs: 500,
+    capDelayMs: 5_000,
+    elapsedBudgetMs: 60_000,
   },
 };
 

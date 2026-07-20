@@ -12,6 +12,7 @@ import {
 import type { ImageProvider, PollResult, SubmitResult } from '../providers';
 import * as providers from '../providers';
 import * as storage from '../storage';
+import { StorageError } from '../errors';
 import {
   createRequestSnapshot,
   REQUEST_SNAPSHOT_VERSION,
@@ -595,6 +596,56 @@ describe('durable lifecycle', () => {
       images: expect.arrayContaining([expect.anything(), expect.anything()]),
     });
     expect(storage.downloadAndStore).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a transient image download and resumes the same storing checkpoint', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(now));
+    try {
+      const { db } = createTestDb();
+      const job = seedJob(db, {
+        phase: 'storing',
+        status: 'running',
+        resultSnapshot: JSON.stringify([{
+          url: 'https://cdn.example.test/retry.png',
+          width: 1,
+          height: 1,
+          contentType: 'image/png',
+          index: 0,
+        }]),
+      });
+      vi.mocked(storage.downloadAndStore)
+        .mockRejectedValueOnce(new StorageError('Remote image temporarily unavailable', {
+          retryable: true,
+          retryAfterMs: 1_000,
+        }))
+        .mockResolvedValueOnce({
+          storagePath: '2026/07/retry.png',
+          contentType: 'image/png',
+          sizeBytes: 1,
+        });
+
+      await expect(advance(job, db)).resolves.toBe('retried');
+      const waiting = getGenerationJob(job.id, db)!;
+      expect(waiting).toMatchObject({
+        status: 'running',
+        phase: 'storing',
+        attemptCount: 1,
+        retryStartedAt: now,
+        pollLeaseUntil: null,
+      });
+      const retryAt = Date.parse(waiting.nextPollAt!);
+      vi.setSystemTime(new Date(retryAt));
+
+      await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('completed');
+      expect(getGenerationWithJobsAndImages('gen-1', db)).toMatchObject({
+        status: 'completed',
+        images: [expect.objectContaining({ storagePath: '2026/07/retry.png' })],
+      });
+      expect(storage.downloadAndStore).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('continues polling legacy handle rows that do not have a request snapshot', async () => {

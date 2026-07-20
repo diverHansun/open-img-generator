@@ -59,12 +59,12 @@
 4. **不定义 db schema**: schema 定义是 db 模块的职责。job-engine 通过 db 查询/写入函数操作数据。
 5. **不处理 HTTP 路由**: API 层负责解析 HTTP 请求和返回 JSON。job-engine 不感知 Request/Response 对象。
 6. **不计算「前端交集」**: 多模型宽高比交集是 web-ui 的职责。服务端只校验「每个 target 是否支持提交的 aspectRatio」。
-7. **不重放不确定的 submit，也不把所有失败都重试**: E1 仅在 limiter 明确未开始，或 adapter 标记为 `not_started`/retryable `rejected` 时，把 `dispatching` 安全回写为 `queued`（submit 总计最多 3 次、30 秒）。已进入 fetch 后的 timeout/reset/5xx 为 `unknown`，以及租约过期都进入 `outcome_unknown`，绝不盲重投。已有 handle 的 typed-retryable poll/cancel 仍分别最多 6 次/10 分钟和 3 次/30 秒；response-size、redirect、Provider URL 与 storage 规则继续由 E2/E3 收口。
+7. **不重放不确定的 submit，也不把所有失败都重试**: E1 仅在 limiter 明确未开始，或 adapter 标记为 `not_started`/retryable `rejected` 时，把 `dispatching` 安全回写为 `queued`（submit 总计最多 3 次、30 秒）。已进入 fetch 后的 timeout/reset/5xx 为 `unknown`，以及租约过期都进入 `outcome_unknown`，绝不盲重投。已有 handle 的 typed-retryable poll/cancel 仍分别最多 6 次/10 分钟和 3 次/30 秒；E2/E3 分别在 Provider HTTP 与 storage 边界收口 response-size、redirect、URL、MIME/magic-byte 与 staging 规则。
 8. **不做跨进程限流/熔断或外部队列**: 当前依赖单进程 worker、SQLite lease 和 per-provider semaphore；多实例共享限流仍不在 MVP 范围。
 9. **不优化 prompt**: prompt 预处理是 prompt 模块的职责。
 10. **不定义厂商取消协议**: 取消入口与本地状态机归 job-engine；providers 只负责在官方支持时实现 `cancel(handle)`。不支持时 job-engine 仍完成本地取消，不能承诺远端停止或不计费。
 11. **不持久化原始 API body 或 Provider 原始响应**: 为恢复派发，job-engine 仅短期持久化每 target 的已校验、版本化 `NormalizedRequest` snapshot 与转存中的 result snapshot；snapshot 不暴露给 API/UI，并在终态清理。不会存 credential、任意对象或 raw Base64/data URL。
-12. **不在 D1 声称完成远端图片安全校验**: inline staging 已具备 25 MiB 边界和 Provider metadata 一致性；magic-byte 校验、远端 URL/redirect/私网防护、流式解码与总预算属于 E3。
+12. **不绕过 storage 的远端图片安全校验**: inline staging 已具备分块解码、25 MiB、Provider metadata 与 magic-byte 一致性；远端 URL/redirect/私网防护和流式写入统一归 storage，job-engine 不复制或放宽这些规则。
 13. **不渲染 UI、不声明前端控件显隐**: capabilities 驱动的参数面板属于 web-ui。
 14. **不管理 Project / History 列表 / Gallery 收藏 / 模型启用偏好**: 归属 library。
 15. **不创建 Session**: Session 由 library/API 先创建；job-engine 只引用。

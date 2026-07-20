@@ -8,7 +8,7 @@ import type {
 import {
   createProviderError,
   createProviderErrorFromHttpError,
-  postJson,
+  postJsonWithInlineImageResponse,
   ProviderHttpError,
 } from '../http-client';
 import { doubaoCapabilities } from '../capabilities/doubao';
@@ -133,7 +133,11 @@ export class DoubaoProvider implements ImageProvider {
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
     try {
-      const data = await postJson(apiUrl(), buildRequestBody(req, model), this.authHeaders());
+      const data = await postJsonWithInlineImageResponse(
+        apiUrl(),
+        buildRequestBody(req, model),
+        this.authHeaders(),
+      );
       const images = parseImages(data, resolveSize(req));
       if (images.length === 0) {
         return {

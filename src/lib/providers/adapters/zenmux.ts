@@ -8,7 +8,7 @@ import type {
 import {
   createProviderError,
   createProviderErrorFromHttpError,
-  postJson,
+  postJsonWithInlineImageResponse,
   ProviderHttpError,
 } from '../http-client';
 import { zenmuxCapabilities } from '../capabilities/zenmux';
@@ -108,7 +108,11 @@ export class ZenmuxProvider implements ImageProvider {
     try {
       const body = buildRequestBody(req);
       body.model = model;
-      const data = await postJson(url, body, this.authHeaders());
+      const data = await postJsonWithInlineImageResponse(
+        url,
+        body,
+        this.authHeaders(),
+      );
       const images = parseImages(data);
       if (images.length === 0) {
         return {

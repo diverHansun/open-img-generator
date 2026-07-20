@@ -33,7 +33,7 @@
 - providers 内 aspectRatio→厂商 size 映射表（归属 providers test）。
 - web-ui 交集算法（归属 web-ui test）。
 - 真实厂商 E2E（手工 / 可选集成）。
-- E3 的 magic-byte、远端 URL/redirect/私网防护、流式解码和跨进程 worker 协调（D1 文档只能明确边界，不以当前测试替代）。
+- E3 已覆盖 magic-byte、远端 URL/redirect/私网防护与分块 Base64 staging；跨进程 worker 协调仍由 integration/E2E 继续验收。
 
 ---
 

@@ -366,7 +366,7 @@ export async function storeImages(
       const error =
         err instanceof StorageError
           ? err
-          : new StorageError('Generated image could not be stored', err);
+          : new StorageError('Generated image could not be stored', { cause: err });
       return { kind: 'failed', error };
     }
     const inserted = createImageIfAbsent(
@@ -699,7 +699,9 @@ function scheduleRetryOrFinish(
       ? 'dispatching'
       : operation === 'poll'
         ? 'polling'
-        : 'cancelling';
+        : operation === 'cancel'
+          ? 'cancelling'
+          : 'storing';
 
   if (decision.kind === 'exhausted') {
     const exhausted = jobDiagnostic(
@@ -708,7 +710,9 @@ function scheduleRetryOrFinish(
         ? 'Provider submit'
         : operation === 'poll'
           ? 'Provider poll'
-          : 'Remote cancellation'} retry budget was exhausted (${decision.reason})`,
+          : operation === 'cancel'
+            ? 'Remote cancellation'
+            : 'Image download'} retry budget was exhausted (${decision.reason})`,
       false,
     );
     if (operation === 'cancel') {
@@ -1469,7 +1473,17 @@ async function storeNextImage(
   let stored: Awaited<ReturnType<typeof storage.downloadAndStore>>;
   try {
     stored = await storage.downloadAndStore(next.url);
-  } catch {
+  } catch (err) {
+    if (err instanceof StorageError && err.retryable) {
+      return scheduleRetryOrFinish(
+        claimed,
+        'download',
+        jobDiagnostic('STORAGE_ERROR', 'Image download temporarily failed', true),
+        client,
+        claimedUntil,
+        err.retryAfterMs,
+      );
+    }
     return applyTerminalFailure(
       claimed,
       jobDiagnostic('STORAGE_ERROR', 'Image storage failed', false),

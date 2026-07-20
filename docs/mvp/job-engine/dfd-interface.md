@@ -163,7 +163,7 @@ Session / Project CRUD 由 **library + API** 负责，不经 job-engine。Sessio
 - 每张图片先物化文件，再以 lease-guarded 短事务插入 image row、更新 phase/status 与 generation 聚合；失败或取消失去 checkpoint 时删除本次尝试文件
 - 单 job 内任一张失败 → 该 job failed；已成功 images 保留
 - **不**将其他 job 标失败
-- data URL/Base64 先经 25 MiB 上限和 Provider metadata content-type 一致性检查写入私有 staging；result snapshot 仅保存 `staging:<uuid>`，不保存 raw data URL/Base64。magic-byte 校验、远端 URL/redirect/私网策略、流式解码和完整 staging reconciliation 是 E3 范围。
+- data URL/Base64 先分块写入私有 staging；每张受 25 MiB、Provider metadata content-type 与 PNG/JPEG/WebP magic-byte 一致性检查，result snapshot 仅保存 `staging:<uuid>`，不保存 raw data URL/Base64。远端 URL 下载也在 storage 内以逐跳 HTTPS/DNS/IP/redirect 与 25 MiB 流式校验收口；`.tmp`/staging 残留由 orphan grace cleanup 回收。
 
 ### 2.8 Provider 列表
 

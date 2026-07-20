@@ -79,21 +79,27 @@ describe('quickstart vertical slice', () => {
     expect(session.title).toBe('demo');
 
     // 4. Sync generation (zenmux)
-    const imageBuffer = Buffer.from('quickstart-sync-image');
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({
-        created: 123,
-        data: [{ url: 'https://cdn.zenmux.ai/cat.png' }],
-      }),
-      arrayBuffer: async () =>
-        imageBuffer.buffer.slice(
-          imageBuffer.byteOffset,
-          imageBuffer.byteOffset + imageBuffer.byteLength,
-        ),
-    } as unknown as Response);
+    const imageBuffer = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ...Buffer.from('quickstart-sync-image'),
+    ]);
+    global.fetch = vi.fn().mockImplementation((url: string | URL) => {
+      if (String(url).includes('cdn.zenmux.ai')) {
+        return Promise.resolve(new Response(imageBuffer, {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }));
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          created: 123,
+          data: [{ url: 'https://cdn.zenmux.ai/cat.png' }],
+        }),
+      } as Response);
+    });
 
     const syncResponse = await postGeneration(
       new Request('http://localhost:3000/api/generations', {
@@ -125,9 +131,13 @@ describe('quickstart vertical slice', () => {
 
     // 5. Async generation with sessionId (fal)
     let statusCalled = false;
-    const falImageBuffer = Buffer.from('quickstart-async-image');
-    global.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes('/status')) {
+    const falImageBuffer = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ...Buffer.from('quickstart-async-image'),
+    ]);
+    global.fetch = vi.fn().mockImplementation((url: string | URL) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes('/status')) {
         statusCalled = true;
         return Promise.resolve({
           ok: true,
@@ -136,7 +146,7 @@ describe('quickstart vertical slice', () => {
           json: async () => ({ status: 'COMPLETED' }),
         } as Response);
       }
-      if (url.includes('/response')) {
+      if (requestUrl.includes('/response')) {
         return Promise.resolve({
           ok: true,
           status: 200,
@@ -153,17 +163,11 @@ describe('quickstart vertical slice', () => {
           }),
         } as Response);
       }
-      if (url.includes('cdn.fal.ai')) {
-        return Promise.resolve({
-          ok: true,
+      if (requestUrl.includes('cdn.fal.ai')) {
+        return Promise.resolve(new Response(falImageBuffer, {
           status: 200,
-          headers: new Headers({ 'content-type': 'image/png' }),
-          arrayBuffer: async () =>
-            falImageBuffer.buffer.slice(
-              falImageBuffer.byteOffset,
-              falImageBuffer.byteOffset + falImageBuffer.byteLength,
-            ),
-        } as Response);
+          headers: { 'content-type': 'image/png' },
+        }));
       }
       return Promise.resolve({
         ok: true,

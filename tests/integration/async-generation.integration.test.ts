@@ -26,10 +26,14 @@ describe('async generation end-to-end (fal)', () => {
   it('creates a durable pending generation and completes across dispatch, poll, and storage', async () => {
     let submitCall = false;
     let statusCall = false;
-    const imageBuffer = Buffer.from('fake-fal-image');
+    const imageBuffer = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ...Buffer.from('fake-fal-image'),
+    ]);
 
-    global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      if (typeof url === 'string' && url.includes('/status') && !statusCall) {
+    global.fetch = vi.fn().mockImplementation((url: string | URL, init?: RequestInit) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes('/status') && !statusCall) {
         statusCall = true;
         return Promise.resolve({
           ok: true,
@@ -39,7 +43,7 @@ describe('async generation end-to-end (fal)', () => {
           arrayBuffer: async () => new ArrayBuffer(0),
         } as Response);
       }
-      if (typeof url === 'string' && url.includes('/response')) {
+      if (requestUrl.includes('/response')) {
         return Promise.resolve({
           ok: true,
           status: 200,
@@ -49,6 +53,12 @@ describe('async generation end-to-end (fal)', () => {
           }),
           arrayBuffer: async () => imageBuffer.buffer.slice(imageBuffer.byteOffset, imageBuffer.byteOffset + imageBuffer.byteLength),
         } as Response);
+      }
+      if (requestUrl === 'https://cdn.fal.ai/img1.png') {
+        return Promise.resolve(new Response(imageBuffer, {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }));
       }
       // submit
       submitCall = true;

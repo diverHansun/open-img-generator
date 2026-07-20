@@ -52,8 +52,8 @@ sync Provider 与 async Provider 共享 admission → dispatch → storing 生�
 | 约束 | 值 |
 |------|-----|
 | MVP sync target count 上限 | **1**（该 target 的 count>1 → 400） |
-| provider submit 超时 | 当前 adapter 语义不变；统一 deadline/retry 分类由 Batch E 收口 |
-| 单张 storage 下载超时 | 当前 storage 默认 60s；完整流式/remote URL 安全由 Batch E 收口 |
+| provider submit 超时 | Provider HTTP client 默认 30s，并遵守 caller deadline；重试按 E1 disposition policy |
+| 单张 storage 下载超时 | 60s；HTTPS/DNS/IP/manual redirect、25 MiB 流式、MIME/magic-byte 由 storage 强制 |
 | 多 sync target | 各 job 独立排队/claim；POST 始终只等待 admission transaction |
 | async target | 不受 sync count=1 限制，仍受 capabilities.maxCount |
 
@@ -129,7 +129,7 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
 
 ## 9. storage 安全
 
-`getReadStream(storagePath)` 必须 canonicalize 并断言落在 `LOCAL_STORAGE_DIR` 下；不存在则 NotFoundError。
+`getReadStream(storagePath)` 必须 canonicalize 并断言落在 `LOCAL_STORAGE_DIR` 下；不存在则 NotFoundError。`downloadAndStore()` 默认仅接受公网 HTTPS，逐跳拒绝 private/loopback redirect，以 25 MiB 流式临时文件下载，并要求 PNG/JPEG/WebP 的 MIME 和 magic bytes 匹配；错误不包含带签名 URL。
 
 ---
 
@@ -140,7 +140,7 @@ HTTP dispatch（provider.submit）在创建事务**提交之后**。
 | ValidationError（含非法 targets / 不支持的 aspectRatio） | 400 | `{ "error": "..." }` |
 | NotFoundError | 404 | `{ "error": "Not found" }` |
 | 单/多 job provider 失败（已落库） | 201 | `{ "id", "status": <聚合>, "links" }` |
-| StorageError（某 job 转存） | GET 200 | 该 job failed；聚合见 §8 |
+| StorageError（某 job 转存） | GET 200 | URL/MIME/magic/本地写入错误终态失败；网络、超时、429/5xx、短读按 `download` 策略（最多 3 次调用、60s 预算）重试，穷尽后 failed；聚合见 §8 |
 
 ---
 
