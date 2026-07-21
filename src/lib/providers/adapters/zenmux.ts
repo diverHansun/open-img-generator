@@ -25,7 +25,13 @@ import {
   readProviderRequestIdFromResponse,
 } from '../error-diagnostics';
 
-function resolveSize(req: NormalizedRequest, profile: ZenmuxImageProfile): string {
+type OpenAiImageProfile = Extract<ZenmuxImageProfile, { kind: 'openai-images' }>;
+type GeminiImageProfile = Extract<
+  ZenmuxImageProfile,
+  { kind: 'gemini-generate-content' }
+>;
+
+function resolveSize(req: NormalizedRequest, profile: OpenAiImageProfile): string {
   if (req.width && req.height) {
     return `${req.width}x${req.height}`;
   }
@@ -40,7 +46,7 @@ function resolveSize(req: NormalizedRequest, profile: ZenmuxImageProfile): strin
 function buildRequestBody(
   req: NormalizedRequest,
   model: string,
-  profile: ZenmuxImageProfile,
+  profile: OpenAiImageProfile,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     prompt: req.prompt,
@@ -56,6 +62,32 @@ function buildRequestBody(
   }
 
   return body;
+}
+
+function geminiEndpoint(profile: GeminiImageProfile): string {
+  return `https://zenmux.ai/api/vertex-ai/v1/publishers/${profile.publisher}/models/${profile.apiModel}:generateContent`;
+}
+
+function buildGeminiRequestBody(
+  req: NormalizedRequest,
+  profile: GeminiImageProfile,
+): Record<string, unknown> {
+  const requestedSize = req.providerOptions?.imageSize;
+  const imageSize =
+    typeof requestedSize === 'string' &&
+    profile.supportedImageSizes.includes(requestedSize)
+      ? requestedSize
+      : profile.defaultImageSize;
+  return {
+    contents: [{ role: 'user', parts: [{ text: req.prompt }] }],
+    generationConfig: {
+      responseModalities: ['TEXT', 'IMAGE'],
+      imageConfig: {
+        aspectRatio: req.aspectRatio ?? profile.defaultAspectRatio,
+        imageSize,
+      },
+    },
+  };
 }
 
 function parseImages(payload: unknown): ProviderImageRef[] {
@@ -95,6 +127,42 @@ function parseImages(payload: unknown): ProviderImageRef[] {
   });
 }
 
+function parseGeminiImages(payload: unknown): ProviderImageRef[] {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
+  const candidates = (payload as Record<string, unknown>).candidates;
+  if (!Array.isArray(candidates)) return [];
+  const images: ProviderImageRef[] = [];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+    const content = (candidate as Record<string, unknown>).content;
+    if (!content || typeof content !== 'object' || Array.isArray(content)) continue;
+    const parts = (content as Record<string, unknown>).parts;
+    if (!Array.isArray(parts)) continue;
+    for (const part of parts) {
+      if (!part || typeof part !== 'object' || Array.isArray(part)) continue;
+      const record = part as Record<string, unknown>;
+      const inline = record.inlineData ?? record.inline_data;
+      if (!inline || typeof inline !== 'object' || Array.isArray(inline)) continue;
+      const inlineRecord = inline as Record<string, unknown>;
+      const data = inlineRecord.data;
+      if (typeof data !== 'string' || data.length === 0) continue;
+      const mimeType = inlineRecord.mimeType ?? inlineRecord.mime_type;
+      const contentType =
+        typeof mimeType === 'string' && mimeType.startsWith('image/')
+          ? mimeType
+          : 'image/png';
+      images.push({
+        url: `data:${contentType};base64,${data}`,
+        width: null,
+        height: null,
+        contentType,
+        index: images.length,
+      });
+    }
+  }
+  return images;
+}
+
 export class ZenmuxProvider implements ImageProvider {
   id = 'zenmux' as const;
   displayName = 'ZenMux';
@@ -113,16 +181,21 @@ export class ZenmuxProvider implements ImageProvider {
     const spec = zenmuxModelSpecs.get(model);
     if (!spec) return unsupportedModelSubmitResult(this.id);
 
-    const url = 'https://zenmux.ai/api/v1/images/generations';
     try {
-      const body = buildRequestBody(req, model, spec.profile);
+      const isGemini = spec.profile.kind === 'gemini-generate-content';
+      const url = isGemini
+        ? geminiEndpoint(spec.profile)
+        : 'https://zenmux.ai/api/v1/images/generations';
+      const body = isGemini
+        ? buildGeminiRequestBody(req, spec.profile)
+        : buildRequestBody(req, model, spec.profile);
       const data = await postJsonWithInlineImageResponse(
         url,
         body,
         this.authHeaders(),
         { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
       );
-      const images = parseImages(data);
+      const images = isGemini ? parseGeminiImages(data) : parseImages(data);
       if (images.length === 0) {
         return {
           kind: 'failed',

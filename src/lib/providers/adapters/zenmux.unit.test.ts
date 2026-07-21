@@ -180,4 +180,67 @@ describe('ZenmuxProvider', () => {
     });
     expect(global.fetch).not.toHaveBeenCalled();
   });
+
+  it('uses the Vertex generateContent dialect for Nano Banana models', async () => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        candidates: [{
+          content: {
+            parts: [
+              { text: 'generated' },
+              { inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } },
+            ],
+          },
+        }],
+      }),
+    });
+
+    const result = await provider.submit(
+      makeNormalizedRequest({
+        aspectRatio: '16:9',
+        providerOptions: { imageSize: '2K', arbitrary: 'ignored' },
+      }),
+      'google/gemini-3.1-flash-image',
+    );
+
+    expect(result).toMatchObject({
+      kind: 'sync',
+      images: [{ url: 'data:image/png;base64,aGVsbG8=', index: 0 }],
+    });
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(url).toBe(
+      'https://zenmux.ai/api/vertex-ai/v1/publishers/google/models/gemini-3.1-flash-image:generateContent',
+    );
+    expect(JSON.parse(String(init?.body))).toEqual({
+      contents: [{ role: 'user', parts: [{ text: 'A cat wearing a space helmet' }] }],
+      generationConfig: {
+        responseModalities: ['TEXT', 'IMAGE'],
+        imageConfig: { aspectRatio: '16:9', imageSize: '2K' },
+      },
+    });
+  });
+
+  it('defaults unsupported Gemini image sizes without forwarding arbitrary options', async () => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        candidates: [{ content: { parts: [{ inline_data: { mime_type: 'image/webp', data: 'aA==' } }] } }],
+      }),
+    });
+
+    await provider.submit(
+      makeNormalizedRequest({ providerOptions: { imageSize: '8K', quality: 'high' } }),
+      'google/gemini-2.5-flash-image',
+    );
+
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body));
+    expect(body.generationConfig.imageConfig.imageSize).toBe('1K');
+    expect(JSON.stringify(body)).not.toContain('quality');
+  });
 });
