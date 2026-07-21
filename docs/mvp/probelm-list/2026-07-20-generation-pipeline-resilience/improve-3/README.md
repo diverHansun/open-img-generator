@@ -8,6 +8,8 @@
 >
 > 前置批次：[improve-2](../improve-2/README.md)
 
+> 后续纠偏：[improve-4](../improve-4/README.md) supersede “`storage_missing` 删除 favorite”及“cleanup 默认独占 storage root”两项条款；其余本批契约继续有效。
+
 ## 目标
 
 面向本机单实例、单用户产品，在不引入通用代理发现/路由系统的前提下：

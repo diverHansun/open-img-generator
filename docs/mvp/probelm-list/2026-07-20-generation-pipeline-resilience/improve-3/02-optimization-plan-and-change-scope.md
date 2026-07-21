@@ -48,7 +48,7 @@ Provider result
 | `available` | 非 NULL | NULL | NULL | 可有可无 |
 | `retention_expired` | NULL | 非 NULL | `retention_expired` | 不得存在 |
 | `user_deleted` | NULL | 非 NULL | `user_deleted` | 不得存在 |
-| `storage_missing` | NULL | 非 NULL | `storage_missing` | 若读取时发现 favorite 文件缺失，删除坏 favorite 后转墓碑并记录安全诊断 |
+| `storage_missing` | NULL | 非 NULL | `storage_missing` | 历史条款：原计划删除坏 favorite；已由 [improve-4](../improve-4/README.md) supersede 为“转墓碑但保留 favorite，并在 Gallery 显示缺失收藏” |
 
 迁移和写路径必须拒绝半状态：只有 path 或只有 reason/removed_at。可以由 SQLite `CHECK` 约束表达：available 三字段组合，或 removed 三字段组合；`removal_reason` 只允许上述三值。
 
@@ -159,7 +159,7 @@ images(
   - available 且文件存在：`200` + 内容流；
   - tombstone：structured `410`，code 为 `IMAGE_EXPIRED`、`IMAGE_DELETED` 或 `IMAGE_MISSING`；
   - 完全不存在的 ID：`404`；
-  - DB available 但文件不存在：原子标记 `storage_missing`（favorite 需要同步移除），返回 `410 IMAGE_MISSING`，记录安全诊断，不泄漏绝对路径。
+  - DB available 但文件不存在：原子标记 `storage_missing`，返回 `410 IMAGE_MISSING`，记录安全诊断，不泄漏绝对路径；“同步移除 favorite”的旧要求已由 [improve-4](../improve-4/README.md) 废止。
 - API error handler 增加专用 Gone/availability error，不用通用 404/500 淹没根因。
 
 **下载**：
@@ -276,7 +276,7 @@ type ImageView = {
 | cleanup 与 favorite 并发 | SQL 条件更新要求不存在 favorite；事务 winner 决定结果 | cleanup 先胜则收藏收到 Gone/Conflict；不复活已清理文件 |
 | DELETE 与 favorite 并发 | 同一短事务删除 favorite + 标 user_deleted | 删除是用户显式 destructive 意图，优先于收藏 |
 | tombstone 成功、文件删除失败 | API 已不再暴露 path；记录 failure | orphan cleanup 超过 grace 后重试回收 |
-| 文件先被外部删除 | 读取时标 storage_missing，清除坏 favorite | 历史保留，用户需重新生成/使用导出副本 |
+| 文件先被外部删除 | 读取时标 storage_missing；“清除 favorite”的旧要求已由 [improve-4](../improve-4/README.md) supersede 为保留 favorite 并显示 Gallery 墓碑 | 历史与收藏意图保留；字节依赖本地备份、既有 Provider result 或重新生成 |
 | DB migration 失败 | pre-migration backup + immediate transaction + FK/schema check | DB 保持 v3；修复后重跑，不手工半迁移 |
 | Base64 超限/非法 MIME | 现有 36/25 MiB + MIME/magic 拒绝 | Job STORAGE_ERROR，安全诊断，不回退 URL 重提生成请求 |
 | 下载中同时被删除 | 打开文件/状态检查竞态由读取实现收口；不得返回部分成功后改 JSON | 可在成功打开 fd 后完成该次下载，或在开流前返回 410；测试冻结选定语义 |

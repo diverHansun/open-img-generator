@@ -24,6 +24,7 @@
 ```
 job-engine
   → storage.downloadAndStore(remoteUrl)
+    → 校验 storage ownership marker 与当前 DATABASE_URL 配对
     → 校验 HTTPS、无 userinfo、DNS/IP 非私网（每次 redirect 重新校验；仅精确白名单 host 可使用全为 198.18/15 的透明代理映射）
     → manual redirect（最多 3 跳）→ 流式读取图片二进制（25 MiB 硬上限）
     → 校验 PNG/JPEG/WebP 的 Content-Type 与 magic bytes 一致
@@ -82,7 +83,7 @@ MVP **不实现** `getPublicUrl`；图片访问统一走 API 二进制响应。
 
 ## 5. 生命周期清理
 
-worker 定期调用 `cleanupStoredImages()`；该调用把过期未收藏图片改为墓碑、删除图片字节并清理超过宽限期的孤儿文件，不删除生成历史。`GET /api/images/:id/download` 只导出副本且不续期；`DELETE /api/images/:id` 幂等写 `user_deleted` 墓碑。支持 `dryRun` 供维护检查。
+worker 定期调用 `cleanupStoredImages()`；该调用先校验 DB/root ownership 并获取本地清理锁，再把过期未收藏图片改为墓碑、删除图片字节并清理超过宽限期且未被 image/video/staging 引用的孤儿文件，不删除生成历史。`GET /api/images/:id/download` 只导出副本且不续期；`DELETE /api/images/:id` 幂等写 `user_deleted` 墓碑。支持 `dryRun` 供维护检查。
 
 ## 环境配置
 
@@ -90,6 +91,8 @@ worker 定期调用 `cleanupStoredImages()`；该调用把过期未收藏图片�
 |------|--------|------|
 | STORAGE_PROVIDER | `local` | v1 仅支持 local |
 | LOCAL_STORAGE_DIR | `./data/images` | 本地存储根目录 |
+| APP_LOG_DIR | `./data/logs` | 脱敏 JSONL 审计日志目录；5 MiB 当前文件 + 3 份轮转 |
+| APP_FILE_LOG_ENABLED | `1` | 设为 `0` 时关闭文件日志，stderr 仍保留 |
 | ALLOW_INSECURE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许 `http:`；生产保持关闭 |
 | ALLOW_PRIVATE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许私网/loopback 地址；生产保持关闭 |
 | TRUSTED_PROXY_IMAGE_HOSTS | 空 | 透明代理把已验证外部 HTTPS CDN 映射为 `198.18.0.0/15` 时的逗号分隔精确 host 列表；不是通配符或私网 bypass |

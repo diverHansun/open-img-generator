@@ -4,10 +4,12 @@
 
 `cleanupStoredImages({ db, retentionDays, orphanGraceMs, dryRun })` 由可选 Node worker 定期调用，也可由维护脚本显式调用：
 
-1. 查询 cutoff 之前、仍有 `storage_path` 且未收藏的 image；用 `NOT EXISTS favorite` 保护的原子更新把它改为 `retention_expired` 墓碑并清空 path。
-2. 墓碑提交后删除文件；文件删除失败则保留 failure 计数，下一轮孤儿扫描/维护任务继续修复。Generation/Job/Prompt/Provider error 与 image 历史身份不删除。
-3. 扫描 `LOCAL_STORAGE_DIR`，未被任何 image 行引用且超过 `orphanGraceMs` 的文件视为孤儿并删除。
-4. 收藏关系参与查询和删除 CAS，清理不会删除收藏图片。
+1. 校验 `LOCAL_STORAGE_DIR/.open-image-storage.json` 中的 DB path hash；不匹配或 marker 非法时 fail closed，不进入任何写入或清理。
+2. 获取本机 `.cleanup.lock`；已有活锁时跳过本轮，避免同一进程内或多进程重叠清理。
+3. 查询 cutoff 之前、仍有 `storage_path` 且未收藏的 image；用 `NOT EXISTS favorite` 保护的原子更新把它改为 `retention_expired` 墓碑并清空 path。
+4. 墓碑提交后删除文件；文件删除失败则保留 failure 计数，下一轮孤儿扫描/维护任务继续修复。Generation/Job/Prompt/Provider error 与 image 历史身份不删除。
+5. 扫描 `LOCAL_STORAGE_DIR`，未被 image、video 或 durable staging 引用且超过 `orphanGraceMs` 的文件才视为孤儿；marker 与活锁永不作为孤儿删除。
+6. 收藏关系参与查询和删除 CAS；外部文件缺失只写 `storage_missing`，不再删除 favorite。
 
 默认 `IMAGE_RETENTION_DAYS=7`，设为 `0` 禁用自动过期清理；非法值回退 7 天并记录不含路径/密钥的 warning。默认孤儿宽限期为 1 小时。所有路径继续经过 storage root canonicalize，阻止路径穿越。
 
@@ -19,4 +21,6 @@
 
 ## 并发边界
 
-cleanup 不参与 provider 调用；worker 使用传入的 `DbClient`，避免测试/多实例误操作全局 DB。`markImageExpiredIfUnfavorited` 与收藏写入都使用 SQLite immediate transaction；收藏先胜则 cleanup 条件更新为 0，cleanup 先胜则墓碑不可重新收藏。主动单图删除在短事务中移除 favorite 并写 `user_deleted` 墓碑。
+cleanup 不参与 provider 调用；worker 使用传入的 `DbClient`。测试实例必须成对隔离 `DATABASE_URL` 与 `LOCAL_STORAGE_DIR`，storage ownership 再提供 fail-closed 防线。`markImageExpiredIfUnfavorited` 与收藏写入都使用 SQLite immediate transaction；收藏先胜则 cleanup 条件更新为 0，cleanup 先胜则墓碑不可重新收藏。主动单图删除在短事务中移除 favorite 并写 `user_deleted` 墓碑。
+
+所有权认领仅允许空目录，或现有正式媒体集合与当前 DB 的 live image/video 引用完全一致。marker 仅保存协议版本与 canonical DB path 的 SHA-256，不保存绝对路径。清理、所有权、缺失检测和恢复事件通过安全 allowlist logger 写 stderr 与有界 JSONL；原始错误、Prompt、URL 和本机路径不会进入日志。

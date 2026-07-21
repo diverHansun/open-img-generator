@@ -4,7 +4,7 @@
 >
 > 范围：单实例后台 worker、Provider 拥塞等待、多模型 target 数量、用户主动发起的 Generation 历史硬删除。
 >
-> 关联契约：[生成管线 improve-3：内联优先、7 天保留与图片墓碑](../../2026-07-20-generation-pipeline-resilience/improve-3/README.md)
+> 关联契约：[生成管线 improve-3：内联优先、7 天保留与图片墓碑](../../2026-07-20-generation-pipeline-resilience/improve-3/README.md)；[improve-4：存储所有权、收藏墓碑与本地审计日志](../../2026-07-20-generation-pipeline-resilience/improve-4/README.md) 修正异常文件缺失时的收藏语义，不改变本批显式 Generation 删除。
 
 ## 文档地图
 

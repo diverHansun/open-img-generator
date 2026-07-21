@@ -92,7 +92,7 @@ Migration smoke 必须使用生产 `scripts/migrate-db.mjs`，不得只在测试
 | IMG-02 | retention tombstone | Contract | 410 `IMAGE_EXPIRED`，不返回路径 |
 | IMG-03 | user tombstone | Contract | 410 `IMAGE_DELETED` |
 | IMG-04 | missing tombstone | Contract | 410 `IMAGE_MISSING` |
-| IMG-05 | DB available 但文件被外部删除 | Integration | 原子协调为 storage_missing，清除坏 favorite，返回 410，History 仍有占位 |
+| IMG-05 | DB available 但文件被外部删除 | Integration | 原子协调为 storage_missing、返回 410、History 仍有占位；“清除 favorite”已由 [improve-4](../improve-4/README.md) supersede，现应保留 favorite 并显示 Gallery 墓碑 |
 | IMG-06 | 完全未知 image ID | Contract | 404，与 410 可区分 |
 | IMG-07 | storage path traversal/tamper | Unit/Integration | 继续拒绝，不在错误响应暴露绝对路径 |
 
@@ -206,7 +206,7 @@ git diff --check
 | 下载文件名/header 注入 | 不使用 prompt、字符 allowlist、RFC filename encoding | 浏览器最终命名仍可能调整 |
 | Base64 放大/恶意 payload | JSON/decoded size、MIME/magic、staging、日志脱敏 | 峰值内存仍高于 URL path；当前单用户有界接受 |
 | tombstone 被当作 Provider failure | availability 与 Job status 分离、UI regression | 新 UI 文案需保持中英文同步 |
-| 外部删除收藏文件 | storage_missing 协调并移除坏 favorite | 无法恢复原字节；依赖用户导出/重新生成 |
+| 外部删除收藏文件 | 历史条款：storage_missing 协调并移除 favorite；已由 [improve-4](../improve-4/README.md) supersede 为保留收藏意图 | 无法恢复原字节；依赖本地备份、既有 Provider result 或重新生成 |
 | “系统代理”被过度承诺 | 文档明确 Node/Browser 边界，保留窄兼容 | App 宿主选型前无法提供完全一致的系统代理行为 |
 
 红队重点不是增加更多状态，而是确认这四个不变量始终成立：历史不被 cleanup 抹掉、收藏不被竞态误删、不可用图片不生成可点击 URL、任何网络/文件错误都不泄漏敏感路径或远端签名 URL。

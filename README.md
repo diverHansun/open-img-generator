@@ -43,7 +43,9 @@ TRUSTED_PROXY_IMAGE_HOSTS=v3b.fal.media
 
 ### 图片保留与导出
 
-图片字节保存在 `LOCAL_STORAGE_DIR`（默认 `./data/images`），SQLite 只保存 Generation/Job、图片元数据和清理墓碑。未收藏图片默认保留 7 天；`IMAGE_RETENTION_DAYS=0` 可关闭自动过期。收藏图片持续保留，直到用户主动删除。下载只导出一份副本，不延长应用内部副本的保留期；自动过期或单图删除后，历史仍保留并显示对应原因。
+图片字节保存在 `LOCAL_STORAGE_DIR`（默认 `./data/images`），SQLite 只保存 Generation/Job、图片元数据和清理墓碑。未收藏图片默认保留 7 天；`IMAGE_RETENTION_DAYS=0` 可关闭自动过期。收藏图片持续保留，直到用户主动删除；文件若在应用外丢失，收藏意图仍保留并显示“图片已过期清理”。下载只导出一份副本，不延长应用内部副本的保留期；自动过期或单图删除后，历史仍保留并显示对应原因。
+
+存储根目录通过 `.open-image-storage.json` 与当前 `DATABASE_URL` 配对；不匹配时写入、删除和自动清理会安全拒绝，避免测试数据库或第二实例误删真实媒体。安全审计日志默认写入 `APP_LOG_DIR=./data/logs`，采用 5 MiB 当前文件加 3 份轮转；设置 `APP_FILE_LOG_ENABLED=0` 可只保留 stderr。日志不记录 API Key、Prompt、签名 URL、原始异常或绝对路径。
 
 ## 生产运行
 
@@ -53,7 +55,9 @@ npm run build
 npm start
 ```
 
-生产环境应为 `DATABASE_URL` 和 `LOCAL_STORAGE_DIR` 使用持久化目录，并确保运行用户具有读写权限。
+开发服务使用 `.next/`，生产构建与 `npm start` 使用 `.next-build/`。两者可同时存在，执行 `npm run build` 不会再覆盖正在运行的开发服务 chunk。
+
+生产环境应为 `DATABASE_URL`、`LOCAL_STORAGE_DIR` 和 `APP_LOG_DIR` 使用持久化目录，并确保运行用户具有读写权限。移动数据库或存储目录前应一起备份，不要手工复制 marker 到另一套数据库。
 
 ## 验证
 
