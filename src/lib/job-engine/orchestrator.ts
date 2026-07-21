@@ -21,7 +21,7 @@ import {
   OutcomeUnknownDeleteConfirmationRequiredError,
   ValidationError,
 } from '../errors';
-import { removeStoredFile } from '../storage';
+import { assertStorageWritable, removeStoredFile } from '../storage';
 import * as prompt from '../prompt';
 import { getById } from '../providers';
 import type { NormalizedRequest, ProviderCapabilities } from '../providers';
@@ -223,6 +223,7 @@ export function deleteGeneration(
   options: { confirmUnknownOutcome?: boolean },
   ctx: OrchestratorContext,
 ): void {
+  assertStorageWritable();
   const resources = deleteGenerationForHistory(id, options, ctx.db);
   if (resources.kind === 'not_found') {
     throw new NotFoundError(`Generation not found: ${id}`);
@@ -302,8 +303,7 @@ function toGenerationView(
         url: availability === 'available' ? `/api/images/${image.id}` : null,
         width: image.width,
         height: image.height,
-        favorited:
-          availability === 'available' && favoriteImageIds.has(image.id),
+        favorited: favoriteImageIds.has(image.id),
         availability,
         removedAt: image.removedAt,
       };

@@ -39,6 +39,14 @@ export type RemovedImageResult = {
   removedAt: string | null;
 };
 
+export type RestoreMissingImageParams = {
+  storagePath: string;
+  contentType: string;
+  width: number | null;
+  height: number | null;
+  sizeBytes: number;
+};
+
 export function getImageAvailability(
   image: Pick<Image, 'storagePath' | 'removedAt' | 'removalReason'>,
 ): ImageAvailability {
@@ -249,14 +257,21 @@ export function markImageUserDeleted(
     (tx) => {
       const current = tx.select().from(images).where(eq(images.id, id)).get();
       if (!current) return undefined;
+      tx.delete(favorites).where(eq(favorites.imageId, id)).run();
       if (current.storagePath === null) {
+        if (current.removalReason !== 'user_deleted') {
+          tx.update(images).set({ removedAt, removalReason: 'user_deleted' })
+            .where(and(eq(images.id, id), isNull(images.storagePath)))
+            .run();
+        }
         return {
           storagePath: null,
-          availability: getImageAvailability(current),
-          removedAt: current.removedAt,
+          availability: 'user_deleted',
+          removedAt: current.removalReason === 'user_deleted'
+            ? current.removedAt
+            : removedAt,
         };
       }
-      tx.delete(favorites).where(eq(favorites.imageId, id)).run();
       const updated = tx
         .update(images)
         .set({
@@ -303,7 +318,6 @@ export function markImageStorageMissing(
           removedAt: current.removedAt,
         };
       }
-      tx.delete(favorites).where(eq(favorites.imageId, id)).run();
       tx.update(images)
         .set({
           storagePath: null,
@@ -320,4 +334,25 @@ export function markImageStorageMissing(
     },
     { behavior: 'immediate' },
   );
+}
+
+/** Restores bytes only while the exact storage-missing tombstone still wins. */
+export function restoreImageStorageIfMissing(
+  id: string,
+  params: RestoreMissingImageParams,
+  client: DbClient = db,
+): boolean {
+  return client.update(images).set({
+    storagePath: params.storagePath,
+    contentType: params.contentType,
+    width: params.width,
+    height: params.height,
+    sizeBytes: params.sizeBytes,
+    removedAt: null,
+    removalReason: null,
+  }).where(and(
+    eq(images.id, id),
+    isNull(images.storagePath),
+    eq(images.removalReason, 'storage_missing'),
+  )).run().changes > 0;
 }

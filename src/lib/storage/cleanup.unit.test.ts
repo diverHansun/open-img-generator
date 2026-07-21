@@ -7,21 +7,27 @@ import { createGenerationAndJob } from '../db/queries/generations';
 import { createImage } from '../db/queries/images';
 import { favorites, images } from '../db/schema';
 import { cleanupStoredImages } from './cleanup';
+import { verifyStorageOwnership } from './ownership';
+import { createVideoIfAbsent } from '../db/queries/videos';
 
 const oldDate = '2020-01-01T00:00:00.000Z';
 
 describe('stored image cleanup', () => {
   const originalStorage = process.env.LOCAL_STORAGE_DIR;
+  const originalDatabaseUrl = process.env.DATABASE_URL;
   let tempDir: string;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-cleanup-test-'));
     process.env.LOCAL_STORAGE_DIR = tempDir;
+    verifyStorageOwnership(tempDir);
   });
 
   afterEach(() => {
     if (originalStorage === undefined) delete process.env.LOCAL_STORAGE_DIR;
     else process.env.LOCAL_STORAGE_DIR = originalStorage;
+    if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = originalDatabaseUrl;
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -176,5 +182,64 @@ describe('stored image cleanup', () => {
     expect(result.deletedOrphans).toBe(1);
     expect(fs.existsSync(stagedPath)).toBe(true);
     expect(fs.existsSync(stalePath)).toBe(false);
+  });
+
+  it('keeps an aged video file referenced by the videos table', () => {
+    const { db } = createTestDb();
+    const videoPath = writeFile('2026/07/result.mp4');
+    const oldTimestamp = new Date(Date.now() - 86_400_000);
+    fs.utimesSync(videoPath, oldTimestamp, oldTimestamp);
+    createGenerationAndJob(
+      {
+        id: 'gen-video',
+        sessionId: 'default-session',
+        prompt: 'video cleanup test',
+        status: 'completed',
+        mediaKind: 'video',
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      },
+      {
+        id: 'job-video',
+        generationId: 'gen-video',
+        provider: 'doubao',
+        model: 'seedance',
+        status: 'completed',
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      },
+      db,
+    );
+    createVideoIfAbsent(
+      {
+        id: 'video-1',
+        jobId: 'job-video',
+        index: 0,
+        storagePath: '2026/07/result.mp4',
+        contentType: 'video/mp4',
+        width: 1280,
+        height: 720,
+        durationSeconds: 5,
+        sizeBytes: 4,
+        createdAt: oldDate,
+      },
+      db,
+    );
+
+    const result = cleanupStoredImages({ db, retentionDays: 0, orphanGraceMs: 0 });
+    expect(result.deletedOrphans).toBe(0);
+    expect(fs.existsSync(videoPath)).toBe(true);
+  });
+
+  it('refuses cleanup when another database points at the owned root', () => {
+    const { db } = createTestDb();
+    const orphan = writeFile('orphan.png');
+    const oldTimestamp = new Date(Date.now() - 86_400_000);
+    fs.utimesSync(orphan, oldTimestamp, oldTimestamp);
+    process.env.DATABASE_URL = `file:${path.join(tempDir, 'different.sqlite')}`;
+
+    const result = cleanupStoredImages({ db, retentionDays: 0, orphanGraceMs: 0 });
+    expect(result).toMatchObject({ skipped: true, skipReason: 'ownership' });
+    expect(fs.existsSync(orphan)).toBe(true);
   });
 });

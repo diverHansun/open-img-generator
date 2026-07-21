@@ -62,7 +62,9 @@ export type GenerationSummary = {
 export type GalleryItem = {
   favoriteId: string;
   imageId: string;
-  url: string;
+  url: string | null;
+  availability: ImageAvailability;
+  removedAt: string | null;
   width: number | null;
   height: number | null;
   favoritedAt: string;

@@ -17,6 +17,12 @@ export type GenerationStatus =
   | 'failed'
   | 'cancelled';
 
+export type ImageAvailability =
+  | 'available'
+  | 'retention_expired'
+  | 'user_deleted'
+  | 'storage_missing';
+
 export type ProviderCapabilities = {
   providerId: ProviderId;
   model: string;
@@ -232,7 +238,9 @@ export type HistoryPage = {
 export type GalleryItem = {
   favoriteId: string;
   imageId: string;
-  url: string;
+  url: string | null;
+  availability: ImageAvailability;
+  removedAt: string | null;
   width: number | null;
   height: number | null;
   favoritedAt: string;

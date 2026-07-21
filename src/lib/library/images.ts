@@ -2,13 +2,15 @@ import {
   db,
   getImage,
   getImageAvailability,
+  listFavoriteImageIds,
   markImageStorageMissing,
   markImageUserDeleted,
   type DbClient,
   type Image,
 } from '../db';
 import { ImageUnavailableError, NotFoundError } from '../errors';
-import { getReadStream, removeStoredFile } from '../storage';
+import { assertStorageWritable, getReadStream, removeStoredFile } from '../storage';
+import { logSafeEvent } from '../observability/safe-logger';
 
 export type ReadableImage = {
   image: Image & { storagePath: string };
@@ -36,7 +38,9 @@ export function openReadableImage(
     };
   } catch (error) {
     if (!(error instanceof NotFoundError)) throw error;
+    const wasFavorite = listFavoriteImageIds([id], client).has(id);
     markImageStorageMissing(id, new Date().toISOString(), client);
+    logSafeEvent({ event: 'storage.missing_detected', imageId: id, wasFavorite });
     throw new ImageUnavailableError('storage_missing');
   }
 }
@@ -45,6 +49,7 @@ export function deleteImageBytes(
   id: string,
   client: DbClient = db,
 ): void {
+  assertStorageWritable();
   const result = markImageUserDeleted(id, new Date().toISOString(), client);
   if (!result) throw new NotFoundError(`Image not found: ${id}`);
   if (!result.storagePath) return;

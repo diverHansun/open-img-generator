@@ -41,6 +41,8 @@ const galleryItem = {
   favoriteId: 'favorite-1',
   imageId: 'image-1',
   url: '/api/images/image-1',
+  availability: 'available' as const,
+  removedAt: null,
   width: 1024,
   height: 1024,
   favoritedAt: '2026-07-16T00:00:00.000Z',

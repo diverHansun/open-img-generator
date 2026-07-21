@@ -176,6 +176,32 @@ describe('library domain', () => {
     ]);
   });
 
+  it('lists a missing favorite as a tombstone with no image URL', () => {
+    seedGeneration(testDb, {
+      generationId: 'generation-missing-favorite',
+      sessionId: 'default-session',
+      createdAt: '2026-07-16T03:00:00.000Z',
+      imageId: 'image-missing-favorite',
+    });
+    addFavorite('image-missing-favorite', testDb.db);
+    testDb.sqlite
+      .prepare(
+        `UPDATE images
+         SET storage_path = NULL, removed_at = ?, removal_reason = 'storage_missing'
+         WHERE id = ?`,
+      )
+      .run('2026-07-16T04:00:00.000Z', 'image-missing-favorite');
+
+    expect(listFavorites({}, testDb.db).items).toEqual([
+      expect.objectContaining({
+        imageId: 'image-missing-favorite',
+        url: null,
+        availability: 'storage_missing',
+        removedAt: '2026-07-16T04:00:00.000Z',
+      }),
+    ]);
+  });
+
   it('upserts only preferences for currently enabled registry models', () => {
     process.env.FAL_KEY = 'test-key';
     const preference = upsertModelPreference(

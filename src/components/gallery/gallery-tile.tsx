@@ -29,6 +29,8 @@ export function GalleryTile({
   const [failed, setFailed] = React.useState(false);
   const shape = galleryImageShape(item.width, item.height);
   const accessiblePrompt = accessibleExcerpt(item.prompt);
+  const imageUrl = item.url;
+  const missing = imageUrl === null;
 
   return (
     <article
@@ -39,16 +41,27 @@ export function GalleryTile({
       <button
         type="button"
         className={styles.imageButton}
-        aria-label={t('gallery.openPreview', { prompt: accessiblePrompt })}
+        aria-label={
+          missing
+            ? t('gallery.viewMissingSource', { prompt: accessiblePrompt })
+            : t('gallery.openPreview', { prompt: accessiblePrompt })
+        }
         onClick={(event) => onOpen(event.currentTarget)}
       >
-        {failed ? (
-          <span className={styles.imageError} role="img" aria-label={t('gallery.imageUnavailable')}>
+        {missing || failed ? (
+          <span
+            className={styles.imageError}
+            role="img"
+            aria-label={
+              missing ? t('gallery.imageExpired') : t('gallery.imageUnavailable')
+            }
+          >
             <ImageOff aria-hidden="true" />
+            {missing ? <strong>{t('gallery.imageExpired')}</strong> : null}
           </span>
         ) : (
           <img
-            src={item.url}
+            src={imageUrl!}
             width={item.width ?? undefined}
             height={item.height ?? undefined}
             alt={accessiblePrompt}

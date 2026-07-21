@@ -39,3 +39,17 @@ export function createStorageDir() {
     },
   };
 }
+
+/** Preferred helper for storage-aware integration tests: DB/root never drift. */
+export function createIntegrationRuntime() {
+  const database = createIntegrationDb();
+  const storage = createStorageDir();
+  return {
+    database,
+    storage,
+    cleanup: () => {
+      storage.cleanup();
+      database.cleanup();
+    },
+  };
+}

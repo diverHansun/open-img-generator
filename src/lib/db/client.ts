@@ -1,15 +1,22 @@
 import Database from 'better-sqlite3';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from './schema';
 
 export type DbClient = BetterSQLite3Database<typeof schema>;
 
-function getDatabaseUrl(): string {
+export function getDatabasePath(): string {
   const url = process.env.DATABASE_URL;
   if (!url) {
-    return './data/app.db';
+    return path.resolve('./data/app.db');
   }
-  return url.replace(/^file:/, '');
+  const databasePath = url.replace(/^file:/, '');
+  return databasePath === ':memory:' ? databasePath : path.resolve(databasePath);
+}
+
+export function getDatabasePathHash(): string {
+  return createHash('sha256').update(getDatabasePath()).digest('hex');
 }
 
 export function createDbClient(url: string): DbClient {
@@ -20,7 +27,7 @@ export function createDbClient(url: string): DbClient {
 }
 
 export function createLazyDbClient(
-  factory: () => DbClient = () => createDbClient(getDatabaseUrl()),
+  factory: () => DbClient = () => createDbClient(getDatabasePath()),
 ): DbClient {
   let client: DbClient | undefined;
   return new Proxy({} as DbClient, {

@@ -42,8 +42,9 @@
 .imageButton:focus-visible { outline-offset: -3px; }
 .imageButton img { object-fit: cover; transition: transform var(--duration-medium) var(--ease-standard); }
 .tile:hover .imageButton img, .tile:focus-within .imageButton img { transform: scale(1.015); }
-.imageError { display: grid; place-items: center; color: var(--color-ink-faint); }
+.imageError { display: grid; place-items: center; align-content: center; gap: var(--space-2); padding: var(--space-3); color: var(--color-ink-faint); text-align: center; }
 .imageError svg { width: 1.5rem; }
+.imageError strong { max-width: 12rem; font-size: .75rem; font-weight: 600; }
 .tileMeta {
   position: absolute;
   right: var(--space-2);

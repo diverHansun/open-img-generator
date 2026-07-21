@@ -12,6 +12,7 @@ import {
   validateRemoteImageUrl,
   type RemoteImageUrlPolicyOptions,
 } from './image-url-policy';
+import { verifyStorageOwnership } from './ownership';
 
 const STAGING_PREFIX = 'staging:';
 const STAGING_DIRECTORY = '.staging';
@@ -72,7 +73,20 @@ export function getStorageRoot(): string {
 
 function ensureRootExists(): void {
   const root = getStorageRoot();
-  fs.mkdirSync(root, { recursive: true });
+  try {
+    if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
+    verifyStorageOwnership(root);
+  } catch (error) {
+    if (error instanceof StorageError) throw error;
+    throw new StorageError('Local storage directory is unavailable', {
+      cause: error,
+      diagnostic: { category: 'local_write_failed' },
+    });
+  }
+}
+
+export function assertStorageWritable(): void {
+  ensureRootExists();
 }
 
 function extensionFromContentType(contentType: string): string {
@@ -356,6 +370,7 @@ async function writeResponseToTemporary(
 }
 
 function temporaryPath(): string {
+  ensureRootExists();
   const root = getTemporaryRoot();
   fs.mkdirSync(root, { recursive: true });
   return path.join(root, `${randomUUID()}.tmp`);
@@ -394,6 +409,7 @@ export function stageInlineImage(
   dataUrl: string,
   expectedContentType?: string,
 ): { reference: string; contentType: string; sizeBytes: number } {
+  ensureRootExists();
   const { contentType, encoded } = parseInlineImageDataUrl(dataUrl);
   const normalizedExpected = normalizeImageContentType(expectedContentType);
   if (expectedContentType && !normalizedExpected) {
@@ -425,6 +441,7 @@ export function stageInlineImage(
 
 /** Best-effort cleanup for a snapshot that was superseded or cancelled. */
 export function removeStagedImage(reference: string): void {
+  ensureRootExists();
   const staged = findStagedFile(reference);
   if (!staged) return;
   try {
@@ -435,6 +452,7 @@ export function removeStagedImage(reference: string): void {
 }
 
 function materializeStagedImage(reference: string): DownloadAndStoreResult {
+  ensureRootExists();
   const staged = findStagedFile(reference);
   if (!staged) throw new StorageError('Staged image is unavailable');
   const sizeBytes = fs.statSync(staged.absolutePath).size;
@@ -549,6 +567,7 @@ export async function downloadAndStore(
   url: string,
   options: DownloadAndStoreOptions = {},
 ): Promise<DownloadAndStoreResult> {
+  ensureRootExists();
   if (isStagedImageRef(url)) return materializeStagedImage(url);
   if (url.startsWith(STAGING_PREFIX)) {
     throw new StorageError('Invalid staged image reference');
@@ -630,6 +649,7 @@ export async function downloadAndStoreVideo(
   url: string,
   options: DownloadAndStoreOptions = {},
 ): Promise<DownloadAndStoreResult> {
+  ensureRootExists();
   const response = await fetchRemoteImage(url, options);
   if (!response.ok) {
     await cancelResponseBody(response);
@@ -666,6 +686,7 @@ export async function downloadAndStoreVideo(
 
 /** Best-effort cleanup for a file that lost an idempotent image insert race. */
 export function removeStoredFile(storagePath: string): void {
+  ensureRootExists();
   const absolutePath = resolveStoragePath(storagePath);
   try {
     fs.rmSync(absolutePath, { force: true });

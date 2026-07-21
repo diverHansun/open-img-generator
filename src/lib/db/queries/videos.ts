@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { videos } from '../schema';
 import type { Video } from '../schema';
@@ -49,4 +49,10 @@ export function getVideo(id: string, client: DbClient = db): Video {
   const row = client.select().from(videos).where(eq(videos.id, id)).get();
   if (!row) throw new NotFoundError(`Video not found: ${id}`);
   return row;
+}
+
+export function listVideoStoragePaths(client: DbClient = db): string[] {
+  return client.select({ storagePath: videos.storagePath }).from(videos)
+    .where(isNotNull(videos.storagePath)).all()
+    .map((row) => row.storagePath!);
 }

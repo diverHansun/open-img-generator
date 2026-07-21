@@ -9,7 +9,9 @@ import {
   listFavoriteImageIds,
   getImageAvailability,
   markImageExpiredIfUnfavorited,
+  markImageStorageMissing,
   markImageUserDeleted,
+  restoreImageStorageIfMissing,
 } from './images';
 import { NotFoundError } from '../../errors';
 
@@ -182,5 +184,80 @@ describe('images queries', () => {
       availability: 'user_deleted',
       removedAt: now,
     });
+  });
+
+  it('preserves favorite intent when the managed file is missing', () => {
+    const { db } = createTestDb();
+    seedJob(db);
+    createImage(
+      {
+        id: 'img-1',
+        jobId: 'job-1',
+        index: 0,
+        storagePath: 'img.png',
+        contentType: 'image/png',
+        width: null,
+        height: null,
+        sizeBytes: 1,
+        createdAt: now,
+      },
+      db,
+    );
+    db.insert(favorites)
+      .values({ id: 'favorite-1', imageId: 'img-1', createdAt: now })
+      .run();
+
+    expect(markImageStorageMissing('img-1', now, db)).toMatchObject({
+      storagePath: 'img.png',
+      availability: 'storage_missing',
+    });
+    expect(listFavoriteImageIds(['img-1'], db)).toEqual(new Set(['img-1']));
+    expect(getImageAvailability(getImage('img-1', db))).toBe('storage_missing');
+    expect(markImageUserDeleted('img-1', 'later', db)).toEqual({
+      storagePath: null,
+      availability: 'user_deleted',
+      removedAt: 'later',
+    });
+    expect(listFavoriteImageIds(['img-1'], db).size).toBe(0);
+  });
+
+  it('restores bytes only from a storage-missing tombstone', () => {
+    const { db } = createTestDb();
+    seedJob(db);
+    createImage(
+      {
+        id: 'img-1',
+        jobId: 'job-1',
+        index: 0,
+        storagePath: 'old.png',
+        contentType: 'image/png',
+        width: null,
+        height: null,
+        sizeBytes: 1,
+        createdAt: now,
+      },
+      db,
+    );
+    markImageStorageMissing('img-1', now, db);
+    expect(restoreImageStorageIfMissing('img-1', {
+      storagePath: 'restored.png',
+      contentType: 'image/png',
+      width: 1024,
+      height: 1024,
+      sizeBytes: 42,
+    }, db)).toBe(true);
+    expect(getImage('img-1', db)).toMatchObject({
+      storagePath: 'restored.png',
+      removedAt: null,
+      removalReason: null,
+      sizeBytes: 42,
+    });
+    expect(restoreImageStorageIfMissing('img-1', {
+      storagePath: 'second.png',
+      contentType: 'image/png',
+      width: null,
+      height: null,
+      sizeBytes: 2,
+    }, db)).toBe(false);
   });
 });

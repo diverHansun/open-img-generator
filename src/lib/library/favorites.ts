@@ -14,6 +14,7 @@ import { NotFoundError, ValidationError } from '../errors';
 import { getProject } from './projects';
 import { isKnownProviderId } from '../provider-config/catalog';
 import type { GalleryItem, Page } from './types';
+import { getImageAvailability } from '../db';
 
 type Cursor = { createdAt: string; id: string };
 
@@ -39,6 +40,9 @@ function favoriteQuery(client: DbClient) {
     .select({
       favoriteId: favorites.id,
       imageId: images.id,
+      storagePath: images.storagePath,
+      removedAt: images.removedAt,
+      removalReason: images.removalReason,
       width: images.width,
       height: images.height,
       favoritedAt: favorites.createdAt,
@@ -61,7 +65,13 @@ function favoriteQuery(client: DbClient) {
 
 function toGalleryItem(row: ReturnType<ReturnType<typeof favoriteQuery>['get']>): GalleryItem {
   if (!row) throw new NotFoundError('Favorite not found');
-  return { ...row, url: `/api/images/${row.imageId}` };
+  const availability = getImageAvailability(row);
+  const { storagePath: _storagePath, removalReason: _removalReason, ...item } = row;
+  return {
+    ...item,
+    url: availability === 'available' ? `/api/images/${row.imageId}` : null,
+    availability,
+  };
 }
 
 export function addFavorite(imageId: string, client: DbClient = db): GalleryItem {
@@ -89,7 +99,7 @@ export function getFavoriteByImageId(
 ): GalleryItem {
   return toGalleryItem(
     favoriteQuery(client)
-      .where(and(eq(favorites.imageId, imageId), isNotNull(images.storagePath)))
+      .where(eq(favorites.imageId, imageId))
       .get(),
   );
 }
@@ -127,7 +137,7 @@ export function listFavorites(
   if (input.projectId) getProject(input.projectId, client);
   const limit = Math.min(input.limit ?? 48, 100);
   const cursor = decodeCursor(input.cursor);
-  const conditions: SQL[] = [isNotNull(images.storagePath)];
+  const conditions: SQL[] = [];
   if (cursor) {
     const cursorCondition = or(
       lt(favorites.createdAt, cursor.createdAt),

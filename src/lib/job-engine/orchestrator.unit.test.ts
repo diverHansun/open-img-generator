@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 
 import { createTestDb } from '../../../tests/helpers/db';
-import { generationJobs, generations, getGenerationWithJobsAndImages, sessions } from '../db';
+import {
+  favorites,
+  generationJobs,
+  generations,
+  getGenerationWithJobsAndImages,
+  markImageStorageMissing,
+  sessions,
+} from '../db';
 import { IdempotencyKeyReusedError } from '../errors';
 import type { ImageProvider } from '../providers';
 import * as providers from '../providers';
@@ -208,5 +215,21 @@ describe('generation orchestrator durable admission', () => {
     const completed = await getGeneration(admitted.generationId, { db });
     expect(completed.status).toBe('completed');
     expect(completed.images).toHaveLength(1);
+
+    const imageId = completed.images[0]!.id;
+    db.insert(favorites).values({
+      id: 'favorite-reading-room',
+      imageId,
+      createdAt: new Date().toISOString(),
+    }).run();
+    markImageStorageMissing(imageId, new Date().toISOString(), db);
+
+    const missingFavorite = await getGeneration(admitted.generationId, { db });
+    expect(missingFavorite.images[0]).toMatchObject({
+      id: imageId,
+      url: null,
+      favorited: true,
+      availability: 'storage_missing',
+    });
   });
 });

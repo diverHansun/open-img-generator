@@ -15,6 +15,8 @@ function item(imageId: string, projectId = 'project-1', provider = 'qwen'): Gall
     favoriteId: 'favorite-' + imageId,
     imageId,
     url: '/api/images/' + imageId,
+    availability: 'available',
+    removedAt: null,
     width: 1024,
     height: 1024,
     favoritedAt: '2026-07-20T00:00:00.000Z',

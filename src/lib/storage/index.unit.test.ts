@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  assertStorageWritable,
   downloadAndStore,
   downloadAndStoreVideo,
   getReadStream,
@@ -331,6 +332,7 @@ describe('storage', () => {
   });
 
   it('cancels the response when the temporary directory cannot be created', async () => {
+    assertStorageWritable();
     const cancel = vi.fn().mockResolvedValue(undefined);
     const getReader = vi.fn();
     global.fetch = vi.fn().mockResolvedValue({
@@ -356,6 +358,7 @@ describe('storage', () => {
   });
 
   it('cancels the response when the temporary file cannot be opened', async () => {
+    assertStorageWritable();
     const cancel = vi.fn().mockResolvedValue(undefined);
     const getReader = vi.fn();
     global.fetch = vi.fn().mockResolvedValue({
@@ -423,6 +426,7 @@ describe('storage', () => {
   });
 
   it('removes a stored file within the storage root', () => {
+    assertStorageWritable();
     const storagePath = '2026/07/loser.png';
     const absolutePath = path.join(tempDir, storagePath);
     fs.mkdirSync(path.dirname(absolutePath), { recursive: true });

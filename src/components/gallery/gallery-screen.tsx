@@ -623,7 +623,16 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
                   favorited={mutation?.favorited ?? true}
                   favoritePending={mutation?.pending ?? false}
                   onOpen={(returnFocus) =>
-                    setActiveDialog({ kind: 'preview', item, returnFocus })
+                    setActiveDialog(
+                      item.url === null
+                        ? {
+                            kind: 'generation',
+                            generationId: item.generationId,
+                            projectTitle: item.projectTitle,
+                            returnFocus,
+                          }
+                        : { kind: 'preview', item, returnFocus },
+                    )
                   }
                   onFavoriteChange={(next) => void changeFavorite(item, next)}
                 />
@@ -651,7 +660,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
 
       <p className="sr-only" aria-live="polite">{announcement}</p>
 
-      {activeDialog?.kind === 'preview' ? (
+      {activeDialog?.kind === 'preview' && activeDialog.item.url !== null ? (
         <ImagePreviewDialog
           open
           onOpenChange={(open) => {

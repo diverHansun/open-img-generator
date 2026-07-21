@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createIntegrationDb } from '../helpers/integration';
+import { createIntegrationRuntime } from '../helpers/integration';
 
 process.env.FAL_KEY = 'test-fal-key';
 
-const { tempFile, cleanup } = createIntegrationDb();
+const { cleanup } = createIntegrationRuntime();
 
 const { GET: getHealth } = await import('../../src/app/api/health/route');
 
