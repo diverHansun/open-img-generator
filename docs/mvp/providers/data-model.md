@@ -314,7 +314,7 @@ Doubao adapter 使用独立 Ark API（默认 `https://ark.cn-beijing.volces.com/
 
 当前 ModelSpec ID 为 `doubao-seedream-4-0-250828`、`doubao-seedream-4-5-251128`、`doubao-seedream-5-0-260128`；三者首批保持单张、非流式、`sequential_image_generation=disabled`，优先请求 `b64_json` 立即落盘。
 
-### qwen / qwen-image-plus
+### qwen / qwen-image-plus、qwen-image-2.0-pro、wan2.7-image-pro
 
 | 字段 | 值 |
 |------|-----|
@@ -327,7 +327,7 @@ Doubao adapter 使用独立 Ark API（默认 `https://ark.cn-beijing.volces.com/
 | supportsSeed | true |
 | defaultSize | `"1664*928"` |
 
-Qwen adapter 使用 DashScope `text2image/image-synthesis` 创建任务，并通过 `GET /tasks/:taskId` 惰性 poll；任务和图片 URL 有效期约 24 小时，job-engine 必须及时转存。
+Qwen adapter 由私有 profile 选择协议：`qwen-image-plus` 使用 `legacy-text2image-async`；`qwen-image-2.0-pro` 使用 `multimodal-sync`；`wan2.7-image-pro` 使用 `multimodal-async`。两种新 profile 仅构造单轮纯文本 `messages[].content[].text`，首批固定 `n=1`，Wan 明确关闭 sequential 与 thinking。异步任务和图片 URL 有效期约 24 小时，job-engine 必须及时转存。
 
 ---
 

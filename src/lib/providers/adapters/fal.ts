@@ -74,7 +74,10 @@ function trustedFalHandleUrl(value: unknown): string {
   return trustedSameOriginProviderUrl(value, falBaseUrl().origin);
 }
 
-function resolveSize(req: NormalizedRequest, profile: FalImageProfile): string {
+type FluxImageProfile = Extract<FalImageProfile, { kind: 'flux-image-size' }>;
+type BananaImageProfile = Extract<FalImageProfile, { kind: 'banana-aspect-ratio' }>;
+
+function resolveFluxSize(req: NormalizedRequest, profile: FluxImageProfile): string {
   if (req.aspectRatio && profile.aspectRatioSizes[req.aspectRatio]) {
     return profile.aspectRatioSizes[req.aspectRatio];
   }
@@ -86,6 +89,10 @@ function buildRequestBody(
   req: NormalizedRequest,
   profile: FalImageProfile,
 ): Record<string, unknown> {
+  if (profile.kind === 'banana-aspect-ratio') {
+    return buildBananaRequestBody(req, profile);
+  }
+
   const body: Record<string, unknown> = {
     prompt: req.prompt,
   };
@@ -97,7 +104,7 @@ function buildRequestBody(
     body.seed = req.seed;
   }
 
-  body.image_size = resolveSize(req, profile);
+  body.image_size = resolveFluxSize(req, profile);
 
   for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
     if (key !== 'image_size') {
@@ -105,6 +112,37 @@ function buildRequestBody(
     }
   }
 
+  return body;
+}
+
+function buildBananaRequestBody(
+  req: NormalizedRequest,
+  profile: BananaImageProfile,
+): Record<string, unknown> {
+  const requestedResolution = req.providerOptions?.resolution;
+  const resolution =
+    typeof requestedResolution === 'string' &&
+    profile.supportedResolutions.includes(requestedResolution)
+      ? requestedResolution
+      : profile.defaultResolution;
+  const outputFormat = req.providerOptions?.output_format;
+  const safetyTolerance = req.providerOptions?.safety_tolerance;
+  const body: Record<string, unknown> = {
+    prompt: req.prompt,
+    num_images: req.count ?? 1,
+    aspect_ratio: req.aspectRatio ?? profile.defaultAspectRatio,
+    resolution,
+    output_format:
+      outputFormat === 'jpeg' || outputFormat === 'webp' ? outputFormat : 'png',
+    limit_generations: true,
+  };
+  if (req.seed !== undefined) body.seed = req.seed;
+  if (
+    typeof safetyTolerance === 'string' &&
+    ['1', '2', '3', '4', '5', '6'].includes(safetyTolerance)
+  ) {
+    body.safety_tolerance = safetyTolerance;
+  }
   return body;
 }
 

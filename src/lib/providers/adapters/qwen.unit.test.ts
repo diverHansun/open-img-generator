@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeJobHandle, makeNormalizedRequest } from '../../../../tests/factories';
 import { QwenProvider } from './qwen';
+import { SYNC_IMAGE_GENERATION_TIMEOUT_MS } from '../timeout-policy';
 
 describe('QwenProvider', () => {
   let provider: QwenProvider;
@@ -82,6 +83,120 @@ describe('QwenProvider', () => {
       },
     });
     expect(timeout).toHaveBeenCalledWith(30_000);
+  });
+
+  it('submits Qwen Image 2.0 Pro synchronously with multimodal text content', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(new AbortController().signal);
+    mockFetch({
+      output: {
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: [{ type: 'image', image: 'https://oss.example.com/qwen2.png' }],
+          },
+        }],
+      },
+    });
+
+    const result = await provider.submit(
+      makeNormalizedRequest({
+        aspectRatio: '1:1',
+        negativePrompt: 'blurry',
+        seed: 9,
+      }),
+      'qwen-image-2.0-pro',
+    );
+
+    expect(result).toMatchObject({
+      kind: 'sync',
+      images: [{ url: 'https://oss.example.com/qwen2.png', index: 0 }],
+    });
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(url).toBe(
+      'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+    );
+    expect((init?.headers as Record<string, string>)['X-DashScope-Async']).toBeUndefined();
+    expect(JSON.parse(String(init?.body))).toEqual({
+      model: 'qwen-image-2.0-pro',
+      input: {
+        messages: [{
+          role: 'user',
+          content: [{ text: 'A cat wearing a space helmet' }],
+        }],
+      },
+      parameters: {
+        size: '1024*1024',
+        n: 1,
+        watermark: false,
+        seed: 9,
+        prompt_extend: true,
+        negative_prompt: 'blurry',
+      },
+    });
+    expect(timeout).toHaveBeenCalledWith(SYNC_IMAGE_GENERATION_TIMEOUT_MS);
+  });
+
+  it('submits Wan 2.7 through the async multimodal endpoint', async () => {
+    mockFetch({ output: { task_id: 'wan-task-1', task_status: 'PENDING' } });
+
+    const result = await provider.submit(
+      makeNormalizedRequest({ aspectRatio: '16:9', seed: 23 }),
+      'wan2.7-image-pro',
+    );
+
+    expect(result).toMatchObject({
+      kind: 'async',
+      handle: { externalId: 'wan-task-1', model: 'wan2.7-image-pro' },
+    });
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(url).toBe(
+      'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation',
+    );
+    expect((init?.headers as Record<string, string>)['X-DashScope-Async']).toBe('enable');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      model: 'wan2.7-image-pro',
+      input: {
+        messages: [{
+          role: 'user',
+          content: [{ text: 'A cat wearing a space helmet' }],
+        }],
+      },
+      parameters: {
+        size: '1280*720',
+        n: 1,
+        watermark: false,
+        seed: 23,
+        enable_sequential: false,
+        thinking_mode: false,
+      },
+    });
+  });
+
+  it('polls Wan multimodal choices into image references', async () => {
+    mockFetch({
+      output: {
+        task_id: 'wan-task-1',
+        task_status: 'SUCCEEDED',
+        choices: [{
+          message: {
+            role: 'assistant',
+            content: [{ type: 'image', image: 'https://oss.example.com/wan.png' }],
+          },
+        }],
+      },
+    });
+
+    const result = await provider.poll({
+      ...handle,
+      model: 'wan2.7-image-pro',
+      externalId: 'wan-task-1',
+    });
+
+    expect(result).toMatchObject({
+      status: 'completed',
+      images: [{ url: 'https://oss.example.com/wan.png', index: 0 }],
+    });
   });
 
   it('polls pending, running, completed, and cancelled states', async () => {

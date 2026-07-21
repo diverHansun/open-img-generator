@@ -66,6 +66,8 @@
 | poll failed | mock 5xx | PollResult.status="failed"，error.code="PROVIDER_ERROR" |
 | cancel | mock 202 | 正常返回，不抛错 |
 | cancel 已完成任务 | mock 400 | 返回 `PollResult.status="failed"` |
+| Nano Banana 2/Pro | model spec 选择 Banana profile | 发送 `aspect_ratio/resolution/num_images`，不发送 FLUX `image_size` |
+| Banana 安全字段 | providerOptions 含 sync/web search/image_size | 只接收已验证的 resolution/output_format/safety_tolerance，其余不进入请求 |
 
 ### 2.4 SiliconFlow / 智谱 Sync 路径
 
@@ -91,6 +93,9 @@
 | Qwen 正常 submit | model=`qwen-image-plus` | `kind="async"`，返回 `task_id` 句柄 |
 | Qwen poll | PENDING/RUNNING/SUCCEEDED/FAILED/CANCELED | 映射统一 `PollResult` 状态 |
 | Qwen HTTP 鉴权/限流/超时 | mock 401/429/TimeoutError | `AUTH_FAILED`/可重试 `RATE_LIMITED`/`TIMEOUT` |
+| Qwen Image 2.0 Pro | `multimodal-sync` | 单轮 text content，直接解析 `output.choices[].message.content[].image` |
+| Wan 2.7 Image Pro submit | `multimodal-async` | `image-generation/generation` + async header；关闭 sequential/thinking |
+| Wan poll | SUCCEEDED + choices | 转为 ProviderImageRef 并立即进入 storage |
 
 ### 2.6 Kling 独立 API
 

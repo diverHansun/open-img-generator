@@ -75,6 +75,90 @@ describe('FalProvider', () => {
     expect(JSON.parse(String(init?.body))).toMatchObject({ image_size: 'landscape_16_9' });
   });
 
+  it.each([
+    ['fal-ai/nano-banana-2', '16:9'],
+    ['fal-ai/nano-banana-pro', '3:2'],
+  ])('uses Banana request fields for %s', async (model, aspectRatio) => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        request_id: 'banana-req-1',
+        status_url: `https://queue.fal.run/${model}/requests/banana-req-1/status`,
+        response_url: `https://queue.fal.run/${model}/requests/banana-req-1/response`,
+      }),
+    });
+
+    const result = await provider.submit(
+      makeNormalizedRequest({
+        aspectRatio,
+        seed: 17,
+        providerOptions: {
+          resolution: '1K',
+          output_format: 'webp',
+          safety_tolerance: '3',
+          sync_mode: true,
+          enable_web_search: true,
+          image_size: 'ignored',
+        },
+      }),
+      model,
+    );
+
+    expect(result.kind).toBe('async');
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(url).toBe(`https://queue.fal.run/${model}`);
+    expect(JSON.parse(String(init?.body))).toEqual({
+      prompt: 'A cat wearing a space helmet',
+      num_images: 1,
+      aspect_ratio: aspectRatio,
+      resolution: '1K',
+      output_format: 'webp',
+      limit_generations: true,
+      seed: 17,
+      safety_tolerance: '3',
+    });
+  });
+
+  it('uses the documented per-model Banana defaults', async () => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        request_id: 'banana-req-2',
+        status_url: 'https://queue.fal.run/fal-ai/nano-banana-2/requests/banana-req-2/status',
+        response_url: 'https://queue.fal.run/fal-ai/nano-banana-2/requests/banana-req-2/response',
+      }),
+    });
+
+    await provider.submit(makeNormalizedRequest(), 'fal-ai/nano-banana-2');
+    let [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      aspect_ratio: 'auto',
+      resolution: '1K',
+    });
+
+    vi.mocked(global.fetch).mockClear();
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        request_id: 'banana-req-3',
+        status_url: 'https://queue.fal.run/fal-ai/nano-banana-pro/requests/banana-req-3/status',
+        response_url: 'https://queue.fal.run/fal-ai/nano-banana-pro/requests/banana-req-3/response',
+      }),
+    });
+    await provider.submit(makeNormalizedRequest(), 'fal-ai/nano-banana-pro');
+    [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      aspect_ratio: '1:1',
+      resolution: '1K',
+    });
+  });
+
   it('does not persist attacker-controlled task endpoints from a submit response', async () => {
     mockFetch({
       ok: true,

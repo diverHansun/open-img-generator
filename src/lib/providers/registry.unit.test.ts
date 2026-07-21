@@ -34,6 +34,8 @@ describe('registry', () => {
     expect(provider).toBeDefined();
     expect(provider?.id).toBe('fal');
     expect(provider?.capabilities.has('fal-ai/flux/schnell')).toBe(true);
+    expect(provider?.capabilities.has('fal-ai/nano-banana-2')).toBe(true);
+    expect(provider?.capabilities.has('fal-ai/nano-banana-pro')).toBe(true);
   });
 
   it('returns zenmux provider when ZENMUX_API_KEY is set', () => {
@@ -41,6 +43,7 @@ describe('registry', () => {
     const provider = getById('zenmux');
     expect(provider).toBeDefined();
     expect(provider?.id).toBe('zenmux');
+    expect(provider?.capabilities.has('openai/gpt-image-1.5')).toBe(true);
   });
 
   it('returns siliconflow provider when SILICONFLOW_API_KEY is set', () => {
@@ -49,6 +52,8 @@ describe('registry', () => {
     expect(provider).toBeDefined();
     expect(provider?.id).toBe('siliconflow');
     expect(provider?.capabilities.has('Kwai-Kolors/Kolors')).toBe(true);
+    expect(provider?.capabilities.has('Tongyi-MAI/Z-Image-Turbo')).toBe(true);
+    expect(provider?.capabilities.has('Tongyi-MAI/Z-Image')).toBe(false);
   });
 
   it('returns zhipu provider when ZHIPU_API_KEY is set', () => {
@@ -65,6 +70,8 @@ describe('registry', () => {
     expect(provider).toBeDefined();
     expect(provider?.id).toBe('doubao');
     expect(provider?.capabilities.has('doubao-seedream-4-0-250828')).toBe(true);
+    expect(provider?.capabilities.has('doubao-seedream-4-5-251128')).toBe(true);
+    expect(provider?.capabilities.has('doubao-seedream-5-0-260128')).toBe(true);
   });
 
   it('returns qwen provider when DASHSCOPE_API_KEY is set', () => {
@@ -73,6 +80,8 @@ describe('registry', () => {
     expect(provider).toBeDefined();
     expect(provider?.id).toBe('qwen');
     expect(provider?.capabilities.has('qwen-image-plus')).toBe(true);
+    expect(provider?.capabilities.has('qwen-image-2.0-pro')).toBe(true);
+    expect(provider?.capabilities.has('wan2.7-image-pro')).toBe(true);
   });
 
   it('returns kling provider when KLING_API_KEY is set', () => {

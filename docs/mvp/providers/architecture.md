@@ -124,7 +124,7 @@ src/lib/providers/
 
 ### 4.1.1 同步与异步的 timeout 边界
 
-ZenMux、SiliconFlow、智谱和 Doubao 的 `submit()` 成功响应本身承载完整图片，统一使用 `SYNC_IMAGE_GENERATION_TIMEOUT_MS`：默认 180 秒、只接受不大于 180 秒的正整数毫秒，非法配置回退默认值。fal、Qwen、Kling 的 submit 仅创建远端 task，继续使用 HTTP helper 的 30 秒 submit / 15 秒 poll 默认值。任何已进入网络的 submit 超时仍是 `unknown`，由 job-engine 终态收口，绝不自动重放。
+ZenMux、SiliconFlow、智谱、Doubao 与 Qwen `multimodal-sync` 模型的 `submit()` 成功响应本身承载完整图片，统一使用 `SYNC_IMAGE_GENERATION_TIMEOUT_MS`：默认 180 秒、只接受不大于 180 秒的正整数毫秒，非法配置回退默认值。fal、Qwen async profiles 与 Kling 的 submit 仅创建远端 task，继续使用 HTTP helper 的 30 秒 submit / 15 秒 poll 默认值。任何已进入网络的 submit 超时仍是 `unknown`，由 job-engine 终态收口，绝不自动重放。
 
 ### 4.2 ModelSpec 静态声明，不运行时探测
 
@@ -144,7 +144,7 @@ NormalizedRequest 中含 `providerOptions?: Record<string, unknown>`，各 adapt
 
 ### 4.4 Provider 分批接入
 
-当前已完成 Batch 1（SiliconFlow、智谱）、Batch 2（Doubao/Ark、Qwen/DashScope）与 Batch 3（Kling 独立 API）。Doubao 是同步响应，Qwen/Kling 是创建任务 + poll 异步流程；Kling 标准图片端点单次最多 1 张参考图、最多 9 张结果，标准协议没有远程取消端点。
+当前已完成 Batch 1（SiliconFlow、智谱）、Batch 2（Doubao/Ark、Qwen/DashScope）与 Batch 3（Kling 独立 API）。Qwen 按 ModelSpec 同时支持 legacy text2image async、multimodal sync 和 multimodal async；Kling 仍是创建任务 + poll 异步流程。Kling 标准图片端点单次最多 1 张参考图、最多 9 张结果，标准协议没有远程取消端点。
 
 Kling adapter 使用 `https://api-singapore.klingai.com`（可由 `KLING_BASE_URL` 覆盖），`POST/GET /v1/images/generations`，Bearer `KLING_API_KEY`；不复用 DashScope 鉴权或 URL。标准端点没有远程 cancel，因此取消由 job-engine 本地标记兜底。
 

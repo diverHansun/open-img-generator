@@ -1,6 +1,6 @@
 # 现有 Provider 模型扩展与私有 ModelSpec
 
-> 状态：实施中（Improve 1 已完成代码与自动化验证；Improve 2 待实施）
+> 状态：Improve 1、Improve 2 已完成代码与自动化验证；真实准入结果见各批 README
 >
 > 日期：2026-07-21
 >
@@ -16,6 +16,14 @@
 | --- | --- | --- | --- |
 | Improve 1 | 全 Provider 私有 ModelSpec 基础设施；扩展同协议模型 | ZenMux GPT Image 1.5；Seedream 4.5/5.0 Lite；SiliconFlow Z-Image/Turbo | [improve-1](./improve-1/README.md) |
 | Improve 2 | 使用 ModelSpec 增加新请求方言 | Fal Nano Banana 2/Pro；Qwen Image 2.0 Pro；Wan 2.7 Image Pro | [improve-2](./improve-2/README.md) |
+
+## 2026-07-21 实施结论
+
+- 七家现有 Provider 均已迁移到 Provider 内部私有 `ModelSpec`；未知模型会在发起网络请求前统一拒绝。
+- Improve 1 已接入 GPT Image 1.5、Seedream 4.5/5.0 Lite 与 Z-Image Turbo。GPT Image 1.5 已完成真实闭环；SiliconFlow、Doubao 因凭据此前只存在于旧服务进程、没有持久化，重启后需用户重新保存凭据再补真实准入。
+- `Tongyi-MAI/Z-Image` 没有在无法真实探测的情况下提前公开，避免目录展示一个尚未确认对当前账户可用的模型。
+- Improve 2 四个模型均完成真实 3000 端口闭环：Provider 返回、job 状态、远端图片立即转存、本地图片读取均成功。
+- Qwen 与 SiliconFlow 的图片 CDN 会受到本机代理 fake-IP 映射影响；本次只按安全诊断暴露出的精确 hostname 加入可信转存名单，没有建设通用代理路由层。
 
 ## 统一边界
 

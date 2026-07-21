@@ -41,7 +41,7 @@ API 层
   → 返回 ProviderInfo[] 给 API 层
 ```
 
-### 2.2 Sync 路径（zenmux / siliconflow / zhipu / doubao）
+### 2.2 Sync 路径（zenmux / siliconflow / zhipu / doubao / qwen multimodal-sync）
 
 ```
 job-engine
@@ -61,7 +61,7 @@ job-engine
 
 SiliconFlow、智谱与 Doubao 的差异只存在于 adapter 内部：分别解析 `images[].url`、`data[].url` 与 Ark `data[].b64_json`/URL fallback；Doubao 额外支持 `image[]` 参考图。providers 不负责最终持久化，内联图片先交由 job-engine/storage 暂存，远程 URL 则立即下载。
 
-### 2.3 Async 路径 — Submit（fal / qwen / kling）
+### 2.3 Async 路径 — Submit（fal / qwen legacy/Wan / kling）
 
 ```
 job-engine

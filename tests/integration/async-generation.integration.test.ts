@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vites
 import { createIntegrationDb, createStorageDir } from '../helpers/integration';
 
 process.env.FAL_KEY = 'test-fal-key';
+const originalDashscopeApiKey = process.env.DASHSCOPE_API_KEY;
+process.env.DASHSCOPE_API_KEY = 'test-dashscope-key';
 const originalWorkerEnabled = process.env.JOB_WORKER_ENABLED;
 process.env.JOB_WORKER_ENABLED = 'false';
 
@@ -21,6 +23,8 @@ describe('async generation end-to-end (fal)', () => {
     cleanupStorage();
     if (originalWorkerEnabled === undefined) delete process.env.JOB_WORKER_ENABLED;
     else process.env.JOB_WORKER_ENABLED = originalWorkerEnabled;
+    if (originalDashscopeApiKey === undefined) delete process.env.DASHSCOPE_API_KEY;
+    else process.env.DASHSCOPE_API_KEY = originalDashscopeApiKey;
   });
 
   it('creates a durable pending generation and completes across dispatch, poll, and storage', async () => {
@@ -116,5 +120,100 @@ describe('async generation end-to-end (fal)', () => {
     expect(getBody.status).toBe('completed');
     expect(getBody.images).toHaveLength(1);
     expect(statusCall).toBe(true);
+  });
+
+  it('completes Wan 2.7 across multimodal async submit, poll, and storage', async () => {
+    const imageBuffer = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ...Buffer.from('fake-wan-image'),
+    ]);
+
+    global.fetch = vi.fn().mockImplementation((url: string | URL, init?: RequestInit) => {
+      const requestUrl = String(url);
+      if (requestUrl.endsWith('/services/aigc/image-generation/generation')) {
+        const body = JSON.parse(String(init?.body));
+        expect(body).toMatchObject({
+          model: 'wan2.7-image-pro',
+          input: {
+            messages: [{
+              role: 'user',
+              content: [{ text: 'A Wan cup' }],
+            }],
+          },
+          parameters: {
+            n: 1,
+            enable_sequential: false,
+            thinking_mode: false,
+          },
+        });
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({
+            output: { task_id: 'wan-task-1', task_status: 'PENDING' },
+          }),
+        } as Response);
+      }
+      if (requestUrl.endsWith('/tasks/wan-task-1')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({
+            output: {
+              task_id: 'wan-task-1',
+              task_status: 'SUCCEEDED',
+              choices: [{
+                message: {
+                  content: [{
+                    type: 'image',
+                    image: 'https://dashscope.example.test/wan.png',
+                  }],
+                },
+              }],
+            },
+          }),
+        } as Response);
+      }
+      if (requestUrl === 'https://dashscope.example.test/wan.png') {
+        return Promise.resolve(new Response(imageBuffer, {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }));
+      }
+      throw new Error(`Unexpected integration request: ${requestUrl}`);
+    });
+
+    const postResponse = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientRequestId: '35bca6c7-7c6f-4c9a-aa61-333333333333',
+          targets: [{ provider: 'qwen', model: 'wan2.7-image-pro' }],
+          prompt: 'A Wan cup',
+          aspectRatio: '1:1',
+          sessionId: 'default-session',
+        }),
+      }),
+    );
+    const postBody = await postResponse.json();
+
+    await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    const completedResponse = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    const completed = await completedResponse.json();
+    expect(completed.status).toBe('completed');
+    expect(completed.images).toHaveLength(1);
   });
 });

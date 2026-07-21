@@ -16,6 +16,7 @@ import {
 import { qwenModelSpecs, type QwenImageProfile } from '../capabilities/qwen';
 import {
   modelCapabilityMap,
+  unsupportedModelError,
   unsupportedModelSubmitResult,
 } from '../model-spec';
 import {
@@ -24,13 +25,14 @@ import {
   trustedProviderExternalId,
 } from '../endpoint-policy';
 import { resolveCredential } from '../../user-config';
+import { resolveSyncImageGenerationTimeoutMs } from '../timeout-policy';
 import {
   classifyProviderDiagnostic,
   readProviderRequestIdFromResponse,
 } from '../error-diagnostics';
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
-const RESERVED_PARAMETER_KEYS = new Set([
+const LEGACY_RESERVED_PARAMETER_KEYS = new Set([
   'negative_prompt',
   'size',
   'n',
@@ -45,7 +47,7 @@ function baseUrl(): URL {
   );
 }
 
-function synthesisUrl(profile: QwenImageProfile): string {
+function generationUrl(profile: QwenImageProfile): string {
   return providerEndpointUrl(baseUrl(), profile.path);
 }
 
@@ -79,7 +81,7 @@ function contentTypeFromUrl(url: string): string {
   return 'image/png';
 }
 
-function buildRequestBody(
+function buildLegacyRequestBody(
   req: NormalizedRequest,
   model: string,
   profile: QwenImageProfile,
@@ -94,7 +96,7 @@ function buildRequestBody(
   if (req.seed !== undefined) parameters.seed = req.seed;
 
   for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
-    if (!RESERVED_PARAMETER_KEYS.has(key)) parameters[key] = value;
+    if (!LEGACY_RESERVED_PARAMETER_KEYS.has(key)) parameters[key] = value;
   }
 
   return {
@@ -104,11 +106,58 @@ function buildRequestBody(
   };
 }
 
-function parseResults(payload: unknown): ProviderImageRef[] {
-  if (!payload || typeof payload !== 'object') return [];
+function buildMultimodalRequestBody(
+  req: NormalizedRequest,
+  model: string,
+  profile: QwenImageProfile,
+): Record<string, unknown> {
+  const parameters: Record<string, unknown> = {
+    size: resolveSize(req, profile),
+    n: 1,
+    watermark: false,
+  };
+  if (req.seed !== undefined) parameters.seed = req.seed;
+  if (profile.kind === 'multimodal-sync') {
+    parameters.prompt_extend = true;
+    if (req.negativePrompt) parameters.negative_prompt = req.negativePrompt;
+  } else {
+    parameters.enable_sequential = false;
+    parameters.thinking_mode = false;
+  }
+
+  return {
+    model,
+    input: {
+      messages: [
+        {
+          role: 'user',
+          content: [{ text: req.prompt }],
+        },
+      ],
+    },
+    parameters,
+  };
+}
+
+function buildRequestBody(
+  req: NormalizedRequest,
+  model: string,
+  profile: QwenImageProfile,
+): Record<string, unknown> {
+  return profile.kind === 'legacy-text2image-async'
+    ? buildLegacyRequestBody(req, model, profile)
+    : buildMultimodalRequestBody(req, model, profile);
+}
+
+function readOutput(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object') return null;
   const output = (payload as Record<string, unknown>).output;
-  if (!output || typeof output !== 'object') return [];
-  const rawResults = (output as Record<string, unknown>).results;
+  return output && typeof output === 'object' ? (output as Record<string, unknown>) : null;
+}
+
+function parseLegacyResults(payload: unknown): ProviderImageRef[] {
+  const output = readOutput(payload);
+  const rawResults = output?.results;
   if (!Array.isArray(rawResults)) return [];
 
   return rawResults.flatMap((item, index) => {
@@ -131,10 +180,41 @@ function parseResults(payload: unknown): ProviderImageRef[] {
   });
 }
 
-function readOutput(payload: unknown): Record<string, unknown> | null {
-  if (!payload || typeof payload !== 'object') return null;
-  const output = (payload as Record<string, unknown>).output;
-  return output && typeof output === 'object' ? (output as Record<string, unknown>) : null;
+function parseMultimodalResults(payload: unknown): ProviderImageRef[] {
+  const output = readOutput(payload);
+  const choices = output?.choices;
+  if (!Array.isArray(choices)) return [];
+
+  const images: ProviderImageRef[] = [];
+  for (const choice of choices) {
+    if (!choice || typeof choice !== 'object') continue;
+    const message = (choice as Record<string, unknown>).message;
+    if (!message || typeof message !== 'object') continue;
+    const content = (message as Record<string, unknown>).content;
+    if (!Array.isArray(content)) continue;
+    for (const item of content) {
+      if (!item || typeof item !== 'object') continue;
+      const image = item as Record<string, unknown>;
+      if (typeof image.image !== 'string' || image.image.length === 0) continue;
+      images.push({
+        url: image.image,
+        width: typeof image.width === 'number' ? image.width : null,
+        height: typeof image.height === 'number' ? image.height : null,
+        contentType: contentTypeFromUrl(image.image),
+        index: images.length,
+      });
+    }
+  }
+  return images;
+}
+
+function parseResults(
+  payload: unknown,
+  profile: QwenImageProfile,
+): ProviderImageRef[] {
+  return profile.kind === 'legacy-text2image-async'
+    ? parseLegacyResults(payload)
+    : parseMultimodalResults(payload);
 }
 
 function qwenErrorCode(payload: unknown): unknown {
@@ -144,6 +224,26 @@ function qwenErrorCode(payload: unknown): unknown {
   const root = payload as Record<string, unknown>;
   if (root.code !== undefined) return root.code;
   return readOutput(payload)?.code;
+}
+
+function asyncHandle(payload: unknown, model: string): JobHandle | null {
+  const output = readOutput(payload);
+  const taskId = output && typeof output.task_id === 'string' ? output.task_id : '';
+  if (!taskId) return null;
+  try {
+    const statusUrl = taskUrl(taskId);
+    return {
+      providerId: 'qwen',
+      model,
+      externalId: taskId,
+      statusUrl,
+      responseUrl: statusUrl,
+      cancelUrl: null,
+      submittedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export class QwenProvider implements ImageProvider {
@@ -161,22 +261,32 @@ export class QwenProvider implements ImageProvider {
     if (!spec) return unsupportedModelSubmitResult(this.id);
 
     try {
-      const data = await postJson(synthesisUrl(spec.profile), buildRequestBody(req, model, spec.profile), {
+      const body = buildRequestBody(req, model, spec.profile);
+      if (spec.profile.kind === 'multimodal-sync') {
+        const data = await postJson(
+          generationUrl(spec.profile),
+          body,
+          this.authHeaders(),
+          { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
+        );
+        const images = parseResults(data, spec.profile);
+        if (images.length === 0) {
+          return {
+            kind: 'failed',
+            error: createProviderError(500, 'No images in Qwen response', false, {
+              diagnostic: classifyProviderDiagnostic('qwen', { noResult: true }),
+            }),
+          };
+        }
+        return { kind: 'sync', images };
+      }
+
+      const data = await postJson(generationUrl(spec.profile), body, {
         ...this.authHeaders(),
         'X-DashScope-Async': 'enable',
       });
-      const output = readOutput(data);
-      const taskId = output && typeof output.task_id === 'string' ? output.task_id : '';
-      if (!taskId) {
-        return {
-          kind: 'failed',
-          error: createProviderError(500, 'No task_id in Qwen response', false),
-        };
-      }
-      let statusUrl: string;
-      try {
-        statusUrl = taskUrl(taskId);
-      } catch {
+      const handle = asyncHandle(data, model);
+      if (!handle) {
         return {
           kind: 'failed',
           error: createProviderError(
@@ -187,15 +297,6 @@ export class QwenProvider implements ImageProvider {
           ),
         };
       }
-      const handle: JobHandle = {
-        providerId: 'qwen',
-        model,
-        externalId: taskId,
-        statusUrl,
-        responseUrl: statusUrl,
-        cancelUrl: null,
-        submittedAt: new Date().toISOString(),
-      };
       return { kind: 'async', handle };
     } catch (err) {
       return { kind: 'failed', error: this.mapError(err) };
@@ -203,9 +304,14 @@ export class QwenProvider implements ImageProvider {
   }
 
   async poll(handle: JobHandle): Promise<PollResult> {
+    const spec = qwenModelSpecs.get(handle.model);
+    if (!spec || spec.profile.kind === 'multimodal-sync') {
+      return { status: 'failed', error: unsupportedModelError(this.id) };
+    }
+
     try {
-      // Persisted URL fields are legacy compatibility data only. Reconstruct
-      // every authenticated Qwen poll endpoint from the configured base + ID.
+      // Persisted URL fields are compatibility data only. Reconstruct every
+      // authenticated Qwen poll endpoint from the configured base + task ID.
       const data = await getJson(taskUrl(handle.externalId), this.authHeaders());
       const output = readOutput(data);
       const status = typeof output?.task_status === 'string'
@@ -216,7 +322,7 @@ export class QwenProvider implements ImageProvider {
       if (status === 'RUNNING') return { status: 'running' };
       if (status === 'CANCELED' || status === 'CANCELLED') return { status: 'cancelled' };
       if (status === 'SUCCEEDED') {
-        const images = parseResults(data);
+        const images = parseResults(data, spec.profile);
         return images.length > 0
           ? { status: 'completed', images }
           : {
@@ -227,8 +333,16 @@ export class QwenProvider implements ImageProvider {
             };
       }
 
-      const code = typeof output?.code === 'string' ? output.code : 'Qwen task failed';
-      const message = typeof output?.message === 'string' ? output.message : code;
+      const code = typeof output?.code === 'string'
+        ? output.code
+        : typeof (data as Record<string, unknown>)?.code === 'string'
+          ? String((data as Record<string, unknown>).code)
+          : 'Qwen task failed';
+      const message = typeof output?.message === 'string'
+        ? output.message
+        : typeof (data as Record<string, unknown>)?.message === 'string'
+          ? String((data as Record<string, unknown>).message)
+          : code;
       return {
         status: 'failed',
         error: createProviderError(422, `${code}: ${message}`, false, {

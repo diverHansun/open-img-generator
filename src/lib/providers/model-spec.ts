@@ -1,5 +1,6 @@
 import type {
   ProviderCapabilities,
+  ProviderError,
   ProviderId,
   SubmitResult,
 } from './types';
@@ -38,20 +39,21 @@ export function modelCapabilityMap<Profile>(
   );
 }
 
-export function unsupportedModelSubmitResult(providerId: ProviderId): SubmitResult {
+export function unsupportedModelError(providerId: ProviderId): ProviderError {
   return {
-    kind: 'failed',
-    error: {
-      code: 'INVALID_REQUEST',
-      message: `Unsupported model for provider ${providerId}`,
-      retryable: false,
-      httpStatus: 400,
-      disposition: 'not_started',
-      diagnostic: {
-        providerId,
-        category: 'model_or_endpoint',
-        providerCode: 'unsupported_model',
-      },
+    code: 'INVALID_REQUEST',
+    message: `Unsupported model for provider ${providerId}`,
+    retryable: false,
+    httpStatus: 400,
+    disposition: 'not_started',
+    diagnostic: {
+      providerId,
+      category: 'model_or_endpoint',
+      providerCode: 'unsupported_model',
     },
   };
+}
+
+export function unsupportedModelSubmitResult(providerId: ProviderId): SubmitResult {
+  return { kind: 'failed', error: unsupportedModelError(providerId) };
 }
