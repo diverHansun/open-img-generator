@@ -50,6 +50,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "client-only": "0.0.1",
     "drizzle-kit": "^0.28.0",
     "msw": "^2.6.0",
     "postcss": "^8.5.19",
