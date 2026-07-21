@@ -36,9 +36,11 @@ job-engine
 
 ```
 API 层: GET /api/images/:id
-  → db.getImage(id) → { storagePath, contentType }
-  → storage.getReadStream(storagePath) → ReadableStream
-  → 返回 HTTP 200 + Content-Type + 二进制 body
+  → db.getImage(id) → available / tombstone
+  → available: storage.getReadStream(storagePath) → HTTP 200 + 图片流
+  → tombstone: HTTP 410 + IMAGE_EXPIRED / IMAGE_DELETED / IMAGE_MISSING
+  → unknown id: HTTP 404
+  → DB available 但文件缺失: 原子转为 storage_missing 后返回 410
 ```
 
 ---
@@ -80,7 +82,7 @@ MVP **不实现** `getPublicUrl`；图片访问统一走 API 二进制响应。
 
 ## 5. 生命周期清理
 
-worker 定期调用 `cleanupStoredImages()`；该调用只删除过期未收藏图片和超过宽限期的孤儿文件，不影响 `GET /api/images/:id` 的读取契约。支持 `dryRun` 供维护检查。
+worker 定期调用 `cleanupStoredImages()`；该调用把过期未收藏图片改为墓碑、删除图片字节并清理超过宽限期的孤儿文件，不删除生成历史。`GET /api/images/:id/download` 只导出副本且不续期；`DELETE /api/images/:id` 幂等写 `user_deleted` 墓碑。支持 `dryRun` 供维护检查。
 
 ## 环境配置
 
@@ -91,3 +93,4 @@ worker 定期调用 `cleanupStoredImages()`；该调用只删除过期未收藏�
 | ALLOW_INSECURE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许 `http:`；生产保持关闭 |
 | ALLOW_PRIVATE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许私网/loopback 地址；生产保持关闭 |
 | TRUSTED_PROXY_IMAGE_HOSTS | 空 | 透明代理把已验证外部 HTTPS CDN 映射为 `198.18.0.0/15` 时的逗号分隔精确 host 列表；不是通配符或私网 bypass |
+| IMAGE_RETENTION_DAYS | `7` | 未收藏图片自动保留天数；`0` 关闭自动过期，合法上限 36500 |

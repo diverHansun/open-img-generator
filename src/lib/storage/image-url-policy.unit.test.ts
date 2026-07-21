@@ -70,7 +70,10 @@ describe('remote image URL policy', () => {
 
     await expect(validateRemoteImageUrl('https://cdn.fal.media/result.jpeg', {
       resolveHostname: async () => ['198.18.0.125'],
-    })).rejects.toBeInstanceOf(RemoteImageUrlError);
+    })).rejects.toMatchObject({
+      reason: 'proxy_mapping_not_trusted',
+      hostname: 'cdn.fal.media',
+    });
 
     await expect(validateRemoteImageUrl('https://v3b.fal.media/result.jpeg', {
       resolveHostname: async () => ['198.18.0.125', '93.184.216.34'],

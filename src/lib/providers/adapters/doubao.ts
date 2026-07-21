@@ -78,7 +78,7 @@ function buildRequestBody(req: NormalizedRequest, model: string): Record<string,
     size,
     sequential_image_generation: 'disabled',
     stream: false,
-    response_format: 'url',
+    response_format: 'b64_json',
     watermark: true,
   };
   if (req.seed !== undefined) body.seed = req.seed;

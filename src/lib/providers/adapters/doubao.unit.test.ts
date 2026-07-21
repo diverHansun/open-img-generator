@@ -69,7 +69,7 @@ describe('DoubaoProvider', () => {
       size: '2048x1536',
       seed: 42,
       sequential_image_generation: 'disabled',
-      response_format: 'url',
+      response_format: 'b64_json',
     });
     expect(timeout).toHaveBeenCalledWith(SYNC_IMAGE_GENERATION_TIMEOUT_MS);
   });

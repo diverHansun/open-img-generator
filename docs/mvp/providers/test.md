@@ -80,7 +80,7 @@
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
-| Doubao 正常 submit | model=`doubao-seedream-4-0-250828` | `kind="sync"`，解析 Ark `data[].url` |
+| Doubao 正常 submit | model=`doubao-seedream-4-0-250828` | 请求 `response_format=b64_json`；优先解析 `data[].b64_json`，仍兼容 URL fallback |
 | Doubao 公开比/seed | `aspectRatio="4:3"` + seed | 请求体含 `size="2048x1536"` + `seed` |
 | Doubao 图生图 | `referenceImages` | 请求体含 `image[]` |
 | Qwen 正常 submit | model=`qwen-image-plus` | `kind="async"`，返回 `task_id` 句柄 |

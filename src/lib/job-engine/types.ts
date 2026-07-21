@@ -3,6 +3,7 @@ import type {
   ProviderId,
   ProviderMode,
 } from '../providers/types';
+import type { StorageDiagnostic } from '../errors';
 
 export type GenerationTarget = {
   provider: ProviderId;
@@ -43,6 +44,7 @@ export type JobView = {
     message: string;
     retryable: boolean;
     diagnostic?: ProviderDiagnostic;
+    storageDiagnostic?: StorageDiagnostic;
   };
 };
 

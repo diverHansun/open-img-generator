@@ -359,6 +359,7 @@ export function GenerationDetailDialog({
                             message: t(getJobErrorMessageKey(
                               visibleError.code,
                               visibleError.diagnostic,
+                              visibleError.storageDiagnostic,
                             )),
                           })}
                           {diagnosticReference ? (

@@ -22,7 +22,7 @@ import {
   type GenerationStatus as DbGenerationStatus,
   type UpdateGenerationJobPatch,
 } from '../db';
-import { StorageError } from '../errors';
+import { StorageError, type StorageDiagnostic } from '../errors';
 import { getById } from '../providers';
 import type {
   JobHandle,
@@ -77,8 +77,15 @@ function jobDiagnostic(
   code: string,
   _message: string,
   retryable = false,
+  storageDiagnostic?: StorageDiagnostic,
 ): string {
-  return serializeSafeJobError(code, retryable);
+  return serializeSafeJobError(
+    code,
+    retryable,
+    'INTERNAL_ERROR',
+    undefined,
+    storageDiagnostic,
+  );
 }
 
 function safeRecordValue(value: object, key: string): unknown {
@@ -435,6 +442,7 @@ export async function completeSync(
             'STORAGE_ERROR',
             'Generated image could not be stored',
             false,
+            result.error.diagnostic,
           ),
           pollLeaseUntil: null,
           nextPollAt: null,
@@ -1483,7 +1491,12 @@ async function storeNextImage(
       return scheduleRetryOrFinish(
         claimed,
         'download',
-        jobDiagnostic('STORAGE_ERROR', 'Image download temporarily failed', true),
+        jobDiagnostic(
+          'STORAGE_ERROR',
+          'Image download temporarily failed',
+          true,
+          err.diagnostic,
+        ),
         client,
         claimedUntil,
         err.retryAfterMs,
@@ -1491,7 +1504,12 @@ async function storeNextImage(
     }
     return applyTerminalFailure(
       claimed,
-      jobDiagnostic('STORAGE_ERROR', 'Image storage failed', false),
+      jobDiagnostic(
+        'STORAGE_ERROR',
+        'Image storage failed',
+        false,
+        err instanceof StorageError ? err.diagnostic : undefined,
+      ),
       client,
       claimedUntil,
       'storing',

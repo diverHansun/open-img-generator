@@ -1,5 +1,6 @@
 import type { JobView } from './types';
 import { toSafeProviderDiagnostic } from '../providers/error-diagnostics';
+import { toSafeStorageDiagnostic } from '../errors';
 
 type SafeJobError = NonNullable<JobView['error']>;
 
@@ -117,14 +118,19 @@ export function serializeSafeJobError(
   retryable: boolean,
   fallbackCode: SafeJobErrorCode = 'INTERNAL_ERROR',
   diagnostic?: unknown,
+  storageDiagnostic?: unknown,
 ): string {
   const safeCode = isSafeJobErrorCode(code) ? code : fallbackCode;
   const safeDiagnostic = toSafeProviderDiagnostic(diagnostic);
+  const safeStorageDiagnostic = toSafeStorageDiagnostic(storageDiagnostic);
   return JSON.stringify({
     code: safeCode,
     message: SAFE_JOB_ERRORS[safeCode].message,
     retryable,
     ...(safeDiagnostic === undefined ? {} : { diagnostic: safeDiagnostic }),
+    ...(safeStorageDiagnostic === undefined
+      ? {}
+      : { storageDiagnostic: safeStorageDiagnostic }),
   });
 }
 
@@ -157,6 +163,9 @@ export function toSafeJobError(serialized: string | null): JobView['error'] {
   const code = Reflect.get(parsed, 'code') as keyof typeof SAFE_JOB_ERRORS;
   const policy = SAFE_JOB_ERRORS[code];
   const diagnostic = toSafeProviderDiagnostic(Reflect.get(parsed, 'diagnostic'));
+  const storageDiagnostic = toSafeStorageDiagnostic(
+    Reflect.get(parsed, 'storageDiagnostic'),
+  );
   return {
     code,
     message: policy.message,
@@ -165,5 +174,6 @@ export function toSafeJobError(serialized: string | null): JobView['error'] {
     // terminal for this specific job (for example a non-retryable timeout).
     retryable: Reflect.get(parsed, 'retryable') as boolean,
     ...(diagnostic === undefined ? {} : { diagnostic }),
+    ...(storageDiagnostic === undefined ? {} : { storageDiagnostic }),
   };
 }

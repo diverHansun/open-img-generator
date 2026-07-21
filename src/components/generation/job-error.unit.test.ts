@@ -56,6 +56,24 @@ describe('job error presentation', () => {
     ).toBe('req-123');
   });
 
+  it('uses safe storage diagnostics and exposes only their hostname', () => {
+    const storageDiagnostic = {
+      category: 'proxy_mapping_not_trusted' as const,
+      hostname: 'img.example.com',
+    };
+    expect(
+      getJobErrorMessageKey('STORAGE_ERROR', undefined, storageDiagnostic),
+    ).toBe('generation.jobError.storageProxyMapping');
+    expect(
+      getJobErrorDiagnosticReference({
+        code: 'STORAGE_ERROR',
+        message: 'internal',
+        retryable: false,
+        storageDiagnostic,
+      }),
+    ).toBe('img.example.com');
+  });
+
   it('does not present transient retry diagnostics as a failed active job', () => {
     const transient = { code: 'TIMEOUT', message: 'internal', retryable: true };
 

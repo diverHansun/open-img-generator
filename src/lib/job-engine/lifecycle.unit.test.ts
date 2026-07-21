@@ -618,6 +618,10 @@ describe('durable lifecycle', () => {
         .mockRejectedValueOnce(new StorageError('Remote image temporarily unavailable', {
           retryable: true,
           retryAfterMs: 1_000,
+          diagnostic: {
+            category: 'remote_download_timeout',
+            hostname: 'cdn.example.test',
+          },
         }))
         .mockResolvedValueOnce({
           storagePath: '2026/07/retry.png',
@@ -633,6 +637,12 @@ describe('durable lifecycle', () => {
         attemptCount: 1,
         retryStartedAt: now,
         pollLeaseUntil: null,
+      });
+      expect(JSON.parse(waiting.error!)).toMatchObject({
+        storageDiagnostic: {
+          category: 'remote_download_timeout',
+          hostname: 'cdn.example.test',
+        },
       });
       const retryAt = Date.parse(waiting.nextPollAt!);
       vi.setSystemTime(new Date(retryAt));

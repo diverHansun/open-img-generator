@@ -98,4 +98,25 @@ describe('public job error DTO', () => {
       },
     });
   });
+
+  it('keeps only a safe storage category and hostname', () => {
+    const serialized = serializeSafeJobError(
+      'STORAGE_ERROR',
+      false,
+      'INTERNAL_ERROR',
+      undefined,
+      {
+        category: 'proxy_mapping_not_trusted',
+        hostname: 'IMG.Example.COM',
+        signedUrl: 'https://img.example.com/file?token=secret',
+      },
+    );
+    expect(serialized).not.toContain('token=secret');
+    expect(toSafeJobError(serialized)).toMatchObject({
+      storageDiagnostic: {
+        category: 'proxy_mapping_not_trusted',
+        hostname: 'img.example.com',
+      },
+    });
+  });
 });

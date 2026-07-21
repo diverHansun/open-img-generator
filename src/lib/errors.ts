@@ -55,6 +55,46 @@ export class DatabaseUnavailableError extends AppError {
   }
 }
 
+export const STORAGE_DIAGNOSTIC_CATEGORIES = [
+  'remote_url_invalid',
+  'remote_dns_failed',
+  'remote_address_blocked',
+  'proxy_mapping_not_trusted',
+  'remote_download_timeout',
+  'remote_download_failed',
+  'remote_http_rejected',
+  'remote_content_invalid',
+  'local_write_failed',
+] as const;
+
+export type StorageDiagnostic = {
+  category: (typeof STORAGE_DIAGNOSTIC_CATEGORIES)[number];
+  hostname?: string;
+};
+
+const SAFE_DIAGNOSTIC_HOSTNAME =
+  /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)$/;
+
+export function toSafeStorageDiagnostic(
+  value: unknown,
+): StorageDiagnostic | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const category = Reflect.get(value, 'category');
+  if (
+    typeof category !== 'string' ||
+    !(STORAGE_DIAGNOSTIC_CATEGORIES as readonly string[]).includes(category)
+  ) {
+    return undefined;
+  }
+  const hostname = Reflect.get(value, 'hostname');
+  return {
+    category: category as StorageDiagnostic['category'],
+    ...(typeof hostname === 'string' && SAFE_DIAGNOSTIC_HOSTNAME.test(hostname)
+      ? { hostname: hostname.toLowerCase() }
+      : {}),
+  };
+}
+
 export class StorageError extends AppError {
   constructor(
     message: string,
@@ -62,16 +102,19 @@ export class StorageError extends AppError {
       cause?: unknown;
       retryable?: boolean;
       retryAfterMs?: number;
+      diagnostic?: StorageDiagnostic;
     } = {},
   ) {
     super(message);
     this.cause = options.cause;
     this.retryable = options.retryable ?? false;
     this.retryAfterMs = options.retryAfterMs;
+    this.diagnostic = toSafeStorageDiagnostic(options.diagnostic);
   }
 
   public readonly cause: unknown;
   /** Only a safe read/download failure may re-enter the storing retry budget. */
   public readonly retryable: boolean;
   public readonly retryAfterMs: number | undefined;
+  public readonly diagnostic: StorageDiagnostic | undefined;
 }

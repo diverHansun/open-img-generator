@@ -117,14 +117,25 @@ describe('storage', () => {
 
     await expect(downloadAndStore('https://cdn.example.com/missing.png', {
       resolveHostname: publicResolver,
-    })).rejects.toBeInstanceOf(StorageError);
+    })).rejects.toMatchObject({
+      diagnostic: {
+        category: 'remote_http_rejected',
+        hostname: 'cdn.example.com',
+      },
+    });
   });
 
   it('throws StorageError on network error', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('network failure'));
     await expect(downloadAndStore('https://cdn.example.com/image.png', {
       resolveHostname: publicResolver,
-    })).rejects.toMatchObject({ retryable: true });
+    })).rejects.toMatchObject({
+      retryable: true,
+      diagnostic: {
+        category: 'remote_download_failed',
+        hostname: 'cdn.example.com',
+      },
+    });
   });
 
   it('marks 5xx downloads retryable and keeps a bounded Retry-After', async () => {

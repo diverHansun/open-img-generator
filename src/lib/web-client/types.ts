@@ -105,6 +105,19 @@ export type JobView = {
     message: string;
     retryable: boolean;
     diagnostic?: ProviderDiagnostic;
+    storageDiagnostic?: {
+      category:
+        | 'remote_url_invalid'
+        | 'remote_dns_failed'
+        | 'remote_address_blocked'
+        | 'proxy_mapping_not_trusted'
+        | 'remote_download_timeout'
+        | 'remote_download_failed'
+        | 'remote_http_rejected'
+        | 'remote_content_invalid'
+        | 'local_write_failed';
+      hostname?: string;
+    };
   };
 };
 

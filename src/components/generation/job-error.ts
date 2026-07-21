@@ -42,10 +42,29 @@ const DIAGNOSTIC_CATEGORY_MESSAGE_KEYS = {
   TranslationKey
 >>;
 
+const STORAGE_DIAGNOSTIC_MESSAGE_KEYS = {
+  remote_url_invalid: 'generation.jobError.storageUrlInvalid',
+  remote_dns_failed: 'generation.jobError.storageDns',
+  remote_address_blocked: 'generation.jobError.storageAddressBlocked',
+  proxy_mapping_not_trusted: 'generation.jobError.storageProxyMapping',
+  remote_download_timeout: 'generation.jobError.storageTimeout',
+  remote_download_failed: 'generation.jobError.storageNetwork',
+  remote_http_rejected: 'generation.jobError.storageHttp',
+  remote_content_invalid: 'generation.jobError.storageContent',
+  local_write_failed: 'generation.jobError.storageLocal',
+} as const satisfies Record<
+  NonNullable<NonNullable<JobView['error']>['storageDiagnostic']>['category'],
+  TranslationKey
+>;
+
 export function getJobErrorMessageKey(
   code: string,
   diagnostic?: NonNullable<JobView['error']>['diagnostic'],
+  storageDiagnostic?: NonNullable<JobView['error']>['storageDiagnostic'],
 ): TranslationKey {
+  if (storageDiagnostic) {
+    return STORAGE_DIAGNOSTIC_MESSAGE_KEYS[storageDiagnostic.category];
+  }
   if (diagnostic && Object.hasOwn(DIAGNOSTIC_CATEGORY_MESSAGE_KEYS, diagnostic.category)) {
     return DIAGNOSTIC_CATEGORY_MESSAGE_KEYS[
       diagnostic.category as keyof typeof DIAGNOSTIC_CATEGORY_MESSAGE_KEYS
@@ -61,7 +80,11 @@ export function getJobErrorMessageKey(
 export function getJobErrorDiagnosticReference(
   error: JobView['error'],
 ): string | undefined {
-  return error?.diagnostic?.providerRequestId ?? error?.diagnostic?.providerCode;
+  return (
+    error?.diagnostic?.providerRequestId ??
+    error?.diagnostic?.providerCode ??
+    error?.storageDiagnostic?.hostname
+  );
 }
 
 /**

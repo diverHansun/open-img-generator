@@ -17,7 +17,14 @@ export type RemoteImageUrlPolicyOptions = {
 };
 
 export class RemoteImageUrlError extends Error {
-  constructor() {
+  constructor(
+    public readonly reason:
+      | 'invalid_url'
+      | 'dns_failed'
+      | 'address_blocked'
+      | 'proxy_mapping_not_trusted',
+    public readonly hostname?: string,
+  ) {
     super('Remote image URL is not allowed');
     this.name = 'RemoteImageUrlError';
   }
@@ -139,14 +146,14 @@ export async function validateRemoteImageUrl(
   options: RemoteImageUrlPolicyOptions = {},
 ): Promise<URL> {
   if (typeof value !== 'string' || value.length === 0 || value.length > MAX_REMOTE_IMAGE_URL_LENGTH) {
-    throw new RemoteImageUrlError();
+    throw new RemoteImageUrlError('invalid_url');
   }
 
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    throw new RemoteImageUrlError();
+    throw new RemoteImageUrlError('invalid_url');
   }
   if (
     (parsed.protocol !== 'https:' &&
@@ -154,7 +161,7 @@ export async function validateRemoteImageUrl(
     parsed.username ||
     parsed.password
   ) {
-    throw new RemoteImageUrlError();
+    throw new RemoteImageUrlError('invalid_url', parsed.hostname || undefined);
   }
   // URL fragments are never a valid part of a signed image request. Drop it
   // before fetch so even a future logger cannot accidentally preserve it.
@@ -162,7 +169,7 @@ export async function validateRemoteImageUrl(
 
   const hostname = hostnameFromUrl(parsed);
   if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost')) {
-    throw new RemoteImageUrlError();
+    throw new RemoteImageUrlError('address_blocked', hostname || undefined);
   }
   let addresses: readonly string[];
   try {
@@ -170,16 +177,23 @@ export async function validateRemoteImageUrl(
       ? [hostname]
       : await (options.resolveHostname ?? resolveHostname)(hostname);
   } catch {
-    throw new RemoteImageUrlError();
+    throw new RemoteImageUrlError('dns_failed', hostname);
   }
-  if (addresses.length === 0) throw new RemoteImageUrlError();
+  if (addresses.length === 0) {
+    throw new RemoteImageUrlError('dns_failed', hostname);
+  }
   if (!allowPrivateAddresses(options) && addresses.some(isForbiddenAddress)) {
     // A local transparent proxy can intentionally synthesize 198.18/15 DNS
     // answers for an external CDN. Do not globally permit private/reserved
     // ranges: this exception is HTTPS-only, exact-host configured, and rejects
     // mixed DNS answers. The caller repeats this policy after every redirect.
     if (!allowsTrustedProxyMappedAddresses(parsed, hostname, addresses)) {
-      throw new RemoteImageUrlError();
+      throw new RemoteImageUrlError(
+        addresses.every(isTrustedProxyMappedIpv4)
+          ? 'proxy_mapping_not_trusted'
+          : 'address_blocked',
+        hostname,
+      );
     }
   }
   return parsed;

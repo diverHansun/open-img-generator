@@ -497,6 +497,7 @@ export function GenerateStage({
                         {t(getJobErrorMessageKey(
                           visibleError.code,
                           visibleError.diagnostic,
+                          visibleError.storageDiagnostic,
                         ))}
                         {diagnosticReference ? (
                           <small>

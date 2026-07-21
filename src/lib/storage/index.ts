@@ -2,7 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { randomUUID } from 'node:crypto';
-import { NotFoundError, StorageError } from '../errors';
+import {
+  NotFoundError,
+  StorageError,
+  type StorageDiagnostic,
+} from '../errors';
 import {
   RemoteImageUrlError,
   validateRemoteImageUrl,
@@ -30,6 +34,35 @@ export type DownloadAndStoreResult = {
 };
 
 type BytePrefix = Uint8Array<ArrayBufferLike>;
+
+function safeRemoteHostname(value: string | URL): string | undefined {
+  try {
+    return (value instanceof URL ? value : new URL(value)).hostname || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function storageDiagnosticForUrlError(
+  error: RemoteImageUrlError,
+): StorageDiagnostic {
+  let category: StorageDiagnostic['category'];
+  switch (error.reason) {
+    case 'dns_failed':
+      category = 'remote_dns_failed';
+      break;
+    case 'address_blocked':
+      category = 'remote_address_blocked';
+      break;
+    case 'proxy_mapping_not_trusted':
+      category = 'proxy_mapping_not_trusted';
+      break;
+    case 'invalid_url':
+      category = 'remote_url_invalid';
+      break;
+  }
+  return { category, ...(error.hostname ? { hostname: error.hostname } : {}) };
+}
 
 export function getStorageRoot(): string {
   const root = process.env.LOCAL_STORAGE_DIR ?? './data/images';
@@ -437,9 +470,13 @@ async function fetchRemoteImage(
     nextUrl = await validateRemoteImageUrl(initialUrl, options);
   } catch (err) {
     if (err instanceof RemoteImageUrlError) {
-      throw new StorageError('Remote image URL is not allowed');
+      throw new StorageError('Remote image URL is not allowed', {
+        diagnostic: storageDiagnosticForUrlError(err),
+      });
     }
-    throw new StorageError('Remote image URL could not be validated');
+    throw new StorageError('Remote image URL could not be validated', {
+      diagnostic: { category: 'remote_url_invalid' },
+    });
   }
 
   const deadlineAt = Date.now() + 60_000;
@@ -448,7 +485,13 @@ async function fetchRemoteImage(
     try {
       const remainingMs = deadlineAt - Date.now();
       if (remainingMs <= 0) {
-        throw new StorageError('Remote image download timed out', { retryable: true });
+        throw new StorageError('Remote image download timed out', {
+          retryable: true,
+          diagnostic: {
+            category: 'remote_download_timeout',
+            hostname: safeRemoteHostname(nextUrl),
+          },
+        });
       }
       response = await fetch(nextUrl, {
         signal: AbortSignal.timeout(remainingMs),
@@ -456,7 +499,23 @@ async function fetchRemoteImage(
       });
     } catch (err) {
       if (err instanceof StorageError) throw err;
-      throw new StorageError('Failed to download remote image', { retryable: true });
+      const timedOut =
+        err instanceof Error &&
+        (err.name === 'TimeoutError' || err.name === 'AbortError');
+      throw new StorageError(
+        timedOut
+          ? 'Remote image download timed out'
+          : 'Failed to download remote image',
+        {
+          retryable: true,
+          diagnostic: {
+            category: timedOut
+              ? 'remote_download_timeout'
+              : 'remote_download_failed',
+            hostname: safeRemoteHostname(nextUrl),
+          },
+        },
+      );
     }
     if (response.status < 300 || response.status >= 400) return response;
     if (redirects === 3) {
@@ -470,9 +529,13 @@ async function fetchRemoteImage(
       nextUrl = await validateRemoteImageUrl(new URL(location, nextUrl).toString(), options);
     } catch (err) {
       if (err instanceof RemoteImageUrlError) {
-        throw new StorageError('Remote image redirect is not allowed');
+        throw new StorageError('Remote image redirect is not allowed', {
+          diagnostic: storageDiagnosticForUrlError(err),
+        });
       }
-      throw new StorageError('Remote image redirect could not be validated');
+      throw new StorageError('Remote image redirect could not be validated', {
+        diagnostic: { category: 'remote_url_invalid' },
+      });
     }
   }
   throw new StorageError('Remote image redirected too many times');
@@ -502,12 +565,21 @@ export async function downloadAndStore(
     throw new StorageError('Remote image download was rejected', {
       retryable: response.status === 429 || response.status >= 500,
       retryAfterMs: parseRetryAfterMs(response),
+      diagnostic: {
+        category: 'remote_http_rejected',
+        hostname: safeRemoteHostname(url),
+      },
     });
   }
   const contentType = normalizeImageContentType(response.headers.get('content-type'));
   if (!contentType) {
     await cancelResponseBody(response);
-    throw new StorageError('Remote image content type is not supported');
+    throw new StorageError('Remote image content type is not supported', {
+      diagnostic: {
+        category: 'remote_content_invalid',
+        hostname: safeRemoteHostname(url),
+      },
+    });
   }
   let sourcePath: string | null = null;
   try {
@@ -519,7 +591,10 @@ export async function downloadAndStore(
     if (sourcePath) removeTemporaryFile(sourcePath);
     else await cancelResponseBody(response);
     if (err instanceof StorageError) throw err;
-    throw new StorageError('Failed to store remote image', { cause: err });
+    throw new StorageError('Failed to store remote image', {
+      cause: err,
+      diagnostic: { category: 'local_write_failed' },
+    });
   }
 }
 

@@ -95,7 +95,7 @@ type SubmitResult =
 
 | kind | 含义 | 适用厂商 |
 |------|------|----------|
-| `sync` | 当场完成，images 含厂商临时 URL | zenmux、siliconflow、zhipu、doubao |
+| `sync` | 当场完成；ZenMux/豆包优先内联 Base64，SiliconFlow/智谱返回临时 URL | zenmux、siliconflow、zhipu、doubao |
 | `async` | 任务已提交，需后续 poll | fal、qwen、kling |
 | `failed` | 单次调用失败（含超时、4xx、5xx） | 全部 |
 
