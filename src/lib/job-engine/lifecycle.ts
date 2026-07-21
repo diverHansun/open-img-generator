@@ -917,6 +917,7 @@ function commitStoredImageAttempt(
       ? {
           status: 'running',
           phase: 'storing',
+          error: null,
           pollLeaseUntil: null,
           nextPollAt: checkpointAt,
           ...resetRetryState(),
@@ -925,6 +926,7 @@ function commitStoredImageAttempt(
       : {
           status: 'completed',
           phase: 'terminal',
+          error: null,
           pollLeaseUntil: null,
           nextPollAt: null,
           resultSnapshot: null,
@@ -1649,6 +1651,7 @@ async function storeNextImage(
         }, tx);
         updateGenerationJobIfLease(claimed.id, claimedUntil, {
           status: 'completed', phase: 'terminal', pollLeaseUntil: null, nextPollAt: null,
+          error: null,
           resultSnapshot: null, requestSnapshot: null, requestSnapshotVersion: null,
           ...resetRetryState(), updatedAt: nowIso(),
         }, tx, { expectedPhase: 'storing' });

@@ -121,7 +121,7 @@ const specs = [
     defaultImageSize: '1K',
   }),
   geminiSpec('google/gemini-3.1-flash-lite-image', 'Nano Banana 2 Lite', {
-    imageSizes: ['512', '1K', '2K', '4K'],
+    imageSizes: ['512px', '1K', '2K', '4K'],
     defaultImageSize: '1K',
   }),
 ] satisfies readonly ProviderModelSpec<ZenmuxImageProfile>[];

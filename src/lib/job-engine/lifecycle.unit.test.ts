@@ -758,6 +758,7 @@ describe('durable lifecycle', () => {
       vi.setSystemTime(new Date(retryAt));
 
       await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('completed');
+      expect(getGenerationJob(job.id, db)?.error).toBeNull();
       expect(getGenerationWithJobsAndImages('gen-1', db)).toMatchObject({
         status: 'completed',
         images: [expect.objectContaining({ storagePath: '2026/07/retry.png' })],
