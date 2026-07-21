@@ -19,7 +19,7 @@ import {
   createRequestSnapshot,
   REQUEST_SNAPSHOT_VERSION,
 } from '../../src/lib/job-engine/request-snapshot';
-import type { ImageProvider, PollResult } from '../../src/lib/providers';
+import type { ImageProvider, PollResult, SubmitResult } from '../../src/lib/providers';
 import * as providers from '../../src/lib/providers';
 import { runWorkerOnce } from '../../src/lib/job-engine/worker';
 
@@ -191,6 +191,105 @@ describe('durable polling retry recovery', () => {
         Date.parse(retryDueAt) + POLL_INTERVAL_MS,
       );
       expect(poll).toHaveBeenCalledTimes(2);
+    } finally {
+      reopened.sqlite.close();
+    }
+  });
+
+  it('recovers an explicit Provider rate-limit wait after reopening SQLite', async () => {
+    const submit = vi
+      .fn<() => Promise<SubmitResult>>()
+      .mockResolvedValueOnce({
+        kind: 'failed',
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'provider busy',
+          retryable: true,
+          disposition: 'rejected',
+          retryAfterMs: 5_000,
+        },
+      })
+      .mockResolvedValueOnce({
+        kind: 'async',
+        handle: {
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          externalId: 'accepted-after-restart',
+          statusUrl: 'https://status.example.test/accepted-after-restart',
+          responseUrl: 'https://response.example.test/accepted-after-restart',
+          cancelUrl: null,
+          submittedAt: start.toISOString(),
+        },
+      });
+    vi.mocked(providers.getById).mockReturnValue({
+      id: 'fal',
+      displayName: 'fal.ai',
+      capabilities: new Map(),
+      submit,
+    });
+
+    const first = openFileBackedDb();
+    let retryDueAt: string;
+    try {
+      createGenerationAndJob(
+        {
+          id: 'gen-rate-limit-restart',
+          sessionId: 'default-session',
+          prompt: 'A quiet observatory',
+          status: 'pending',
+          createdAt: start.toISOString(),
+          updatedAt: start.toISOString(),
+        },
+        {
+          id: 'job-rate-limit-restart',
+          generationId: 'gen-rate-limit-restart',
+          provider: 'fal',
+          model: 'fal-ai/flux/schnell',
+          status: 'pending',
+          phase: 'queued',
+          requestSnapshot: createRequestSnapshot({ prompt: 'A quiet observatory' }),
+          requestSnapshotVersion: REQUEST_SNAPSHOT_VERSION,
+          nextPollAt: start.toISOString(),
+          createdAt: start.toISOString(),
+          updatedAt: start.toISOString(),
+        },
+        first.db,
+      );
+
+      await expect(
+        advance(getGenerationJob('job-rate-limit-restart', first.db)!, first.db),
+      ).resolves.toBe('retried');
+      const waiting = getGenerationJob('job-rate-limit-restart', first.db)!;
+      expect(waiting).toMatchObject({
+        status: 'pending',
+        phase: 'queued',
+        attemptCount: 0,
+        retryStartedAt: null,
+        error: expect.stringContaining('RATE_LIMITED'),
+      });
+      retryDueAt = waiting.nextPollAt!;
+    } finally {
+      first.sqlite.close();
+    }
+
+    const reopened = openFileBackedDb();
+    try {
+      expect(getGenerationJob('job-rate-limit-restart', reopened.db)).toMatchObject({
+        phase: 'queued',
+        nextPollAt: retryDueAt,
+        error: expect.stringContaining('RATE_LIMITED'),
+      });
+      vi.setSystemTime(new Date(retryDueAt));
+      await expect(
+        advance(getGenerationJob('job-rate-limit-restart', reopened.db)!, reopened.db),
+      ).resolves.toBe('advanced');
+      expect(getGenerationJob('job-rate-limit-restart', reopened.db)).toMatchObject({
+        phase: 'polling',
+        error: null,
+        attemptCount: 0,
+        retryStartedAt: null,
+      });
+      expect(submit).toHaveBeenCalledTimes(2);
     } finally {
       reopened.sqlite.close();
     }

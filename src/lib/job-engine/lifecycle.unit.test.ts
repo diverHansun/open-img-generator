@@ -171,24 +171,27 @@ describe('durable lifecycle', () => {
     });
   });
 
-  it('requeues only an explicitly rejected retryable submit and honors Retry-After', async () => {
+  it('waits through repeated explicit rate limits without consuming the submit retry budget', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
-    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
     try {
       const { db } = createTestDb();
+      const rateLimited: SubmitResult = {
+        kind: 'failed',
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'retry later',
+          retryable: true,
+          disposition: 'rejected',
+          retryAfterMs: 5_000,
+        },
+      };
       const submit = vi
         .fn<() => Promise<SubmitResult>>()
-        .mockResolvedValueOnce({
-          kind: 'failed',
-          error: {
-            code: 'RATE_LIMITED',
-            message: 'retry later',
-            retryable: true,
-            disposition: 'rejected',
-            retryAfterMs: 5_000,
-          },
-        })
+        .mockResolvedValueOnce(rateLimited)
+        .mockResolvedValueOnce(rateLimited)
+        .mockResolvedValueOnce(rateLimited)
+        .mockResolvedValueOnce(rateLimited)
         .mockResolvedValueOnce({
           kind: 'async',
           handle: {
@@ -209,23 +212,82 @@ describe('durable lifecycle', () => {
       expect(scheduled).toMatchObject({
         phase: 'queued',
         status: 'pending',
-        attemptCount: 1,
+        attemptCount: 0,
+        retryStartedAt: null,
         nextPollAt: '2026-07-20T00:00:05.000Z',
         error: expect.stringContaining('RATE_LIMITED'),
       });
       expect(submit).toHaveBeenCalledOnce();
 
       await expect(advance(scheduled, db)).resolves.toBe('skipped');
-      vi.setSystemTime(new Date(scheduled.nextPollAt!));
+      for (let attempt = 1; attempt < 4; attempt += 1) {
+        const waiting = getGenerationJob(job.id, db)!;
+        vi.setSystemTime(new Date(waiting.nextPollAt!));
+        await expect(advance(waiting, db)).resolves.toBe('retried');
+        expect(getGenerationJob(job.id, db)).toMatchObject({
+          phase: 'queued',
+          status: 'pending',
+          attemptCount: 0,
+          retryStartedAt: null,
+          error: expect.stringContaining('RATE_LIMITED'),
+        });
+      }
+      const waiting = getGenerationJob(job.id, db)!;
+      vi.setSystemTime(new Date(waiting.nextPollAt!));
       await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('advanced');
-      expect(submit).toHaveBeenCalledTimes(2);
+      expect(submit).toHaveBeenCalledTimes(5);
       expect(getGenerationJob(job.id, db)).toMatchObject({
         phase: 'polling',
         attemptCount: 0,
         retryStartedAt: null,
       });
     } finally {
-      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a rate-limited poll active beyond the bounded poll retry count', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    try {
+      const { db } = createTestDb();
+      const job = seedJob(db, {
+        phase: 'polling',
+        status: 'running',
+        attemptCount: 99,
+        retryStartedAt: '2026-07-19T00:00:00.000Z',
+        providerHandle: JSON.stringify({
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          externalId: 'rate-limited-poll',
+          statusUrl: 'https://status.example.test/rate-limited-poll',
+          responseUrl: 'https://response.example.test/rate-limited-poll',
+          cancelUrl: null,
+          submittedAt: now,
+        }),
+      });
+      const poll = vi.fn().mockResolvedValue({
+        status: 'failed',
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'too many status checks',
+          retryable: true,
+          disposition: 'rejected',
+          retryAfterMs: 10_000,
+        },
+      } as PollResult);
+      vi.mocked(providers.getById).mockReturnValue(provider({ poll }));
+
+      await expect(advance(job, db)).resolves.toBe('retried');
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        phase: 'polling',
+        status: 'running',
+        attemptCount: 0,
+        retryStartedAt: null,
+        nextPollAt: '2026-07-20T00:00:10.000Z',
+        error: expect.stringContaining('RATE_LIMITED'),
+      });
+    } finally {
       vi.useRealTimers();
     }
   });

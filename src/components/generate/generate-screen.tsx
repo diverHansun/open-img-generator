@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 
 import { useLocale } from '@/components/i18n/locale-provider';
 import { Button } from '@/components/ui/button';
-import { MAX_GENERATION_TARGETS } from '@/lib/generation-constraints';
 import type { TranslationKey } from '@/lib/i18n';
 import { workspaceRoute } from '@/lib/routes';
 import {
@@ -323,11 +322,6 @@ export function GenerateScreen({
       setFormError('generate.validationTargets');
       return;
     }
-    if (targets.length > MAX_GENERATION_TARGETS) {
-      setFormError('generate.validationTargetsLimit');
-      return;
-    }
-
     const parsedSeed = seed.trim() === '' ? null : Number(seed);
     if (parsedSeed !== null && !Number.isInteger(parsedSeed)) {
       setFormError('generate.validationParameters');
@@ -524,7 +518,6 @@ export function GenerateScreen({
       sessionBusy={sessionBusy}
       sessionError={sessionError ? t('generate.sessionError') : null}
       hasConfiguredProviders={loadState.data.providers.length > 0}
-      maxTargets={MAX_GENERATION_TARGETS}
       models={models}
       selectedKeys={selectedKeys}
       controls={controls}
@@ -533,16 +526,7 @@ export function GenerateScreen({
       count={count}
       seed={seed}
       negativePrompt={negativePrompt}
-      formError={
-        formError
-          ? t(
-              formError,
-              formError === 'generate.validationTargetsLimit'
-                ? { count: MAX_GENERATION_TARGETS }
-                : undefined,
-            )
-          : null
-      }
+      formError={formError ? t(formError) : null}
       submissionError={submissionError}
       submitting={submitting}
       currentGenerationId={task.currentGenerationId}
@@ -559,14 +543,10 @@ export function GenerateScreen({
         setSelectedKeys((current) => {
           const next = new Set(current);
           if (next.has(key)) next.delete(key);
-          else if (next.size < MAX_GENERATION_TARGETS) next.add(key);
+          else next.add(key);
           return next;
         });
-        setFormError(
-          selectedKeys.has(key) || selectedKeys.size < MAX_GENERATION_TARGETS
-            ? null
-            : 'generate.validationTargetsLimit',
-        );
+        setFormError(null);
         setSubmissionError(null);
       }}
       onAspectRatioChange={(value) => {

@@ -3,8 +3,9 @@ import type {
   ProviderErrorCode,
   ProviderRequestDisposition,
 } from './types';
+import { MAX_PROVIDER_RETRY_AFTER_MS } from './types';
 
-export const MAX_PROVIDER_RETRY_AFTER_MS = 60_000;
+export { MAX_PROVIDER_RETRY_AFTER_MS } from './types';
 export const DEFAULT_PROVIDER_JSON_RESPONSE_BYTES = 2 * 1_024 * 1_024;
 // A 25 MiB binary image expands to about 33.4 MiB in Base64. The current sync
 // contract permits one image, so 36 MiB leaves bounded room for JSON metadata.

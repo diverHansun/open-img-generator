@@ -77,20 +77,23 @@ describe('web-client capabilities', () => {
     ).toThrow('Count exceeds');
   });
 
-  it('rejects more targets than the shared generation limit', () => {
-    const target = {
-      provider: 'fal' as const,
-      model: 'fal-ai/flux/schnell',
-    };
-    expect(() =>
-      buildSubmitGenerationRequest(
-        {
-          prompt: 'A cat',
-          targets: Array.from({ length: 9 }, () => target),
-          sessionId: 'session-1',
-        },
-        providers,
-      ),
-    ).toThrow('At most 8 targets');
+  it('does not impose a client-side target count ceiling', () => {
+    const repeatedProviders = Array.from({ length: 9 }, (_, index) => ({
+      ...providers[0]!,
+      models: [{
+        ...providers[0]!.models[0]!,
+        model: `fal-ai/flux/model-${index}`,
+      }],
+    }));
+    const manyTargets = repeatedProviders.map((provider) => ({
+      provider: provider.id,
+      model: provider.models[0]!.model,
+    }));
+
+    expect(buildSubmitGenerationRequest({
+      prompt: 'A cat',
+      targets: manyTargets,
+      sessionId: 'session-1',
+    }, repeatedProviders).targets).toHaveLength(9);
   });
 });

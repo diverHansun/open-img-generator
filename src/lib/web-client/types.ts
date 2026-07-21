@@ -106,6 +106,8 @@ export type JobView = {
     retryable: boolean;
     diagnostic?: ProviderDiagnostic;
   };
+  waitingForProvider?: boolean;
+  nextAttemptAt?: string;
 };
 
 export type ImageView = {

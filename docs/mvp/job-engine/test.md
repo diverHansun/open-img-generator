@@ -71,6 +71,7 @@
 | 场景 | 预期 |
 |------|------|
 | 默认 worker 启动 | 未设置 `JOB_WORKER_ENABLED` 时启动；设为 `false` 时不启动 |
+| due jobs 超过 `WORKER_BATCH_SIZE` | worker 分页 drain 全部 due rows；每页 Promise 数有界，batch 不拒绝 target |
 | 两个 due async polling job，mock 均 completed | 各自切 storing、完成转存，聚合 completed |
 | queued job | worker 先记录 dispatch lease，才调用 provider.submit；sync ref 进入 storing，async handle 进入 polling |
 | job 尚未 due 或有有效 lease | worker 和详情 GET 均跳过，不发 Provider 调用 |
@@ -102,9 +103,10 @@
 |------|------|
 | createGeneration + N createGenerationJob + snapshot + session touch | 同一 admission transaction；失败则全部回滚 |
 | fan-out cancel | 单一 transaction 更新所有 active jobs 和 generation 聚合；中途 DB 异常不得半取消 |
-| cancel 与 provider limiter 队列 | cancel 先赢则 provider.submit 不开始 |
+| 同 Provider 多个 due submit | 在 worker 页内直接并发进入 adapter，不出现本地 semaphore/queue 拒绝 |
 | cancel 与晚到 async handle | 仅持久化 handle 供 worker remote cancel；public status 仍 cancelled |
 | retryable poll failure | 写 retry checkpoint；未 due 时 worker/详情均不再调 Provider；重启后在 due 继续同一预算，成功后清零 |
+| 明确 `RATE_LIMITED` submit/poll | 超过旧 3 次/30 秒或 poll 次数后仍 active；持久等待跨重启恢复，用户取消后不再调用 Provider |
 | retryable remote cancel | public status 始终 cancelled；file-backed SQLite 关闭/重开后仍按 due 延续同一预算，最多 3 次后以 `RETRY_EXHAUSTED` 收口，不转 failed |
 | remote cancel 返回 pending/running/completed | pending/running 继续取消重试；completed 不写 image、不复活公开状态，而以 `CANCEL_UNCONFIRMED` 安全诊断收口 |
 | Provider 返回畸形 poll/cancel result | 写 `PROVIDER_ERROR` retry checkpoint、释放 lease、消耗同一有界预算 |

@@ -44,6 +44,10 @@ export type JobView = {
     retryable: boolean;
     diagnostic?: ProviderDiagnostic;
   };
+  /** True only for a durable, explicitly rate-limited Provider wait. */
+  waitingForProvider?: boolean;
+  /** Safe local schedule metadata; never a raw Provider header. */
+  nextAttemptAt?: string;
 };
 
 export type ImageView = {

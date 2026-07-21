@@ -7,6 +7,7 @@ import { FavoriteButton } from '@/components/generation/favorite-button';
 import {
   getJobErrorDiagnosticReference,
   getJobErrorMessageKey,
+  isWaitingForProvider,
   shouldShowJobError,
 } from '@/components/generation/job-error';
 import { reconcileGenerationSnapshot } from '@/components/generation/generation-view-state';
@@ -362,6 +363,11 @@ export function GenerationDetailDialog({
                               })}
                             </small>
                           ) : null}
+                        </p>
+                      ) : null}
+                      {isWaitingForProvider(job) ? (
+                        <p className={styles.jobNotice} role="status">
+                          {t('generation.providerWaiting')}
                         </p>
                       ) : null}
                     </article>

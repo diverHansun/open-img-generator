@@ -225,13 +225,13 @@ GenerationView {
   images: ImageView[]   // 跨 job 扁平列表；用 jobId 归属
 }
 
-JobView { id, provider, model, status, error? }
+JobView { id, provider, model, status, error?, waitingForProvider?, nextAttemptAt? }
 ImageView { id, jobId, index, url, width, height, favorited }
 ```
 
 `getGeneration()` 读取后可以辅助调用 `advance()`，但 caller 不可据此假设同步完成：只有该 job 当前 due 且 lease 可 claim 时才可能发生一次生命周期动作。
 
-`error` 永远是安全 code 的 DTO。D2 可在 active/cancelling job 上暂存 retryable 诊断供恢复；前端不应把这种 retryable 诊断渲染为终态失败，下一次成功 phase 会清除它。
+`error` 永远是安全 code 的 DTO。D2 可在 active/cancelling job 上暂存 retryable 诊断供恢复；前端不应把这种 retryable 诊断渲染为终态失败。明确 Provider 限流时额外返回 `waitingForProvider=true` 和本地计算的 `nextAttemptAt`，用于显示“持续等待、可取消”；下一次成功 phase 会清除这些等待状态。
 
 ### 3.3 API 路由契约（generation 相关）
 

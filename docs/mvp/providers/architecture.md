@@ -67,7 +67,7 @@ sync 与 async 两种协议形态通过 ImageProvider 接口上的可选方法�
 |------|-----------|
 | Factory Method | registry 已承担实例创建职责，再加 Factory 是重复抽象 |
 | Observer / Event | providers 是无状态调用层，无事件发布需求 |
-| Decorator | 重试/限流策略由 job-engine 触发；`providers/limiter.ts` 仅提供被 job-engine 调用的 per-provider semaphore，不改变 adapter 职责 |
+| Decorator | job-engine 直接调用 adapter；Provider 服务端负责并发接纳，明确限流由 durable lifecycle 持久等待，不增加本地 semaphore decorator |
 
 ---
 

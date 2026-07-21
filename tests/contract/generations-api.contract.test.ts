@@ -112,6 +112,32 @@ describe('POST /api/generations', () => {
     expect(jobEngine.ensureWorkerStarted).toHaveBeenCalledOnce();
   });
 
+  it('passes more than eight targets to durable admission without an API ceiling', async () => {
+    const targets = Array.from({ length: 9 }, (_, index) => ({
+      provider: 'fal',
+      model: `fal-ai/flux/model-${index}`,
+    }));
+    vi.mocked(jobEngine.submitGeneration).mockResolvedValue({
+      generationId: 'gen-many-targets',
+      status: 'pending',
+      replayed: false,
+    });
+
+    const response = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(submissionBody({ targets })),
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(jobEngine.submitGeneration).toHaveBeenCalledWith(
+      expect.objectContaining({ targets }),
+      expect.anything(),
+    );
+  });
+
   it('returns a replay marker without changing the original generation id', async () => {
     vi.mocked(jobEngine.submitGeneration).mockResolvedValue({
       generationId: 'gen-original',

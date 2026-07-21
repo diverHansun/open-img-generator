@@ -19,6 +19,28 @@ export type WorkerRunResult = {
   skipped: number;
 };
 
+const DEFAULT_WORKER_BATCH_SIZE = 16;
+
+function workerBatchSize(value: number | undefined): number {
+  const parsed = value ?? Number(process.env.WORKER_BATCH_SIZE);
+  return Number.isInteger(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_WORKER_BATCH_SIZE;
+}
+
+function emptyWorkerRunResult(): WorkerRunResult {
+  return {
+    scanned: 0,
+    advanced: 0,
+    retried: 0,
+    completed: 0,
+    failed: 0,
+    unknown: 0,
+    cancelled: 0,
+    skipped: 0,
+  };
+}
+
 /**
  * Starts the optional in-process worker from a Node API entrypoint. Next's
  * instrumentation bundle also runs in an Edge build during `next build`, so
@@ -57,33 +79,44 @@ export async function runWorkerOnce(options: WorkerOptions = {}): Promise<{
   skipped: number;
 }> {
   const client = options.db ?? db;
-  const jobs = listDueGenerationJobs(
-    new Date().toISOString(),
-    options.batchSize ?? Number(process.env.WORKER_BATCH_SIZE ?? 16),
-    client,
-  );
-  const outcomes = await Promise.all(
-    jobs.map(async (job): Promise<AdvanceOutcome> => {
-      try {
-        return await advance(job, client);
-      } catch {
-        // advance is expected to persist a safe domain failure. A truly
-        // unexpected throw is still a failed worker result, never success.
-        return 'failed';
-      }
-    }),
-  );
-  const result: WorkerRunResult = {
-    scanned: jobs.length,
-    advanced: 0,
-    retried: 0,
-    completed: 0,
-    failed: 0,
-    unknown: 0,
-    cancelled: 0,
-    skipped: 0,
-  };
-  for (const outcome of outcomes) result[outcome] += 1;
+  const pageSize = workerBatchSize(options.batchSize);
+  const result = emptyWorkerRunResult();
+  const dueBefore = new Date().toISOString();
+  let afterId: string | undefined;
+
+  // The page size bounds each Promise fan-out; it is not an admission limit.
+  // A stable id cursor drains the jobs that were due when this tick began,
+  // without revisiting a row or constructing one unbounded Promise array.
+  while (true) {
+    const jobs = listDueGenerationJobs(
+      dueBefore,
+      pageSize,
+      client,
+      afterId,
+    );
+    if (jobs.length === 0) break;
+    afterId = jobs.at(-1)!.id;
+
+    let unexpectedThrow = false;
+    const outcomes = await Promise.all(
+      jobs.map(async (job): Promise<AdvanceOutcome> => {
+        try {
+          return await advance(job, client);
+        } catch {
+          // advance is expected to persist a safe domain failure. A truly
+          // unexpected throw is still a failed worker result, never success.
+          unexpectedThrow = true;
+          return 'failed';
+        }
+      }),
+    );
+    result.scanned += jobs.length;
+    for (const outcome of outcomes) result[outcome] += 1;
+
+    // An unexpected throw may have left a row unchanged. Stop this tick and
+    // let the durable timer revisit it instead of hiding a possible hot loop.
+    if (unexpectedThrow) break;
+  }
   return result;
 }
 

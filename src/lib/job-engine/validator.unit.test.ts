@@ -42,20 +42,6 @@ describe('validator', () => {
     expect(() => validate(makeParams({ targets: [] }), { db })).toThrow('At least one target');
   });
 
-  it('rejects a request that exceeds the bounded fan-out limit', () => {
-    expect(() =>
-      validate(
-        makeParams({
-          targets: Array.from({ length: 9 }, (_, index) => ({
-            provider: 'fal' as const,
-            model: `model-${index}`,
-          })),
-        }),
-        { db },
-      ),
-    ).toThrow('At most 8 targets');
-  });
-
   it('rejects duplicate targets', () => {
     expect(() =>
       validate(

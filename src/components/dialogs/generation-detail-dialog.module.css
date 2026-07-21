@@ -167,6 +167,14 @@
   overflow-wrap: anywhere;
 }
 
+.jobNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-warning);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
 .jobError small {
   color: var(--color-ink-muted);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);

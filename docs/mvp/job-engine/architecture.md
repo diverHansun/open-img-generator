@@ -153,7 +153,7 @@ sync target 被 claim 后才调用 `provider.submit()`；其返回的 image refs
 | sync count | 仍强制该 target `count=1`（MVP） |
 | POST 耗时 | 与 Provider/图片下载无关；只受校验和 SQLite transaction 影响 |
 
-同步 image provider 的已开始 submit 使用最多 180 秒的完整响应预算（默认 `SYNC_IMAGE_GENERATION_TIMEOUT_MS=180000`）；该时间包含在现有 5 分钟 phase lease 内，但不改变 30 秒 per-provider queue deadline、60 秒图片下载预算或 async provider 的 submit/poll timeout。180 秒后仍无法确认厂商是否接收/计费时，lifecycle 写入 `outcome_unknown`，不自动重投。
+同步 image provider 的已开始 submit 使用最多 180 秒的完整响应预算（默认 `SYNC_IMAGE_GENERATION_TIMEOUT_MS=180000`）；该时间包含在现有 5 分钟 phase lease 内，但不改变 60 秒图片下载预算或 async provider 的 submit/poll timeout。180 秒后仍无法确认厂商是否接收/计费时，lifecycle 写入 `outcome_unknown`，不自动重投。
 
 ### 4.5 phase lease、取消线性化与图片 checkpoint
 
@@ -181,11 +181,11 @@ sync target 被 claim 后才调用 `provider.submit()`；其返回的 image refs
 
 ### 4.9 并发控制
 
-provider limiter 当前限制同一 provider 的 submit/poll/cancel 并发，不把不同 provider 串行化。全局内存 admission helper 不在 durable POST 路径；有界队列、deadline 与多实例 backpressure 是后续强化项。
+单实例 worker 以 `WORKER_BATCH_SIZE` 约束每一页的 Promise fan-out，并在同一 tick 持续 drain due pages；该值不是 Generation target 数量或 Provider 并发上限。job-engine 不设置 per-provider semaphore/等待队列，也不设置内存 generation admission ceiling：合法、去重的 targets 全部 durable admission，Provider 服务端决定接纳、排队或明确限流。
 
-### 4.10 D2：有界 poll/cancel retry，不重放 submit
+### 4.10 D2：明确限流持久等待；其他 retry 有界
 
-不确定的 submit 仍绝不自动重放：发送后超时/断线进入 `outcome_unknown`，避免重复计费。D2 只重试已持久化 `JobHandle` 上的安全动作：poll 与 remote cancel。
+不确定的 submit 仍绝不自动重放：发送后超时/断线/5xx 进入 `outcome_unknown`，避免重复计费。只有 `RATE_LIMITED + retryable + not_started/rejected` 可进入不消耗 retry budget 的持久等待：submit 回到 `queued`，poll 留在 `polling`，两者写未来 `next_poll_at` 并持续到成功或用户取消。其他安全的 submit/poll/cancel/download retry 继续使用有界预算。
 
 | 动作 | 最大外部调用次数 | 基础/上限 delay | 总 elapsed 窗口 | 穷尽结果 |
 |------|------------------|-----------------|----------------|----------|
@@ -197,7 +197,7 @@ provider limiter 当前限制同一 provider 的 submit/poll/cancel 并发，不
 - typed `ProviderError.retryable === true` 或 poll/cancel 调用异常才进入 retry；成功 pending/running 与进入 storing 会清空 transient error 和 retry state，任何终态/取消切换都会清空 retry state，而终态会保留对应的**安全**诊断（如 `RETRY_EXHAUSTED`）。
 - Provider adapter 的运行时返回会先安全归一化为 plain snapshot；`null`、未知 status 或 poll 的不可读 completed result 以有界 `PROVIDER_ERROR` retry checkpoint 收口。cancel 的不可读附加字段也不会让 lease 悬挂或复活本地状态。
 - 外部错误的原始 message/body/prompt/URL 不写入 job row；持久化与 DTO 只使用 allowlisted code、固定安全文案和已验证的 retryable 布尔值。
-- E1 已为 HTTP error 记录有界 `Retry-After`、`not_started / rejected / unknown` disposition，并为每 provider 的进程内 limiter 增加 32 条默认等待上限、30 秒默认等待 deadline 与 AbortSignal 移除。只有确定未开始或 retryable rejected submit 可以 `dispatching → queued` 有界重排；已开始网络调用仍 unknown。E2 已提供 bounded JSON、auth redirect/endpoint trust；E3 已提供远端图片逐跳 URL policy、25 MiB 流式写入、MIME/magic-byte 与 staging 校验。
+- E1 已为 HTTP error 记录最长 15 分钟的安全 `Retry-After`、`not_started / rejected / unknown` disposition。明确 `RATE_LIMITED` 取本地 5 秒退避与厂商值的较大者并持久等待；其他确定未开始或 retryable rejected submit 仍有界重排，已开始网络调用仍 unknown。E2 已提供 bounded JSON、auth redirect/endpoint trust；E3 已提供远端图片逐跳 URL policy、25 MiB 流式写入、MIME/magic-byte 与 staging 校验。
 
 ---
 
