@@ -9,6 +9,8 @@ describe('build smoke', () => {
     const projectRoot = path.resolve(__dirname, '../..');
     const distDirName = `.next-smoke-${randomUUID()}`;
     const distDir = path.join(projectRoot, distDirName);
+    const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
+    const originalTsconfig = fs.readFileSync(tsconfigPath, 'utf8');
     try {
       execSync('npm run build', {
         cwd: projectRoot,
@@ -23,6 +25,7 @@ describe('build smoke', () => {
       expect(fs.existsSync(distDir)).toBe(true);
     } finally {
       fs.rmSync(distDir, { recursive: true, force: true });
+      fs.writeFileSync(tsconfigPath, originalTsconfig);
     }
   });
 });

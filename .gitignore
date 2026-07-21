@@ -5,6 +5,8 @@ node_modules/
 
 # next.js
 .next/
+.next-build/
+.next-smoke-*/
 out/
 build/
 
