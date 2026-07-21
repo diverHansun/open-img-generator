@@ -1,6 +1,6 @@
 # 现有 Provider 模型扩展与私有 ModelSpec
 
-> 状态：Improve 1、Improve 2 已完成代码与自动化验证；真实准入结果见各批 README
+> 状态：Improve 1、Improve 2 已完成；Improve 3 实施中
 >
 > 日期：2026-07-21
 >
@@ -16,6 +16,7 @@
 | --- | --- | --- | --- |
 | Improve 1 | 全 Provider 私有 ModelSpec 基础设施；扩展同协议模型 | ZenMux GPT Image 1.5；Seedream 4.5/5.0 Lite；SiliconFlow Z-Image/Turbo | [improve-1](./improve-1/README.md) |
 | Improve 2 | 使用 ModelSpec 增加新请求方言 | Fal Nano Banana 2/Pro；Qwen Image 2.0 Pro；Wan 2.7 Image Pro | [improve-2](./improve-2/README.md) |
+| Improve 3 | 扩展已验证方言的模型矩阵 | ZenMux Gemini 图片模型；Fal Nano Banana/FLUX 2/Klein | [improve-3](./improve-3/README.md) |
 
 ## 2026-07-21 实施结论
 

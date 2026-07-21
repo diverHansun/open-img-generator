@@ -19,6 +19,7 @@ src/
     ├── providers/                →  docs/mvp/providers/       （已有 · Non-Duties 已补）
     ├── db/                       →  docs/mvp/db/              （已有 · 扩表已修订）
     ├── storage/                  →  docs/mvp/storage/         （已有 · 基本不动）
+    ├── video-generation/        →  docs/mvp/video-generation/（Seedance 视频纵切）
     ├── prompt/                   →  docs/mvp/prompt/          （已有 · 基本不动）
     ├── web-client/               →  docs/mvp/web-client/      （文档已补）
     ├── library/                  →  docs/mvp/library/         （已实现：资产域与只读历史）
@@ -36,6 +37,7 @@ src/
 | `src/app/` + `components/` | `docs/mvp/web-ui/` | **已修订** | Project 门禁、Generate/History/Gallery/Models/Providers |
 | `src/app/api/` | `docs/mvp/api/` | **已修订** | 路由清单 + constraints |
 | `src/lib/storage/` | `docs/mvp/storage/` | 基本不动 | 图片转存 |
+| `src/lib/video-generation/` | `docs/mvp/video-generation/` | **方案确认** | Seedance 文生视频、视频转存与保留 |
 | `src/lib/prompt/` | `docs/mvp/prompt/` | 基本不动 | prompt 预处理 |
 
 **刻意不建**: `docs/mvp/controllers/`、`services/`、`repositories/`。
@@ -84,6 +86,7 @@ src/
 | providers | ✅ | ✅ Batch 2 | ✅ Batch 2 | ✅ Batch 2 | — | — | ✅ Batch 2 |
 | user-config | ✅ | ✅ | — | — | — | ✅ | ✅ 意图 |
 | storage / prompt | 不动 | | | | | | |
+| video-generation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
