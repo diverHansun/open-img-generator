@@ -30,7 +30,7 @@ describe('provider HTTP boundary', () => {
     const now = Date.parse('2026-07-20T00:00:00.000Z');
     expect(parseRetryAfter('2.5', now)).toBe(2_500);
     expect(parseRetryAfter('Mon, 20 Jul 2026 00:00:10 GMT', now)).toBe(10_000);
-    expect(parseRetryAfter('999999', now)).toBe(60_000);
+    expect(parseRetryAfter('999999', now)).toBe(15 * 60_000);
     expect(parseRetryAfter('invalid', now)).toBeUndefined();
   });
 

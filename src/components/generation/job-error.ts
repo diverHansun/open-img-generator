@@ -100,3 +100,10 @@ export function shouldShowJobError(
   if (!error) return false;
   return status === 'failed' || error.retryable !== true;
 }
+
+export function isWaitingForProvider(
+  job: Pick<JobView, 'waitingForProvider' | 'status'>,
+): boolean {
+  return job.waitingForProvider === true &&
+    (job.status === 'pending' || job.status === 'running');
+}

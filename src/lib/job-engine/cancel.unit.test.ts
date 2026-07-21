@@ -17,7 +17,6 @@ import {
   createRequestSnapshot,
   REQUEST_SNAPSHOT_VERSION,
 } from './request-snapshot';
-import { resetProviderLimiters, withProviderLimit } from '../providers/limiter';
 
 vi.mock('../providers', () => ({ getById: vi.fn() }));
 
@@ -83,8 +82,6 @@ function seedJob(
 describe('durable cancellation', () => {
   beforeEach(() => {
     vi.mocked(providers.getById).mockReset();
-    resetProviderLimiters();
-    delete process.env.MAX_INFLIGHT_PER_PROVIDER;
   });
 
   it('cancels a queued job locally without calling any provider', async () => {
@@ -474,34 +471,6 @@ describe('durable cancellation', () => {
       requestSnapshot: null,
       requestSnapshotVersion: null,
       resultSnapshot: null,
-    });
-  });
-
-  it('does not invoke a limiter-queued provider submit after cancellation wins', async () => {
-    const { db } = createTestDb();
-    seedJob(db);
-    process.env.MAX_INFLIGHT_PER_PROVIDER = '1';
-    const blocker = deferred<void>();
-    const holdSlot = withProviderLimit('kling', async () => blocker.promise);
-    const submit = vi.fn();
-    vi.mocked(providers.getById).mockReturnValue({
-      id: 'kling',
-      displayName: 'Kling AI',
-      capabilities: new Map(),
-      submit,
-    } as ImageProvider);
-
-    const dispatch = advance(getGenerationJob('job-cancel', db)!, db);
-    expect(getGenerationJob('job-cancel', db)?.phase).toBe('dispatching');
-    await cancelGeneration('gen-cancel', { db });
-    blocker.resolve();
-    await holdSlot;
-
-    await expect(dispatch).resolves.toBe('cancelled');
-    expect(submit).not.toHaveBeenCalled();
-    expect(getGenerationJob('job-cancel', db)).toMatchObject({
-      phase: 'terminal',
-      status: 'cancelled',
     });
   });
 

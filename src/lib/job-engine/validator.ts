@@ -1,7 +1,6 @@
 import { ValidationError } from '../errors';
 import { sessionExists, type DbClient } from '../db';
 import { getById } from '../providers';
-import { MAX_GENERATION_TARGETS } from '../generation-constraints';
 import type { SubmitGenerationParams } from './types';
 import { normalizeClientRequestId } from './idempotency';
 
@@ -22,11 +21,6 @@ export function validate(
   }
   if (!Array.isArray(params.targets) || params.targets.length === 0) {
     throw new ValidationError('At least one target is required');
-  }
-  if (params.targets.length > MAX_GENERATION_TARGETS) {
-    throw new ValidationError(
-      `At most ${MAX_GENERATION_TARGETS} targets are allowed`,
-    );
   }
   const count = params.count ?? 1;
   if (!Number.isInteger(count) || count < 1) {

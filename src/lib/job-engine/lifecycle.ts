@@ -30,7 +30,7 @@ import type {
   ProviderRequestDisposition,
   SubmitResult,
 } from '../providers';
-import { ProviderQueueError, withProviderLimit } from '../providers/limiter';
+import { MAX_PROVIDER_RETRY_AFTER_MS } from '../providers/types';
 import * as storage from '../storage';
 import { serializeSafeJobError } from './job-error';
 import { parseRequestSnapshot } from './request-snapshot';
@@ -59,6 +59,7 @@ export const POLL_RETRY_DELAY_MS = POLL_INTERVAL_MS;
 const MAX_RESULT_SNAPSHOT_BYTES = 128 * 1_024;
 const MAX_RESULT_URL_LENGTH = 8 * 1_024;
 const MAX_RESULT_CONTENT_TYPE_LENGTH = 256;
+const PROVIDER_RATE_LIMIT_RETRY_MS = 5_000;
 
 type LifecyclePatch = UpdateGenerationJobPatch & {
   status: GenerationStatus;
@@ -104,6 +105,7 @@ function safeRecordValue(value: object, key: string): unknown {
 function providerFailureDiagnostic(error: unknown): {
   diagnostic: string;
   retryable: boolean;
+  code?: string;
   disposition?: ProviderRequestDisposition;
   retryAfterMs?: number;
 } {
@@ -125,6 +127,7 @@ function providerFailureDiagnostic(error: unknown): {
   const retryable = safeRecordValue(error, 'retryable') as boolean;
   const disposition = safeRecordValue(error, 'disposition');
   const retryAfterMs = safeRecordValue(error, 'retryAfterMs');
+  const code = safeRecordValue(error, 'code');
   const providerDiagnostic = safeRecordValue(error, 'diagnostic');
   return {
     diagnostic: serializeSafeJobError(
@@ -134,6 +137,7 @@ function providerFailureDiagnostic(error: unknown): {
       providerDiagnostic,
     ),
     retryable,
+    ...(typeof code === 'string' ? { code } : {}),
     ...(disposition === 'not_started' ||
     disposition === 'rejected' ||
     disposition === 'unknown'
@@ -142,7 +146,7 @@ function providerFailureDiagnostic(error: unknown): {
     ...(typeof retryAfterMs === 'number' &&
     Number.isFinite(retryAfterMs) &&
     retryAfterMs >= 0
-      ? { retryAfterMs: Math.min(60_000, Math.ceil(retryAfterMs)) }
+      ? { retryAfterMs: Math.min(MAX_PROVIDER_RETRY_AFTER_MS, Math.ceil(retryAfterMs)) }
       : {}),
   };
 }
@@ -770,6 +774,44 @@ function scheduleRetryOrFinish(
   return applied ? 'retried' : 'skipped';
 }
 
+/**
+ * Explicit provider throttling is durable back-pressure, not a bounded error
+ * budget. Keep the job active until the provider accepts it or the user
+ * cancels; ambiguous submit outcomes never enter this path.
+ */
+function scheduleProviderRateLimitWait(
+  job: GenerationJob,
+  operation: 'submit' | 'poll',
+  error: string,
+  client: DbClient,
+  expectedPollLeaseUntil: string,
+  minimumDelayMs?: number,
+): AdvanceOutcome {
+  const expectedPhase: GenerationJobPhase =
+    operation === 'submit' ? 'dispatching' : 'polling';
+  const delayMs = Math.max(
+    PROVIDER_RATE_LIMIT_RETRY_MS,
+    minimumDelayMs ?? 0,
+  );
+  const applied = updateJobAndGeneration(
+    job.id,
+    job.generationId,
+    {
+      status: job.status as GenerationStatus,
+      phase: operation === 'submit' ? 'queued' : 'polling',
+      error,
+      pollLeaseUntil: null,
+      nextPollAt: new Date(Date.now() + delayMs).toISOString(),
+      ...resetRetryState(),
+      updatedAt: nowIso(),
+    },
+    client,
+    expectedPollLeaseUntil,
+    { expectedPhase },
+  );
+  return applied ? 'retried' : 'skipped';
+}
+
 function isCurrentDispatchLease(
   jobId: string,
   expectedPollLeaseUntil: string,
@@ -1142,30 +1184,12 @@ async function dispatchQueuedJob(
 
   let result: SubmitResult | null;
   try {
-    result = await withProviderLimit<SubmitResult | null>(
-      provider.id,
-      async () => {
-        // This executes after a possible limiter wait. Do not start a new
-        // billable request if cancellation committed while the work was queued.
-        if (!isCurrentDispatchLease(claimed.id, claimedUntil, client))
-          return null;
-        return provider.submit(request, claimed.model);
-      },
-    );
-  } catch (error) {
-    if (error instanceof ProviderQueueError) {
-      const code =
-        error.code === 'QUEUE_SATURATED'
-          ? 'QUEUE_SATURATED'
-          : 'PROVIDER_TIMEOUT';
-      return scheduleRetryOrFinish(
-        claimed,
-        'submit',
-        jobDiagnostic(code, 'Provider dispatch did not enter the queue', true),
-        client,
-        claimedUntil,
-      );
-    }
+    // Cancellation can commit after the dispatch lease is claimed but before
+    // the external call begins. Recheck immediately before the billable call.
+    result = isCurrentDispatchLease(claimed.id, claimedUntil, client)
+      ? await provider.submit(request, claimed.model)
+      : null;
+  } catch {
     // Once the task started, a local throw cannot prove that the provider did
     // not receive the request. Never turn generic throw/rejection into a
     // replayable submit.
@@ -1193,6 +1217,7 @@ async function dispatchQueuedJob(
           status: 'pending',
           phase: 'polling',
           providerHandle: JSON.stringify(result.handle),
+          error: null,
           pollLeaseUntil: null,
           nextPollAt: nowIso(),
           ...resetRetryState(),
@@ -1228,6 +1253,16 @@ async function dispatchQueuedJob(
         (failure.disposition === 'not_started' ||
           failure.disposition === 'rejected')
       ) {
+        if (failure.code === 'RATE_LIMITED') {
+          return scheduleProviderRateLimitWait(
+            claimed,
+            'submit',
+            failure.diagnostic,
+            client,
+            claimedUntil,
+            failure.retryAfterMs,
+          );
+        }
         return scheduleRetryOrFinish(
           claimed,
           'submit',
@@ -1298,9 +1333,7 @@ async function pollJob(
 
   let providerResult: unknown;
   try {
-    providerResult = await withProviderLimit(provider.id, () =>
-      provider.poll!(handle),
-    );
+    providerResult = await provider.poll(handle);
   } catch {
     return scheduleRetryOrFinish(
       claimed,
@@ -1387,6 +1420,20 @@ async function pollJob(
     case 'failed': {
       const failure = providerFailureDiagnostic(result.error);
       if (failure.retryable) {
+        if (
+          failure.code === 'RATE_LIMITED' &&
+          (failure.disposition === 'not_started' ||
+            failure.disposition === 'rejected')
+        ) {
+          return scheduleProviderRateLimitWait(
+            claimed,
+            'poll',
+            failure.diagnostic,
+            client,
+            claimedUntil,
+            failure.retryAfterMs,
+          );
+        }
         return scheduleRetryOrFinish(
           claimed,
           'poll',
@@ -1601,9 +1648,7 @@ async function finishCancellingJob(
 
   let providerResult: unknown;
   try {
-    providerResult = await withProviderLimit(provider.id, () =>
-      provider.cancel!(handle),
-    );
+    providerResult = await provider.cancel(handle);
   } catch {
     return scheduleRetryOrFinish(
       claimed,

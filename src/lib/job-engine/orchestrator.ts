@@ -50,6 +50,21 @@ export type OrchestratorContext = {
   db: DbClient;
 };
 
+const DETAIL_ADVANCE_BATCH_SIZE = 16;
+
+async function advanceJobsInBatches(
+  jobs: GenerationWithJobsAndImages['jobs'],
+  client: DbClient,
+): Promise<void> {
+  for (let offset = 0; offset < jobs.length; offset += DETAIL_ADVANCE_BATCH_SIZE) {
+    await Promise.allSettled(
+      jobs
+        .slice(offset, offset + DETAIL_ADVANCE_BATCH_SIZE)
+        .map((job) => advance(job, client)),
+    );
+  }
+}
+
 function buildNormalizedRequest(
   params: SubmitGenerationParams,
   processedPrompt: string,
@@ -167,9 +182,7 @@ export async function getGeneration(
 
   // Detail is a recovery trigger when the optional worker is intentionally
   // disabled, but advance still honours persisted due times and leases.
-  await Promise.allSettled(
-    generation.jobs.map((job) => advance(job, ctx.db)),
-  );
+  await advanceJobsInBatches(generation.jobs, ctx.db);
   generation = getGenerationWithJobsAndImages(id, ctx.db)!;
   return toGenerationView(generation, ctx.db);
 }
@@ -255,13 +268,27 @@ function toGenerationView(
     status: generation.status as GenerationStatus,
     createdAt: generation.createdAt,
     updatedAt: generation.updatedAt,
-    jobs: generation.jobs.map((job) => ({
-      id: job.id,
-      provider: job.provider as GenerationView['jobs'][number]['provider'],
-      model: job.model,
-      status: job.status as GenerationStatus,
-      error: toSafeJobError(job.error),
-    })),
+    jobs: generation.jobs.map((job) => {
+      const error = toSafeJobError(job.error);
+      const waitingForProvider =
+        (job.phase === 'queued' || job.phase === 'polling') &&
+        (job.status === 'pending' || job.status === 'running') &&
+        error?.code === 'RATE_LIMITED' &&
+        error.retryable;
+      return {
+        id: job.id,
+        provider: job.provider as GenerationView['jobs'][number]['provider'],
+        model: job.model,
+        status: job.status as GenerationStatus,
+        error,
+        ...(waitingForProvider
+          ? {
+              waitingForProvider: true,
+              ...(job.nextPollAt ? { nextAttemptAt: job.nextPollAt } : {}),
+            }
+          : {}),
+      };
+    }),
     images: generation.images.map((image) => {
       const availability = getImageAvailability(image);
       return {

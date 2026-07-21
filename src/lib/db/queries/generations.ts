@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, isNotNull, lte, or, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { generations, generationJobs, images, sessions } from '../schema';
 import type { Generation, GenerationJob, Image } from '../schema';
@@ -692,10 +692,12 @@ export function persistLateProviderHandleForCancellation(
   return result.changes > 0;
 }
 
+/** Stable id pagination lets one worker tick visit each due row at most once. */
 export function listDueGenerationJobs(
   now: string,
   limit = 16,
   client: DbClient = db,
+  afterId?: string,
 ): GenerationJob[] {
   return client
     .select()
@@ -721,13 +723,10 @@ export function listDueGenerationJobs(
           isNull(generationJobs.pollLeaseUntil),
           lte(generationJobs.pollLeaseUntil, now),
         ),
+        ...(afterId ? [gt(generationJobs.id, afterId)] : []),
       ),
     )
-    .orderBy(
-      asc(generationJobs.nextPollAt),
-      asc(generationJobs.updatedAt),
-      asc(generationJobs.id),
-    )
+    .orderBy(asc(generationJobs.id))
     .limit(limit)
     .all();
 }

@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 
 import { createTestDb } from '../../../tests/helpers/db';
-import { generations, getGenerationWithJobsAndImages, sessions } from '../db';
+import { generationJobs, generations, getGenerationWithJobsAndImages, sessions } from '../db';
 import { IdempotencyKeyReusedError } from '../errors';
 import type { ImageProvider } from '../providers';
 import * as providers from '../providers';
 import * as storage from '../storage';
 import { getGeneration, submitGeneration } from './orchestrator';
+import { serializeSafeJobError } from './job-error';
 
 vi.mock('../providers', () => ({ getById: vi.fn() }));
 vi.mock('../storage', async (importOriginal) => ({
@@ -88,6 +89,49 @@ describe('generation orchestrator durable admission', () => {
     });
     expect(stored.jobs[0]!.requestSnapshot).toContain('"seed":42');
     expect(stored.jobs[0]!.requestSnapshot).not.toContain('clientRequestId');
+  });
+
+  it('durably admits more than eight distinct valid targets', async () => {
+    const base = makeProvider().capabilities.get('fal-ai/flux/schnell')!;
+    const capabilities = new Map(
+      Array.from({ length: 9 }, (_, index) => {
+        const model = `fal-ai/flux/model-${index}`;
+        return [model, { ...base, model }] as const;
+      }),
+    );
+    const submit = vi.fn();
+    vi.mocked(providers.getById).mockReturnValue(
+      makeProvider({ capabilities, submit }),
+    );
+
+    const result = await submitGeneration(params({
+      targets: Array.from({ length: 9 }, (_, index) => ({
+        provider: 'fal' as const,
+        model: `fal-ai/flux/model-${index}`,
+      })),
+    }), { db });
+
+    expect(getGenerationWithJobsAndImages(result.generationId, db)?.jobs).toHaveLength(9);
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('exposes only safe Provider waiting metadata in the public job view', async () => {
+    vi.mocked(providers.getById).mockReturnValue(makeProvider());
+    const result = await submitGeneration(params(), { db });
+    const nextAttemptAt = '2099-01-01T00:00:00.000Z';
+    db.update(generationJobs).set({
+      error: serializeSafeJobError('RATE_LIMITED', true),
+      nextPollAt: nextAttemptAt,
+    }).where(eq(generationJobs.generationId, result.generationId)).run();
+
+    const view = await getGeneration(result.generationId, { db });
+
+    expect(view.jobs[0]).toMatchObject({
+      status: 'pending',
+      waitingForProvider: true,
+      nextAttemptAt,
+      error: { code: 'RATE_LIMITED', retryable: true },
+    });
   });
 
   it('replays the same durable generation without revalidating current provider configuration', async () => {

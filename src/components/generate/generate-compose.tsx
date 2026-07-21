@@ -28,7 +28,6 @@ export type GenerateComposeProps = {
   sessionBusy: boolean;
   sessionError: string | null;
   hasConfiguredProviders: boolean;
-  maxTargets: number;
   models: AvailableModelTarget[];
   selectedKeys: ReadonlySet<string>;
   controls: GenerationControls;
@@ -68,7 +67,6 @@ export function GenerateCompose({
   sessionBusy,
   sessionError,
   hasConfiguredProviders,
-  maxTargets,
   models,
   selectedKeys,
   controls,
@@ -302,7 +300,6 @@ export function GenerateCompose({
       <GenerateInspector
         projectId={projectId}
         hasConfiguredProviders={hasConfiguredProviders}
-        maxTargets={maxTargets}
         models={models}
         selectedKeys={selectedKeys}
         controls={controls}

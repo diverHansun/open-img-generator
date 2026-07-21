@@ -17,7 +17,6 @@ function targetKey(target: GenerationTarget): string {
 export type GenerateInspectorProps = {
   projectId: string;
   hasConfiguredProviders: boolean;
-  maxTargets: number;
   models: AvailableModelTarget[];
   selectedKeys: ReadonlySet<string>;
   controls: GenerationControls;
@@ -35,7 +34,6 @@ export type GenerateInspectorProps = {
 export function GenerateInspector({
   projectId,
   hasConfiguredProviders,
-  maxTargets,
   models,
   selectedKeys,
   controls,
@@ -83,9 +81,6 @@ export function GenerateInspector({
                   <input
                     type="checkbox"
                     checked={selectedKeys.has(key)}
-                    disabled={
-                      !selectedKeys.has(key) && selectedKeys.size >= maxTargets
-                    }
                     onChange={() => onToggleModel(key)}
                   />
                   <span className={styles.modelCopy}>

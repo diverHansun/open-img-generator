@@ -119,6 +119,8 @@ export type JobView = {
       hostname?: string;
     };
   };
+  waitingForProvider?: boolean;
+  nextAttemptAt?: string;
 };
 
 export type ImageView = {

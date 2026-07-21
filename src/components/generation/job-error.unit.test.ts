@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getJobErrorDiagnosticReference,
   getJobErrorMessageKey,
+  isWaitingForProvider,
   shouldShowJobError,
 } from './job-error';
 
@@ -95,5 +96,20 @@ describe('job error presentation', () => {
         retryable: false,
       }),
     ).toBe(true);
+  });
+
+  it('shows Provider waiting only while the durable job is active', () => {
+    expect(isWaitingForProvider({
+      status: 'pending',
+      waitingForProvider: true,
+    })).toBe(true);
+    expect(isWaitingForProvider({
+      status: 'running',
+      waitingForProvider: true,
+    })).toBe(true);
+    expect(isWaitingForProvider({
+      status: 'cancelled',
+      waitingForProvider: true,
+    })).toBe(false);
   });
 });

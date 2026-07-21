@@ -17,10 +17,13 @@ vi.mock('../storage', async (importOriginal) => ({
 
 const now = '2026-07-12T10:00:00.000Z';
 
-function seedQueuedJob(db: ReturnType<typeof createTestDb>['db']) {
+function seedQueuedJob(
+  db: ReturnType<typeof createTestDb>['db'],
+  suffix = 'worker',
+) {
   createGenerationAndJob(
     {
-      id: 'gen-worker',
+      id: `gen-${suffix}`,
       sessionId: 'default-session',
       prompt: 'worker test',
       status: 'pending',
@@ -28,8 +31,8 @@ function seedQueuedJob(db: ReturnType<typeof createTestDb>['db']) {
       updatedAt: now,
     },
     {
-      id: 'job-worker',
-      generationId: 'gen-worker',
+      id: `job-${suffix}`,
+      generationId: `gen-${suffix}`,
       provider: 'fal',
       model: 'fal-ai/flux/schnell',
       status: 'pending',
@@ -99,6 +102,54 @@ describe('job worker', () => {
       completed: 1,
     });
     expect(getGenerationJob('job-worker', db)).toMatchObject({ phase: 'terminal', status: 'completed' });
+  });
+
+  it('drains more due jobs than one internal page without unbounded fan-out', async () => {
+    const { db } = createTestDb();
+    for (let index = 0; index < 5; index += 1) {
+      seedQueuedJob(db, `worker-${index}`);
+    }
+    let activeSubmits = 0;
+    let maxActiveSubmits = 0;
+    const submit = vi.fn(async () => {
+      activeSubmits += 1;
+      maxActiveSubmits = Math.max(maxActiveSubmits, activeSubmits);
+      await Promise.resolve();
+      activeSubmits -= 1;
+      return {
+        kind: 'sync' as const,
+        images: [{ url: 'https://cdn.example.test/page.png', width: 1, height: 1, contentType: 'image/png', index: 0 }],
+      };
+    });
+    vi.mocked(providers.getById).mockReturnValue({
+      id: 'fal',
+      displayName: 'fal.ai',
+      capabilities: new Map(),
+      submit,
+    });
+    vi.mocked(storage.downloadAndStore).mockResolvedValue({
+      storagePath: '2026/07/page.png',
+      contentType: 'image/png',
+      sizeBytes: 4,
+    });
+
+    await expect(runWorkerOnce({ db, batchSize: 2 })).resolves.toMatchObject({
+      scanned: 5,
+      advanced: 5,
+      completed: 0,
+    });
+    await expect(runWorkerOnce({ db, batchSize: 2 })).resolves.toMatchObject({
+      scanned: 5,
+      completed: 5,
+    });
+    expect(submit).toHaveBeenCalledTimes(5);
+    expect(maxActiveSubmits).toBe(2);
+    for (let index = 0; index < 5; index += 1) {
+      expect(getGenerationJob(`job-worker-${index}`, db)).toMatchObject({
+        phase: 'terminal',
+        status: 'completed',
+      });
+    }
   });
 
   it('returns zeroed domain counters when no jobs are due', async () => {

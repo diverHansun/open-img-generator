@@ -2,6 +2,9 @@ import type { ProviderDiagnostic } from './error-diagnostics';
 
 export type { ProviderDiagnostic, ProviderDiagnosticCategory } from './error-diagnostics';
 
+/** Long enough to respect provider back-pressure without persisting raw headers. */
+export const MAX_PROVIDER_RETRY_AFTER_MS = 15 * 60_000;
+
 export type ProviderId =
   | 'fal'
   | 'zenmux'
