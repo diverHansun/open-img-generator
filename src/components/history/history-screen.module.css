@@ -112,14 +112,41 @@
   margin-left: 1.75rem;
 }
 
+.generationRowShell {
+  position: relative;
+}
+
 .generationRow {
   width: calc(100% - 0.5rem);
   min-height: 4.35rem;
-  padding: var(--space-2);
+  padding: var(--space-2) 3.25rem var(--space-2) var(--space-2);
   border-bottom: 1px solid var(--color-line);
   background: transparent;
   text-align: left;
   transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.rowDelete {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  translate: 0 -50%;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--color-danger);
+}
+
+.rowDelete:hover,
+.rowDelete:focus-visible {
+  background: var(--color-danger-soft);
+}
+
+.rowDelete svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 .generationRow:hover,

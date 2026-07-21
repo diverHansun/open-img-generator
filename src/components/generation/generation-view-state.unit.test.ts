@@ -46,6 +46,8 @@ describe('reconcileGenerationSnapshot', () => {
         width: 512,
         height: 512,
         favorited: false,
+        availability: 'available',
+        removedAt: null,
       },
     ];
     const regressed = view('2026-07-20T00:00:02.000Z', 'running');

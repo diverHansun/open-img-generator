@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "tables": {
     "projects": ["id", "title", "created_at", "updated_at"],
     "sessions": ["id", "project_id", "title", "created_at", "updated_at"],
@@ -42,7 +42,9 @@
       "width",
       "height",
       "size_bytes",
-      "created_at"
+      "created_at",
+      "removed_at",
+      "removal_reason"
     ],
     "favorites": ["id", "image_id", "created_at"],
     "model_preferences": ["provider", "model", "enabled", "updated_at"]

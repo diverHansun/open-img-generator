@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ArrowRight, ImageOff } from 'lucide-react';
+import { ArrowRight, Download, ImageOff, Trash2 } from 'lucide-react';
 
 import { FavoriteButton } from '@/components/generation/favorite-button';
 import { useLocale } from '@/components/i18n/locale-provider';
@@ -38,6 +38,10 @@ export function ImagePreviewDialog({
   favoriteError,
   onFavoriteChange,
   onViewGeneration,
+  downloadUrl,
+  deletePending,
+  deleteError,
+  onDelete,
   returnFocus,
   suppressReturnFocus = false,
 }: {
@@ -54,6 +58,10 @@ export function ImagePreviewDialog({
   favoriteError?: string | null;
   onFavoriteChange?: (next: boolean) => void;
   onViewGeneration?: () => void;
+  downloadUrl?: string;
+  deletePending?: boolean;
+  deleteError?: string | null;
+  onDelete?: () => void;
   returnFocus?: HTMLElement | null;
   suppressReturnFocus?: boolean;
 }) {
@@ -147,10 +155,36 @@ export function ImagePreviewDialog({
             <p>{prompt}</p>
           </section>
 
-          {favoriteError ? (
+          {favoriteError || deleteError ? (
             <p className={styles.inlineError} role="alert">
-              {favoriteError}
+              {favoriteError ?? deleteError}
             </p>
+          ) : null}
+
+          {downloadUrl || onDelete ? (
+            <div className={styles.imageActions}>
+              {downloadUrl ? (
+                <Button asChild type="button" variant="secondary">
+                  <a href={downloadUrl} download>
+                    <Download aria-hidden="true" />
+                    {t('dialogs.downloadImage')}
+                  </a>
+                </Button>
+              ) : null}
+              {onDelete ? (
+                <Button
+                  type="button"
+                  variant="danger"
+                  disabled={deletePending}
+                  onClick={onDelete}
+                >
+                  <Trash2 aria-hidden="true" />
+                  {deletePending
+                    ? t('dialogs.deletingImage')
+                    : t('dialogs.deleteImage')}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
 
           {onViewGeneration ? (

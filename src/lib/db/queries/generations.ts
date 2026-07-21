@@ -85,6 +85,16 @@ export type GenerationAdmissionResult = {
   jobs: GenerationJob[];
 };
 
+export type DeleteGenerationForHistoryResult =
+  | { kind: 'not_found' }
+  | { kind: 'active' }
+  | { kind: 'confirmation_required' }
+  | {
+      kind: 'deleted';
+      storagePaths: string[];
+      resultSnapshots: Array<string | null>;
+    };
+
 function defaultJobPhase(status: GenerationStatus): GenerationJobPhase {
   return status === 'completed' || status === 'failed' || status === 'cancelled'
     ? 'terminal'
@@ -745,6 +755,39 @@ export function getGenerationWithJobsAndImages(
     .get();
   if (!generation) return undefined;
   return fetchGenerationDetails(generation, client);
+}
+
+export function deleteGenerationForHistory(
+  id: string,
+  options: { confirmUnknownOutcome?: boolean } = {},
+  client: DbClient = db,
+): DeleteGenerationForHistoryResult {
+  return client.transaction(
+    (tx) => {
+      const generation = getGenerationWithJobsAndImages(id, tx);
+      if (!generation) return { kind: 'not_found' };
+      const hasUnknownOutcome = generation.jobs.some(
+        (job) => job.phase === 'outcome_unknown',
+      );
+      if (hasUnknownOutcome && !options.confirmUnknownOutcome) {
+        return { kind: 'confirmation_required' };
+      }
+      if (
+        generation.jobs.some(
+          (job) => job.phase !== 'terminal' && job.phase !== 'outcome_unknown',
+        )
+      ) {
+        return { kind: 'active' };
+      }
+      const storagePaths = generation.images
+        .map((image) => image.storagePath)
+        .filter((value): value is string => value !== null);
+      const resultSnapshots = generation.jobs.map((job) => job.resultSnapshot);
+      tx.delete(generations).where(eq(generations.id, id)).run();
+      return { kind: 'deleted', storagePaths, resultSnapshots };
+    },
+    { behavior: 'immediate' },
+  );
 }
 
 export function fetchGenerationDetails(

@@ -1,4 +1,5 @@
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -117,17 +118,27 @@ export const images = sqliteTable(
       .notNull()
       .references(() => generationJobs.id, { onDelete: 'cascade' }),
     index: integer('index').notNull(),
-    storagePath: text('storage_path').notNull(),
+    storagePath: text('storage_path'),
     contentType: text('content_type').notNull(),
     width: integer('width'),
     height: integer('height'),
     sizeBytes: integer('size_bytes'),
     createdAt: text('created_at').notNull(),
+    removedAt: text('removed_at'),
+    removalReason: text('removal_reason'),
   },
   (table) => ({
     uniqueJobIndex: uniqueIndex('unique_job_index').on(
       table.generationJobId,
       table.index,
+    ),
+    availabilityInvariant: check(
+      'images_availability_check',
+      sql`(
+        (${table.storagePath} IS NOT NULL AND ${table.removedAt} IS NULL AND ${table.removalReason} IS NULL)
+        OR
+        (${table.storagePath} IS NULL AND ${table.removedAt} IS NOT NULL AND ${table.removalReason} IN ('retention_expired', 'user_deleted', 'storage_missing'))
+      )`,
     ),
   }),
 );

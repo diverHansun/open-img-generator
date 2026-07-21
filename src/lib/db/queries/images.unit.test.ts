@@ -7,6 +7,9 @@ import {
   getImage,
   imageExists,
   listFavoriteImageIds,
+  getImageAvailability,
+  markImageExpiredIfUnfavorited,
+  markImageUserDeleted,
 } from './images';
 import { NotFoundError } from '../../errors';
 
@@ -115,5 +118,69 @@ describe('images queries', () => {
 
     expect([...listFavoriteImageIds(['img-1', 'img-2'], db)]).toEqual(['img-2']);
     expect(listFavoriteImageIds([], db).size).toBe(0);
+  });
+
+  it('preserves a retention tombstone and lets a favorite win the guard', () => {
+    const { db } = createTestDb();
+    seedJob(db);
+    createImage(
+      {
+        id: 'img-1',
+        jobId: 'job-1',
+        index: 0,
+        storagePath: 'img.png',
+        contentType: 'image/png',
+        width: null,
+        height: null,
+        sizeBytes: 1,
+        createdAt: now,
+      },
+      db,
+    );
+    db.insert(favorites)
+      .values({ id: 'favorite-1', imageId: 'img-1', createdAt: now })
+      .run();
+    expect(markImageExpiredIfUnfavorited('img-1', now, db)).toBeNull();
+    db.delete(favorites).run();
+    expect(markImageExpiredIfUnfavorited('img-1', now, db)).toEqual({
+      storagePath: 'img.png',
+      availability: 'retention_expired',
+      removedAt: now,
+    });
+    expect(getImageAvailability(getImage('img-1', db))).toBe(
+      'retention_expired',
+    );
+  });
+
+  it('explicit deletion removes favorite but keeps an idempotent tombstone', () => {
+    const { db } = createTestDb();
+    seedJob(db);
+    createImage(
+      {
+        id: 'img-1',
+        jobId: 'job-1',
+        index: 0,
+        storagePath: 'img.png',
+        contentType: 'image/png',
+        width: null,
+        height: null,
+        sizeBytes: 1,
+        createdAt: now,
+      },
+      db,
+    );
+    db.insert(favorites)
+      .values({ id: 'favorite-1', imageId: 'img-1', createdAt: now })
+      .run();
+    expect(markImageUserDeleted('img-1', now, db)).toMatchObject({
+      storagePath: 'img.png',
+      availability: 'user_deleted',
+    });
+    expect(listFavoriteImageIds(['img-1'], db).size).toBe(0);
+    expect(markImageUserDeleted('img-1', 'later', db)).toEqual({
+      storagePath: null,
+      availability: 'user_deleted',
+      removedAt: now,
+    });
   });
 });

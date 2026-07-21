@@ -1,4 +1,4 @@
-import { desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import {
   db,
   generationJobs,
@@ -102,7 +102,12 @@ export function listProjectSummaries(
     .innerJoin(generationJobs, eq(images.generationJobId, generationJobs.id))
     .innerJoin(generations, eq(generationJobs.generationId, generations.id))
     .innerJoin(sessions, eq(generations.sessionId, sessions.id))
-    .where(inArray(sessions.projectId, projectIds))
+    .where(
+      and(
+        inArray(sessions.projectId, projectIds),
+        isNotNull(images.storagePath),
+      ),
+    )
     .orderBy(desc(images.createdAt), desc(images.id))
     .all();
   for (const image of imageRows) {

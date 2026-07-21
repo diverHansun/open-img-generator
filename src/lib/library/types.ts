@@ -1,6 +1,7 @@
 import type { GenerationStatus } from '../db';
 import type { Project, Session } from '../db';
 import type { JobView } from '../job-engine/types';
+import type { ImageAvailability } from '../db';
 
 export type ProjectSummary = {
   project: Project;
@@ -50,9 +51,11 @@ export type GenerationSummary = {
   images: Array<{
     id: string;
     jobId: string;
-    url: string;
+    url: string | null;
     width: number | null;
     height: number | null;
+    availability: ImageAvailability;
+    removedAt: string | null;
   }>;
 };
 

@@ -1,5 +1,4 @@
-import { getImage } from '../../../../lib/db';
-import { getReadStream } from '../../../../lib/storage';
+import { deleteImageBytes, openReadableImage } from '../../../../lib/library';
 import { handleApiError } from '../../error-handler';
 
 export async function GET(
@@ -8,12 +7,24 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const image = getImage(id);
-    const stream = getReadStream(image.storagePath);
+    const { image, stream } = openReadableImage(id);
     return new Response(stream as unknown as BodyInit, {
       headers: { 'Content-Type': image.contentType },
     });
   } catch (err) {
-    return handleApiError(err);
+    return handleApiError(err, { structured: true });
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    deleteImageBytes(id);
+    return new Response(null, { status: 204 });
+  } catch (err) {
+    return handleApiError(err, { structured: true });
   }
 }

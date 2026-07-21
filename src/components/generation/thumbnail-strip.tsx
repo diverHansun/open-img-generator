@@ -4,7 +4,7 @@ import styles from './thumbnail-strip.module.css';
 
 export type ThumbnailImage = {
   id: string;
-  url: string;
+  url: string | null;
   width: number | null;
   height: number | null;
 };
@@ -34,16 +34,22 @@ export function ThumbnailStrip({
   const remaining = Math.max(0, images.length - shown.length);
   return (
     <span className={styles.strip} aria-label={`${images.length}`}>
-      {shown.map((image, index) => (
-        <img
-          key={image.id}
-          src={image.url}
-          width={image.width ?? 48}
-          height={image.height ?? 48}
-          alt={index === 0 ? alt : ''}
-          loading="lazy"
-        />
-      ))}
+      {shown.map((image, index) =>
+        image.url ? (
+          <img
+            key={image.id}
+            src={image.url}
+            width={image.width ?? 48}
+            height={image.height ?? 48}
+            alt={index === 0 ? alt : ''}
+            loading="lazy"
+          />
+        ) : (
+          <span key={image.id} className={styles.empty} aria-label={emptyLabel}>
+            <ImageIcon aria-hidden="true" />
+          </span>
+        ),
+      )}
       {remaining > 0 ? (
         <span className={styles.more} aria-label={moreLabel(remaining)}>
           +{remaining}

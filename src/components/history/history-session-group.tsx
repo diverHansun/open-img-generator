@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Trash2 } from 'lucide-react';
 
 import { GenerationStatus } from '@/components/generation/generation-status';
 import { ThumbnailStrip } from '@/components/generation/thumbnail-strip';
@@ -35,6 +35,7 @@ export function HistorySessionGroup({
   onExpandedChange,
   onLoadMore,
   onOpenDetail,
+  onDelete,
 }: {
   group: HistoryGroup;
   expanded: boolean;
@@ -42,6 +43,7 @@ export function HistorySessionGroup({
   onExpandedChange: (expanded: boolean) => void;
   onLoadMore: () => void;
   onOpenDetail: (generationId: string, trigger: HTMLElement) => void;
+  onDelete: (generationId: string) => void;
 }) {
   const { locale, t } = useLocale();
   const sessionName = group.session.title?.trim() || t('history.untitledSession');
@@ -103,13 +105,13 @@ export function HistorySessionGroup({
               const firstTarget = targets[0];
               const accessiblePrompt = accessibleExcerpt(item.prompt);
               return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={styles.generationRow}
-                  aria-label={t('history.openDetail', { prompt: accessiblePrompt })}
-                  onClick={(event) => onOpenDetail(item.id, event.currentTarget)}
-                >
+                <div key={item.id} className={styles.generationRowShell}>
+                  <button
+                    type="button"
+                    className={styles.generationRow}
+                    aria-label={t('history.openDetail', { prompt: accessiblePrompt })}
+                    onClick={(event) => onOpenDetail(item.id, event.currentTarget)}
+                  >
                   <ThumbnailStrip
                     images={item.images}
                     alt={accessiblePrompt}
@@ -142,7 +144,17 @@ export function HistorySessionGroup({
                   >
                     {formatRelativeTime(item.updatedAt, locale)}
                   </time>
-                </button>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.rowDelete}
+                    aria-label={t('history.deleteGeneration')}
+                    title={t('history.deleteGeneration')}
+                    onClick={() => onDelete(item.id)}
+                  >
+                    <Trash2 aria-hidden="true" />
+                  </button>
+                </div>
               );
             })}
           </div>

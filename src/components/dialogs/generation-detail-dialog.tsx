@@ -57,12 +57,17 @@ function patchFavorite(
 }
 
 function ResultImage({ image, prompt }: { image: ImageView; prompt: string }) {
+  const { t } = useLocale();
   const [failed, setFailed] = React.useState(false);
   const accessiblePrompt = accessibleExcerpt(prompt);
-  if (failed) {
+  if (failed || image.url === null) {
+    const label = image.url === null
+      ? t(`generation.image.${image.availability}`)
+      : accessiblePrompt;
     return (
-      <span className={styles.resultImageError} role="img" aria-label={accessiblePrompt}>
+      <span className={styles.resultImageError} role="img" aria-label={label}>
         <ImageOff aria-hidden="true" />
+        {image.url === null ? <small>{label}</small> : null}
       </span>
     );
   }
@@ -206,7 +211,9 @@ export function GenerationDetailDialog({
     }
   }, [client, generationId, t]);
 
-  const selectedImage = view?.images.find((image) => image.id === selectedImageId);
+  const selectedImage = view?.images.find(
+    (image) => image.id === selectedImageId && image.url !== null,
+  );
   const terminal = view
     ? view.jobs.length > 0 &&
       view.jobs.every((job) =>
@@ -377,7 +384,13 @@ export function GenerationDetailDialog({
                   {view.images.map((image, index) => {
                     const mutation = favoriteMutations[image.id];
                     const favorited = mutation?.value ?? image.favorited;
-                    return (
+                    return image.url === null ? (
+                      <article key={image.id} className={styles.resultItem}>
+                        <div className={styles.resultButton}>
+                          <ResultImage image={image} prompt={view.prompt} />
+                        </div>
+                      </article>
+                    ) : (
                       <article key={image.id} className={styles.resultItem}>
                         <button
                           ref={(node) => {

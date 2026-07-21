@@ -112,10 +112,16 @@ export type ImageView = {
   id: string;
   jobId: string;
   index: number;
-  url: string;
+  url: string | null;
   width: number | null;
   height: number | null;
   favorited: boolean;
+  availability:
+    | 'available'
+    | 'retention_expired'
+    | 'user_deleted'
+    | 'storage_missing';
+  removedAt: string | null;
 };
 
 export type GenerationView = {

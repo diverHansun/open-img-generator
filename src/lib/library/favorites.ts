@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, lt, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, lt, or, type SQL } from 'drizzle-orm';
 import {
   db,
   favorites,
@@ -65,13 +65,21 @@ function toGalleryItem(row: ReturnType<ReturnType<typeof favoriteQuery>['get']>)
 }
 
 export function addFavorite(imageId: string, client: DbClient = db): GalleryItem {
-  const image = client.select({ id: images.id }).from(images).where(eq(images.id, imageId)).get();
-  if (!image) throw new NotFoundError(`Image not found: ${imageId}`);
-  client
-    .insert(favorites)
-    .values({ id: randomUUID(), imageId, createdAt: new Date().toISOString() })
-    .onConflictDoNothing({ target: favorites.imageId })
-    .run();
+  client.transaction(
+    (tx) => {
+      const image = tx
+        .select({ id: images.id })
+        .from(images)
+        .where(and(eq(images.id, imageId), isNotNull(images.storagePath)))
+        .get();
+      if (!image) throw new NotFoundError(`Image not found: ${imageId}`);
+      tx.insert(favorites)
+        .values({ id: randomUUID(), imageId, createdAt: new Date().toISOString() })
+        .onConflictDoNothing({ target: favorites.imageId })
+        .run();
+    },
+    { behavior: 'immediate' },
+  );
   return getFavoriteByImageId(imageId, client);
 }
 
@@ -79,7 +87,11 @@ export function getFavoriteByImageId(
   imageId: string,
   client: DbClient = db,
 ): GalleryItem {
-  return toGalleryItem(favoriteQuery(client).where(eq(favorites.imageId, imageId)).get());
+  return toGalleryItem(
+    favoriteQuery(client)
+      .where(and(eq(favorites.imageId, imageId), isNotNull(images.storagePath)))
+      .get(),
+  );
 }
 
 export function removeFavorite(imageId: string, client: DbClient = db): void {
@@ -115,7 +127,7 @@ export function listFavorites(
   if (input.projectId) getProject(input.projectId, client);
   const limit = Math.min(input.limit ?? 48, 100);
   const cursor = decodeCursor(input.cursor);
-  const conditions: SQL[] = [];
+  const conditions: SQL[] = [isNotNull(images.storagePath)];
   if (cursor) {
     const cursorCondition = or(
       lt(favorites.createdAt, cursor.createdAt),

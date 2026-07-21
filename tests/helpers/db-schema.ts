@@ -65,12 +65,20 @@ export function initializeTestSchema(sqlite: Database.Database): void {
       id TEXT PRIMARY KEY,
       generation_job_id TEXT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
       "index" INTEGER NOT NULL,
-      storage_path TEXT NOT NULL,
+      storage_path TEXT,
       content_type TEXT NOT NULL,
       width INTEGER,
       height INTEGER,
       size_bytes INTEGER,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      removed_at TEXT,
+      removal_reason TEXT,
+      CHECK (
+        (storage_path IS NOT NULL AND removed_at IS NULL AND removal_reason IS NULL)
+        OR
+        (storage_path IS NULL AND removed_at IS NOT NULL AND
+          removal_reason IN ('retention_expired', 'user_deleted', 'storage_missing'))
+      )
     );
     CREATE UNIQUE INDEX unique_job_index ON images(generation_job_id, "index");
     CREATE TABLE favorites (

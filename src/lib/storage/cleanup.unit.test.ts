@@ -85,10 +85,22 @@ describe('stored image cleanup', () => {
 
     const result = cleanupStoredImages({ db, retentionDays: 1, orphanGraceMs: 0 });
 
-    expect(result.deletedImages).toBe(2);
+    expect(result.expiredImages).toBe(2);
+    expect(result.deletedFiles).toBe(2);
     expect(result.failures).toBe(0);
     expect(fs.existsSync(existingPath)).toBe(false);
-    expect(db.select().from(images).all()).toHaveLength(0);
+    expect(db.select().from(images).all()).toEqual([
+      expect.objectContaining({
+        id: 'img-old',
+        storagePath: null,
+        removalReason: 'retention_expired',
+      }),
+      expect.objectContaining({
+        id: 'img-missing',
+        storagePath: null,
+        removalReason: 'retention_expired',
+      }),
+    ]);
   });
 
   it('retains favorites and reports the retained count', () => {
@@ -99,7 +111,7 @@ describe('stored image cleanup', () => {
     const result = cleanupStoredImages({ db, retentionDays: 1, orphanGraceMs: 0 });
 
     expect(result.retainedFavorites).toBe(1);
-    expect(result.deletedImages).toBe(0);
+    expect(result.expiredImages).toBe(0);
     expect(fs.existsSync(favoritePath)).toBe(true);
   });
 

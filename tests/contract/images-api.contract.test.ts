@@ -38,6 +38,8 @@ describe('GET /api/images/:id', () => {
       height: 1024,
       sizeBytes: 1234,
       createdAt: '2026-07-12T10:00:00.000Z',
+      removedAt: null,
+      removalReason: null,
     });
 
     const stream = new ReadableStream({

@@ -2,14 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   countRetainedFavorites,
-  deleteImageIfUnfavorited,
   listGenerationJobResultSnapshots,
   listRetentionCandidates,
   listStoragePaths,
+  markImageExpiredIfUnfavorited,
   type DbClient,
 } from '../db';
 import { db } from '../db';
 import { getStorageRoot, removeStoredFile } from './index';
+import { parseImageRetentionDays } from './retention-policy';
 
 export type CleanupOptions = {
   db?: DbClient;
@@ -20,7 +21,8 @@ export type CleanupOptions = {
 
 export type CleanupResult = {
   retainedFavorites: number;
-  deletedImages: number;
+  expiredImages: number;
+  deletedFiles: number;
   deletedOrphans: number;
   failures: number;
 };
@@ -61,7 +63,7 @@ function stagedIdsFromSnapshots(snapshots: string[]): Set<string> {
 
 export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult {
   const client = options.db ?? db;
-  const retentionDays = options.retentionDays ?? Number(process.env.IMAGE_RETENTION_DAYS ?? 30);
+  const retentionDays = options.retentionDays ?? parseImageRetentionDays().days;
   const orphanGraceMs = options.orphanGraceMs ?? Number(process.env.IMAGE_ORPHAN_GRACE_MS ?? 3_600_000);
   const now = Date.now();
   const result: CleanupResult = {
@@ -71,7 +73,8 @@ export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult
           client,
         )
       : 0,
-    deletedImages: 0,
+    expiredImages: 0,
+    deletedFiles: 0,
     deletedOrphans: 0,
     failures: 0,
   };
@@ -81,19 +84,25 @@ export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult
       client,
     )) {
       if (options.dryRun) {
-        result.deletedImages += 1;
+        result.expiredImages += 1;
         continue;
       }
-      // Delete the DB row first with a favorites guard. If a user favorites
-      // concurrently, this returns false and we never remove its file.
-      if (!deleteImageIfUnfavorited(image.id, client)) continue;
+      // The tombstone write is the linearization point. A concurrent favorite
+      // wins through the DB guard; the file path is only returned to the winner.
+      const removed = markImageExpiredIfUnfavorited(
+        image.id,
+        new Date(now).toISOString(),
+        client,
+      );
+      if (!removed?.storagePath) continue;
+      result.expiredImages += 1;
       try {
-        removeStoredFile(image.storagePath);
-        result.deletedImages += 1;
+        removeStoredFile(removed.storagePath);
+        result.deletedFiles += 1;
       } catch {
         // A missing file is safe to reconcile; other failures remain for retry.
-        if (!fs.existsSync(path.resolve(getStorageRoot(), image.storagePath))) {
-          result.deletedImages += 1;
+        if (!fs.existsSync(path.resolve(getStorageRoot(), removed.storagePath))) {
+          result.deletedFiles += 1;
         } else {
           result.failures += 1;
         }

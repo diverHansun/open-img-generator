@@ -8,7 +8,19 @@ export class AppError extends Error {
 export class ValidationError extends AppError {}
 export class PayloadTooLargeError extends AppError {}
 export class NotFoundError extends AppError {}
+export type ImageUnavailableReason =
+  | 'retention_expired'
+  | 'user_deleted'
+  | 'storage_missing';
+
+export class ImageUnavailableError extends AppError {
+  constructor(public readonly reason: ImageUnavailableReason) {
+    super('Image is no longer available');
+  }
+}
 export class ConflictError extends AppError {}
+export class GenerationNotDeletableError extends ConflictError {}
+export class OutcomeUnknownDeleteConfirmationRequiredError extends ConflictError {}
 /**
  * A client request identity may only describe one canonical generation payload.
  * Keeping this distinct from a generic conflict lets callers preserve the

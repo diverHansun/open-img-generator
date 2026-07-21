@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createTestDb } from '../../../../tests/helpers/db';
-import { generations, generationJobs } from '../schema';
+import { favorites, generations, generationJobs, images } from '../schema';
 import {
   createGenerationAndJob,
   createGenerationWithJobs,
@@ -16,6 +16,7 @@ import {
   listDueGenerationJobs,
   markExpiredDispatchingJobOutcomeUnknown,
   requestGenerationCancellation,
+  deleteGenerationForHistory,
 } from './generations';
 import { createImage } from './images';
 
@@ -239,6 +240,70 @@ describe('generations queries', () => {
     expect(result!.jobs).toHaveLength(1);
     expect(result!.jobs[0].images).toHaveLength(1);
     expect(result!.images).toHaveLength(1);
+  });
+
+  it('hard deletes a terminal generation aggregate and returns live resources', () => {
+    const { db } = createTestDb();
+    createGenerationAndJob(
+      { ...makeGenParams(), status: 'completed' },
+      { ...makeJobParams({ status: 'completed' }), phase: 'terminal' },
+      db,
+    );
+    createImage(
+      {
+        id: 'img-1',
+        jobId: 'job-1',
+        index: 0,
+        storagePath: '2026/07/img.png',
+        contentType: 'image/png',
+        width: 1,
+        height: 1,
+        sizeBytes: 4,
+        createdAt: now,
+      },
+      db,
+    );
+    db.insert(favorites)
+      .values({ id: 'favorite-1', imageId: 'img-1', createdAt: now })
+      .run();
+
+    expect(deleteGenerationForHistory('gen-1', {}, db)).toEqual({
+      kind: 'deleted',
+      storagePaths: ['2026/07/img.png'],
+      resultSnapshots: [null],
+    });
+    expect(db.select().from(generations).all()).toHaveLength(0);
+    expect(db.select().from(generationJobs).all()).toHaveLength(0);
+    expect(db.select().from(images).all()).toHaveLength(0);
+    expect(db.select().from(favorites).all()).toHaveLength(0);
+  });
+
+  it('protects active and unknown-outcome generations', () => {
+    const active = createTestDb();
+    createGenerationAndJob(makeGenParams(), makeJobParams(), active.db);
+    expect(deleteGenerationForHistory('gen-1', {}, active.db)).toEqual({
+      kind: 'active',
+    });
+
+    const unknown = createTestDb();
+    createGenerationAndJob(
+      { ...makeGenParams(), status: 'failed' },
+      {
+        ...makeJobParams({ status: 'failed' }),
+        phase: 'outcome_unknown',
+      },
+      unknown.db,
+    );
+    expect(deleteGenerationForHistory('gen-1', {}, unknown.db)).toEqual({
+      kind: 'confirmation_required',
+    });
+    expect(
+      deleteGenerationForHistory(
+        'gen-1',
+        { confirmUnknownOutcome: true },
+        unknown.db,
+      ),
+    ).toMatchObject({ kind: 'deleted' });
   });
 
   it('updates generation status and updated_at', () => {

@@ -14,6 +14,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { workspaceRoute } from '@/lib/routes';
 import {
   getBrowserWebClientRuntime,
+  ApiClientError,
   LatestRequestCoordinator,
   type HistoryPage,
 } from '@/lib/web-client';
@@ -204,6 +205,29 @@ export function HistoryScreen({ projectId }: { projectId: string }) {
     }
   }
 
+  async function deleteHistoryGeneration(generationId: string) {
+    if (!window.confirm(t('history.deleteGenerationConfirm'))) return;
+    try {
+      await client.deleteGeneration(generationId);
+    } catch (error) {
+      if (
+        error instanceof ApiClientError &&
+        error.code === 'OUTCOME_UNKNOWN_DELETE_CONFIRMATION_REQUIRED'
+      ) {
+        if (!window.confirm(t('history.deleteUnknownOutcomeConfirm'))) return;
+        await client.deleteGeneration(generationId, {
+          confirmUnknownOutcome: true,
+        });
+      } else {
+        setAnnouncement(t('history.deleteGenerationError'));
+        return;
+      }
+    }
+    if (detail?.generationId === generationId) setDetail(null);
+    setAnnouncement(t('history.deleteGenerationSuccess'));
+    await loadHistory(false);
+  }
+
   const description = page
     ? t('history.summary', {
         sessions: page.totalSessions,
@@ -286,6 +310,7 @@ export function HistoryScreen({ projectId }: { projectId: string }) {
                 onOpenDetail={(generationId, returnFocus) =>
                   setDetail({ generationId, returnFocus })
                 }
+                onDelete={(generationId) => void deleteHistoryGeneration(generationId)}
               />
             ))}
           </div>

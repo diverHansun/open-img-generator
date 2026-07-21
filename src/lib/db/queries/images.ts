@@ -1,4 +1,12 @@
-import { and, eq, inArray, isNull, lt, notExists } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  notExists,
+} from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { favorites, images } from '../schema';
 import type { Image } from '../schema';
@@ -15,6 +23,35 @@ export type CreateImageParams = {
   sizeBytes: number;
   createdAt: string;
 };
+
+export const IMAGE_REMOVAL_REASONS = [
+  'retention_expired',
+  'user_deleted',
+  'storage_missing',
+] as const;
+
+export type ImageRemovalReason = (typeof IMAGE_REMOVAL_REASONS)[number];
+export type ImageAvailability = 'available' | ImageRemovalReason;
+
+export type RemovedImageResult = {
+  storagePath: string | null;
+  availability: ImageAvailability;
+  removedAt: string | null;
+};
+
+export function getImageAvailability(
+  image: Pick<Image, 'storagePath' | 'removedAt' | 'removalReason'>,
+): ImageAvailability {
+  if (image.storagePath !== null) return 'available';
+  if (
+    image.removalReason === 'retention_expired' ||
+    image.removalReason === 'user_deleted' ||
+    image.removalReason === 'storage_missing'
+  ) {
+    return image.removalReason;
+  }
+  throw new Error('Image availability invariant is invalid');
+}
 
 export function createImage(
   params: CreateImageParams,
@@ -113,7 +150,12 @@ export function listFavoriteImageIds(
 }
 
 export function listStoragePaths(client: DbClient = db): string[] {
-  return client.select({ storagePath: images.storagePath }).from(images).all().map((row) => row.storagePath);
+  return client
+    .select({ storagePath: images.storagePath })
+    .from(images)
+    .where(isNotNull(images.storagePath))
+    .all()
+    .map((row) => row.storagePath!);
 }
 
 export function listRetentionCandidates(
@@ -124,7 +166,14 @@ export function listRetentionCandidates(
     .select({ image: images })
     .from(images)
     .leftJoin(favorites, eq(favorites.imageId, images.id))
-    .where(and(lt(images.createdAt, cutoff), isNull(favorites.id)))
+    .where(
+      and(
+        lt(images.createdAt, cutoff),
+        isNotNull(images.storagePath),
+        isNull(images.removedAt),
+        isNull(favorites.id),
+      ),
+    )
     .all()
     .map((row) => row.image);
 }
@@ -141,23 +190,134 @@ export function countRetainedFavorites(
     .all().length;
 }
 
-export function deleteImageIfUnfavorited(
+/**
+ * Atomically replaces a live file reference with a retention tombstone. A
+ * concurrently-created favorite wins through the NOT EXISTS guard.
+ */
+export function markImageExpiredIfUnfavorited(
   id: string,
+  removedAt: string,
   client: DbClient = db,
-): boolean {
-  const result = client
-    .delete(images)
-    .where(
-      and(
-        eq(images.id, id),
-        notExists(
-          client
-            .select({ id: favorites.id })
-            .from(favorites)
-            .where(eq(favorites.imageId, images.id)),
-        ),
-      ),
-    )
-    .run();
-  return result.changes > 0;
+): RemovedImageResult | null {
+  return client.transaction(
+    (tx) => {
+      const current = tx
+        .select()
+        .from(images)
+        .where(eq(images.id, id))
+        .get();
+      if (!current || current.storagePath === null) return null;
+      const result = tx
+        .update(images)
+        .set({
+          storagePath: null,
+          removedAt,
+          removalReason: 'retention_expired',
+        })
+        .where(
+          and(
+            eq(images.id, id),
+            isNotNull(images.storagePath),
+            notExists(
+              tx
+                .select({ id: favorites.id })
+                .from(favorites)
+                .where(eq(favorites.imageId, images.id)),
+            ),
+          ),
+        )
+        .run();
+      return result.changes > 0
+        ? {
+            storagePath: current.storagePath,
+            availability: 'retention_expired',
+            removedAt,
+          }
+        : null;
+    },
+    { behavior: 'immediate' },
+  );
+}
+
+/** Explicit image deletion wins over favorite state but preserves history. */
+export function markImageUserDeleted(
+  id: string,
+  removedAt: string,
+  client: DbClient = db,
+): RemovedImageResult | undefined {
+  return client.transaction(
+    (tx) => {
+      const current = tx.select().from(images).where(eq(images.id, id)).get();
+      if (!current) return undefined;
+      if (current.storagePath === null) {
+        return {
+          storagePath: null,
+          availability: getImageAvailability(current),
+          removedAt: current.removedAt,
+        };
+      }
+      tx.delete(favorites).where(eq(favorites.imageId, id)).run();
+      const updated = tx
+        .update(images)
+        .set({
+          storagePath: null,
+          removedAt,
+          removalReason: 'user_deleted',
+        })
+        .where(and(eq(images.id, id), isNotNull(images.storagePath)))
+        .run();
+      if (updated.changes === 0) {
+        const winner = tx.select().from(images).where(eq(images.id, id)).get();
+        return winner
+          ? {
+              storagePath: null,
+              availability: getImageAvailability(winner),
+              removedAt: winner.removedAt,
+            }
+          : undefined;
+      }
+      return {
+        storagePath: current.storagePath,
+        availability: 'user_deleted',
+        removedAt,
+      };
+    },
+    { behavior: 'immediate' },
+  );
+}
+
+/** Reconciles a DB row whose managed file disappeared outside the app. */
+export function markImageStorageMissing(
+  id: string,
+  removedAt: string,
+  client: DbClient = db,
+): RemovedImageResult | undefined {
+  return client.transaction(
+    (tx) => {
+      const current = tx.select().from(images).where(eq(images.id, id)).get();
+      if (!current) return undefined;
+      if (current.storagePath === null) {
+        return {
+          storagePath: null,
+          availability: getImageAvailability(current),
+          removedAt: current.removedAt,
+        };
+      }
+      tx.delete(favorites).where(eq(favorites.imageId, id)).run();
+      tx.update(images)
+        .set({
+          storagePath: null,
+          removedAt,
+          removalReason: 'storage_missing',
+        })
+        .where(and(eq(images.id, id), isNotNull(images.storagePath)))
+        .run();
+      return {
+        storagePath: current.storagePath,
+        availability: 'storage_missing',
+        removedAt,
+      };
+    },
+    { behavior: 'immediate' },
+  );
 }

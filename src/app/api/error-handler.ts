@@ -12,6 +12,9 @@ import {
   InitialSessionUnavailableError,
   SchemaNotReadyError,
   DatabaseUnavailableError,
+  ImageUnavailableError,
+  GenerationNotDeletableError,
+  OutcomeUnknownDeleteConfirmationRequiredError,
 } from '../../lib/errors';
 import { logApiFailure } from '../../lib/observability/safe-logger';
 import {
@@ -74,6 +77,20 @@ function safeSchemaDetails(error: SchemaNotReadyError): SafeErrorDetails {
 }
 
 function classifyApiError(err: unknown): StructuredApiError {
+  if (err instanceof ImageUnavailableError) {
+    const code = {
+      retention_expired: 'IMAGE_EXPIRED',
+      user_deleted: 'IMAGE_DELETED',
+      storage_missing: 'IMAGE_MISSING',
+    }[err.reason];
+    return {
+      code,
+      message: err.message,
+      safeMessage: err.message,
+      retryable: false,
+      status: 410,
+    };
+  }
   if (err instanceof SchemaNotReadyError) {
     return {
       code: 'SCHEMA_NOT_READY',
@@ -148,6 +165,24 @@ function classifyApiError(err: unknown): StructuredApiError {
     };
   }
   if (err instanceof ConflictError) {
+    if (err instanceof GenerationNotDeletableError) {
+      return {
+        code: 'GENERATION_NOT_DELETABLE',
+        message: err.message,
+        safeMessage: 'Generation is still active and cannot be deleted',
+        retryable: false,
+        status: 409,
+      };
+    }
+    if (err instanceof OutcomeUnknownDeleteConfirmationRequiredError) {
+      return {
+        code: 'OUTCOME_UNKNOWN_DELETE_CONFIRMATION_REQUIRED',
+        message: err.message,
+        safeMessage: 'Deletion requires confirmation for an unknown provider outcome',
+        retryable: false,
+        status: 409,
+      };
+    }
     if (err instanceof IdempotencyKeyReusedError) {
       return {
         code: 'IDEMPOTENCY_KEY_REUSED',

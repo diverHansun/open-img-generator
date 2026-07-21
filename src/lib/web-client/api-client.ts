@@ -229,6 +229,17 @@ export function createApiClient(fetcher: FetchLike = fetch) {
         jsonInit('POST', {}),
         DETAIL_DEADLINE_MS,
       ),
+    deleteGeneration: (
+      id: string,
+      options: { confirmUnknownOutcome?: boolean } = {},
+    ) =>
+      requestEmpty(
+        fetcher,
+        `/api/generations/${encodeURIComponent(id)}`,
+        options.confirmUnknownOutcome
+          ? jsonInit('DELETE', { confirmUnknownOutcome: true })
+          : { method: 'DELETE' },
+      ),
     listGenerations: (
       query: {
         limit?: number;
@@ -345,6 +356,10 @@ export function createApiClient(fetcher: FetchLike = fetch) {
       ),
     removeFavorite: (imageId: string) =>
       requestEmpty(fetcher, `/api/favorites/${encodeURIComponent(imageId)}`, {
+        method: 'DELETE',
+      }),
+    deleteImage: (imageId: string) =>
+      requestEmpty(fetcher, `/api/images/${encodeURIComponent(imageId)}`, {
         method: 'DELETE',
       }),
     listModelPreferences: (options?: ApiRequestOptions) =>

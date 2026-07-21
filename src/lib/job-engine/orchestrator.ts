@@ -6,13 +6,22 @@ import {
   admitGenerationWithJobs,
   getGenerationByClientRequestId,
   getGenerationWithJobsAndImages,
+  getImageAvailability,
   listFavoriteImageIds,
   requestGenerationCancellation,
+  deleteGenerationForHistory,
   sessions,
   type DbClient,
   type GenerationWithJobsAndImages,
 } from '../db';
-import { IdempotencyKeyReusedError, NotFoundError, ValidationError } from '../errors';
+import {
+  GenerationNotDeletableError,
+  IdempotencyKeyReusedError,
+  NotFoundError,
+  OutcomeUnknownDeleteConfirmationRequiredError,
+  ValidationError,
+} from '../errors';
+import { removeStoredFile } from '../storage';
 import * as prompt from '../prompt';
 import { getById } from '../providers';
 import type { NormalizedRequest, ProviderCapabilities } from '../providers';
@@ -193,6 +202,37 @@ export async function cancelGeneration(
   return toGenerationView(generation, ctx.db);
 }
 
+export function deleteGeneration(
+  id: string,
+  options: { confirmUnknownOutcome?: boolean },
+  ctx: OrchestratorContext,
+): void {
+  const resources = deleteGenerationForHistory(id, options, ctx.db);
+  if (resources.kind === 'not_found') {
+    throw new NotFoundError(`Generation not found: ${id}`);
+  }
+  if (resources.kind === 'confirmation_required') {
+    throw new OutcomeUnknownDeleteConfirmationRequiredError(
+      'Unknown provider outcome requires explicit deletion confirmation',
+    );
+  }
+  if (resources.kind === 'active') {
+    throw new GenerationNotDeletableError(
+      'Active generation cannot be deleted',
+    );
+  }
+  for (const snapshot of resources.resultSnapshots) {
+    cleanupStagedResultSnapshot(snapshot);
+  }
+  for (const storagePath of resources.storagePaths) {
+    try {
+      removeStoredFile(storagePath);
+    } catch {
+      // DB deletion is authoritative; orphan cleanup retries managed files.
+    }
+  }
+}
+
 function toGenerationView(
   generation: GenerationWithJobsAndImages,
   client: DbClient,
@@ -222,14 +262,20 @@ function toGenerationView(
       status: job.status as GenerationStatus,
       error: toSafeJobError(job.error),
     })),
-    images: generation.images.map((image) => ({
-      id: image.id,
-      jobId: image.generationJobId,
-      index: image.index,
-      url: `/api/images/${image.id}`,
-      width: image.width,
-      height: image.height,
-      favorited: favoriteImageIds.has(image.id),
-    })),
+    images: generation.images.map((image) => {
+      const availability = getImageAvailability(image);
+      return {
+        id: image.id,
+        jobId: image.generationJobId,
+        index: image.index,
+        url: availability === 'available' ? `/api/images/${image.id}` : null,
+        width: image.width,
+        height: image.height,
+        favorited:
+          availability === 'available' && favoriteImageIds.has(image.id),
+        availability,
+        removedAt: image.removedAt,
+      };
+    }),
   };
 }

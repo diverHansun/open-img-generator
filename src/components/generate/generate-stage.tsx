@@ -108,6 +108,8 @@ export function GenerateStage({
     () => new Set(),
   );
   const [favoriteError, setFavoriteError] = React.useState(false);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [selectedImageId, setSelectedImageId] = React.useState<string | null>(null);
   const [previewReturnFocus, setPreviewReturnFocus] =
     React.useState<HTMLElement | null>(null);
@@ -262,6 +264,42 @@ export function GenerateStage({
     (job) => job.status === 'pending' || job.status === 'running',
   ) ?? [];
   const selectedImage = view?.images.find((image) => image.id === selectedImageId);
+  const selectedAvailableImage = selectedImage?.url
+    ? { ...selectedImage, url: selectedImage.url }
+    : null;
+  const deleteSelectedImage = React.useCallback(async () => {
+    const image = selectedAvailableImage;
+    if (!image || deleteBusy) return;
+    if (!window.confirm(t('dialogs.deleteImageConfirm'))) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await runtime.client.deleteImage(image.id);
+      favoriteOverrides.current.delete(image.id);
+      const current = viewRef.current;
+      if (current) {
+        commitView({
+          ...current,
+          images: current.images.map((item) =>
+            item.id === image.id
+              ? {
+                  ...item,
+                  url: null,
+                  favorited: false,
+                  availability: 'user_deleted',
+                  removedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
+        });
+      }
+      setSelectedImageId(null);
+    } catch {
+      setDeleteError(t('dialogs.deleteImageError'));
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [commitView, deleteBusy, runtime, selectedAvailableImage, t]);
   const selectedJob = selectedImage
     ? view?.jobs.find((job) => job.id === selectedImage.jobId)
     : undefined;
@@ -373,7 +411,13 @@ export function GenerateStage({
             className={styles.imageStage}
             data-count={Math.min(view.images.length + runningJobs.length, 5)}
           >
-            {view.images.map((image) => (
+            {view.images.map((image) =>
+              image.url === null ? (
+                <div className={styles.jobPlaceholder} key={image.id}>
+                  <XCircle aria-hidden="true" />
+                  <span>{t(`generation.image.${image.availability}`)}</span>
+                </div>
+              ) : (
               <figure className={styles.stageImage} key={image.id}>
                 <button
                   type="button"
@@ -398,7 +442,8 @@ export function GenerateStage({
                   onChange={() => void toggleFavorite(image.id)}
                 />
               </figure>
-            ))}
+              ),
+            )}
             {runningJobs.map((job) => (
               <div className={styles.jobPlaceholder} key={job.id}>
                 <LoaderCircle className={styles.spin} aria-hidden="true" />
@@ -469,22 +514,26 @@ export function GenerateStage({
             </div>
           </details>
 
-          {selectedImage ? (
+          {selectedAvailableImage ? (
             <ImagePreviewDialog
               open
               onOpenChange={(open) => {
                 if (!open) setSelectedImageId(null);
               }}
-              image={selectedImage}
+              image={selectedAvailableImage}
               prompt={view.prompt}
               provider={selectedJob?.provider}
               model={selectedJob?.model}
-              favorited={selectedImage.favorited}
-              favoritePending={favoriteBusy.has(selectedImage.id)}
+              favorited={selectedAvailableImage.favorited}
+              favoritePending={favoriteBusy.has(selectedAvailableImage.id)}
               favoriteError={
                 favoriteError ? t('generate.favoriteError') : null
               }
-              onFavoriteChange={() => void toggleFavorite(selectedImage.id)}
+              downloadUrl={`/api/images/${encodeURIComponent(selectedAvailableImage.id)}/download`}
+              deletePending={deleteBusy}
+              deleteError={deleteError}
+              onDelete={() => void deleteSelectedImage()}
+              onFavoriteChange={() => void toggleFavorite(selectedAvailableImage.id)}
               returnFocus={previewReturnFocus}
             />
           ) : null}

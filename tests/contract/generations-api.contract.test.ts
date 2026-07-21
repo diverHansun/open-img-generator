@@ -7,6 +7,7 @@ import {
   SchemaNotReadyError,
 } from '../../src/lib/errors';
 import { GET as getGeneration } from '../../src/app/api/generations/[id]/route';
+import { DELETE as deleteGeneration } from '../../src/app/api/generations/[id]/route';
 import { POST as cancelGeneration } from '../../src/app/api/generations/[id]/cancel/route';
 import { GET as listGenerations, POST as postGeneration } from '../../src/app/api/generations/route';
 
@@ -14,6 +15,7 @@ vi.mock('../../src/lib/job-engine', () => ({
   submitGeneration: vi.fn(),
   getGeneration: vi.fn(),
   cancelGeneration: vi.fn(),
+  deleteGeneration: vi.fn(),
   ensureWorkerStarted: vi.fn(),
 }));
 
@@ -402,6 +404,8 @@ describe('GET /api/generations/:id', () => {
           width: 1024,
           height: 1024,
           favorited: true,
+          availability: 'available',
+          removedAt: null,
         },
       ],
     });
@@ -444,6 +448,43 @@ describe('GET /api/generations/:id', () => {
   });
 });
 
+describe('DELETE /api/generations/:id', () => {
+  beforeEach(() => vi.mocked(jobEngine.deleteGeneration).mockReset());
+
+  it('deletes a terminal generation with no request body', async () => {
+    const response = await deleteGeneration(
+      new Request('http://localhost:3000/api/generations/gen-1', {
+        method: 'DELETE',
+        headers: { 'X-Request-Id': 'delete-request-1' },
+      }),
+      { params: Promise.resolve({ id: 'gen-1' }) },
+    );
+    expect(response.status).toBe(204);
+    expect(jobEngine.deleteGeneration).toHaveBeenCalledWith(
+      'gen-1',
+      { confirmUnknownOutcome: false },
+      expect.anything(),
+    );
+  });
+
+  it('passes explicit unknown-outcome confirmation', async () => {
+    const response = await deleteGeneration(
+      new Request('http://localhost:3000/api/generations/gen-1', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmUnknownOutcome: true }),
+      }),
+      { params: Promise.resolve({ id: 'gen-1' }) },
+    );
+    expect(response.status).toBe(204);
+    expect(jobEngine.deleteGeneration).toHaveBeenCalledWith(
+      'gen-1',
+      { confirmUnknownOutcome: true },
+      expect.anything(),
+    );
+  });
+});
+
 describe('POST /api/generations/:id/cancel', () => {
   beforeEach(() => {
     vi.mocked(jobEngine.cancelGeneration).mockReset();
@@ -468,6 +509,8 @@ describe('POST /api/generations/:id/cancel', () => {
           width: 1024,
           height: 1024,
           favorited: true,
+          availability: 'available',
+          removedAt: null,
         },
       ],
     });
@@ -491,6 +534,8 @@ describe('POST /api/generations/:id/cancel', () => {
       width: 1024,
       height: 1024,
       favorited: true,
+      availability: 'available',
+      removedAt: null,
     });
   });
 

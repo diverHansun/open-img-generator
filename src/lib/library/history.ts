@@ -14,6 +14,7 @@ import {
   generationJobs,
   generations,
   images,
+  getImageAvailability,
   sessionExists,
   sessions,
   type DbClient,
@@ -117,13 +118,18 @@ function toSummaries(
       status: job.status as GenerationStatus,
       error: parseError(job.error),
     })),
-    images: (imagesByGeneration.get(generation.id) ?? []).map((image) => ({
-      id: image.id,
-      jobId: image.generationJobId,
-      url: `/api/images/${image.id}`,
-      width: image.width,
-      height: image.height,
-    })),
+    images: (imagesByGeneration.get(generation.id) ?? []).map((image) => {
+      const availability = getImageAvailability(image);
+      return {
+        id: image.id,
+        jobId: image.generationJobId,
+        url: availability === 'available' ? `/api/images/${image.id}` : null,
+        width: image.width,
+        height: image.height,
+        availability,
+        removedAt: image.removedAt,
+      };
+    }),
   }));
 }
 
