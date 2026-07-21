@@ -236,9 +236,9 @@ export function createApiClient(fetcher: FetchLike = fetch) {
       requestEmpty(
         fetcher,
         `/api/generations/${encodeURIComponent(id)}`,
-        options.confirmUnknownOutcome
-          ? jsonInit('DELETE', { confirmUnknownOutcome: true })
-          : { method: 'DELETE' },
+        jsonInit('DELETE', {
+          confirmUnknownOutcome: options.confirmUnknownOutcome === true,
+        }),
       ),
     listGenerations: (
       query: {

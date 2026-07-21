@@ -215,9 +215,14 @@ export function HistoryScreen({ projectId }: { projectId: string }) {
         error.code === 'OUTCOME_UNKNOWN_DELETE_CONFIRMATION_REQUIRED'
       ) {
         if (!window.confirm(t('history.deleteUnknownOutcomeConfirm'))) return;
-        await client.deleteGeneration(generationId, {
-          confirmUnknownOutcome: true,
-        });
+        try {
+          await client.deleteGeneration(generationId, {
+            confirmUnknownOutcome: true,
+          });
+        } catch {
+          setAnnouncement(t('history.deleteGenerationError'));
+          return;
+        }
       } else {
         setAnnouncement(t('history.deleteGenerationError'));
         return;

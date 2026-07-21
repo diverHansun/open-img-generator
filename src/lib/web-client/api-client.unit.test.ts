@@ -238,6 +238,25 @@ describe('web API client', () => {
     });
   });
 
+  it('sends an explicit JSON body when deleting a generation', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await client.deleteGeneration('generation/one');
+    await client.deleteGeneration('generation/two', { confirmUnknownOutcome: true });
+
+    expect(fetcher).toHaveBeenNthCalledWith(1, '/api/generations/generation%2Fone', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmUnknownOutcome: false }),
+    });
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/generations/generation%2Ftwo', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmUnknownOutcome: true }),
+    });
+  });
+
   it('encodes project-scoped sessions and read-only history queries', async () => {
     const fetcher = vi
       .fn()
