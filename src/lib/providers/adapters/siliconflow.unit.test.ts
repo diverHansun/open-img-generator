@@ -150,4 +150,29 @@ describe('SiliconFlowProvider', () => {
       expect(result.error.disposition).toBe('unknown');
     }
   });
+
+  it('does not send Kolors-only batch_size to Z-Image Turbo', async () => {
+    const model = 'Tongyi-MAI/Z-Image-Turbo';
+    mockFetch({ images: [{ url: 'https://cdn.siliconflow.cn/result.png' }] });
+
+    const result = await provider.submit(makeNormalizedRequest(), model);
+
+    expect(result.kind).toBe('sync');
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body));
+    expect(body).toMatchObject({ model, image_size: '1024x1024' });
+    expect(body).not.toHaveProperty('batch_size');
+  });
+
+  it('rejects unknown models before sending a request', async () => {
+    global.fetch = vi.fn();
+
+    const result = await provider.submit(makeNormalizedRequest(), 'unknown/model');
+
+    expect(result).toMatchObject({
+      kind: 'failed',
+      error: { code: 'INVALID_REQUEST', disposition: 'not_started' },
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
 });

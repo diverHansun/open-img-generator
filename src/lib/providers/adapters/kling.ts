@@ -3,7 +3,6 @@ import type {
   JobHandle,
   NormalizedRequest,
   PollResult,
-  ProviderCapabilities,
   ProviderImageRef,
   SubmitResult,
 } from '../types';
@@ -14,7 +13,11 @@ import {
   postJson,
   ProviderHttpError,
 } from '../http-client';
-import { klingCapabilities } from '../capabilities/kling';
+import { klingModelSpecs, type KlingImageProfile } from '../capabilities/kling';
+import {
+  modelCapabilityMap,
+  unsupportedModelSubmitResult,
+} from '../model-spec';
 import {
   providerEndpointUrl,
   trustedProviderBaseUrl,
@@ -65,14 +68,19 @@ function normalizeReferenceImage(value: string): string {
   return value.replace(/^data:[^;]+;base64,/i, '');
 }
 
-function buildRequestBody(req: NormalizedRequest, model: string): Record<string, unknown> {
+function buildRequestBody(
+  req: NormalizedRequest,
+  model: string,
+  profile: KlingImageProfile,
+): Record<string, unknown> {
   if (req.referenceImages && req.referenceImages.length > 1) {
     throw new Error('Kling standard image endpoint accepts at most one reference image');
   }
   const body: Record<string, unknown> = {
     model_name: model,
     prompt: req.prompt,
-    resolution: req.providerOptions?.resolution === '2k' ? '2k' : '1k',
+    resolution:
+      req.providerOptions?.resolution === '2k' ? '2k' : profile.defaultResolution,
     n: req.count ?? 1,
     watermark_info: { enabled: false },
   };
@@ -165,15 +173,16 @@ function parseImages(payload: unknown): ProviderImageRef[] {
 export class KlingProvider implements ImageProvider {
   id = 'kling' as const;
   displayName = 'Kling AI';
-  capabilities = new Map<string, ProviderCapabilities>(
-    klingCapabilities.map((capability) => [capability.model, capability]),
-  );
+  capabilities = modelCapabilityMap(klingModelSpecs);
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
+    const spec = klingModelSpecs.get(model);
+    if (!spec) return unsupportedModelSubmitResult(this.id);
+
     try {
       const data = await postJson(
         generationsUrl(),
-        buildRequestBody(req, model),
+        buildRequestBody(req, model, spec.profile),
         authHeaders(),
       );
       const envelopeError = readEnvelopeError(data);

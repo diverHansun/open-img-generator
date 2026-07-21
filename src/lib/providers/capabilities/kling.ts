@@ -1,17 +1,36 @@
 import type { ProviderCapabilities } from '../types';
+import {
+  defineProviderModelSpecs,
+  modelCapabilities,
+  type ProviderModelSpec,
+} from '../model-spec';
 
-export const klingCapabilities: ProviderCapabilities[] = [
+export type KlingImageProfile = Readonly<{
+  kind: 'image-generation-v1';
+  defaultResolution: '1k';
+}>;
+
+const specs = [
   {
-    providerId: 'kling',
-    model: 'kling-v3',
-    displayName: 'Kling Image V3',
-    modes: ['text-to-image', 'image-to-image'],
-    maxCount: 9,
-    supportedSizes: ['1k', '2k'],
-    supportedAspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'],
-    supportsNegativePrompt: true,
-    supportsSeed: false,
-    protocol: 'async',
-    defaultSize: '1k',
+    capabilities: {
+      providerId: 'kling',
+      model: 'kling-v3',
+      displayName: 'Kling Image V3',
+      modes: ['text-to-image', 'image-to-image'],
+      maxCount: 9,
+      supportedSizes: ['1k', '2k'],
+      supportedAspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'],
+      supportsNegativePrompt: true,
+      supportsSeed: false,
+      protocol: 'async',
+      defaultSize: '1k',
+    } satisfies ProviderCapabilities,
+    profile: {
+      kind: 'image-generation-v1',
+      defaultResolution: '1k',
+    },
   },
-];
+] satisfies readonly ProviderModelSpec<KlingImageProfile>[];
+
+export const klingModelSpecs = defineProviderModelSpecs(specs);
+export const klingCapabilities = modelCapabilities(klingModelSpecs);

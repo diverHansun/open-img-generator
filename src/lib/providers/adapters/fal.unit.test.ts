@@ -254,4 +254,16 @@ describe('FalProvider', () => {
     const fetchCall = vi.mocked(global.fetch).mock.calls[0];
     expect(fetchCall[1]?.method).toBe('PUT');
   });
+
+  it('rejects unknown models before sending a request', async () => {
+    global.fetch = vi.fn();
+
+    const result = await provider.submit(makeNormalizedRequest(), 'fal-ai/not-real');
+
+    expect(result).toMatchObject({
+      kind: 'failed',
+      error: { code: 'INVALID_REQUEST', disposition: 'not_started' },
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
 });

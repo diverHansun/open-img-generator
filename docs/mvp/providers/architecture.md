@@ -13,7 +13,7 @@ providers 模块由四个子组件组成，依赖方向单向向下：
 ```
 registry ──→ adapter(s) ──→ http-client
     │
-    ├──→ capabilities (静态模型能力)
+    ├──→ ModelSpec (Provider 私有协议 + 公开 capabilities 投影)
     ├──→ limiter (job-engine 调用边界)
     └──→ types (共享类型，被各子组件引用)
 ```
@@ -23,6 +23,7 @@ registry ──→ adapter(s) ──→ http-client
 | **types** | 定义模块内外的共享数据结构：NormalizedRequest、SubmitResult、ProviderCapabilities 等。是整个系统与厂商之间的"通用语言"。 |
 | **registry** | 按 env key 判断启用状态，懒初始化 adapter 实例，对外提供 `listEnabled()` 与 `getById(id)`。是模块唯一对外入口（除 types 导出外）。 |
 | **adapter** | 每家厂商一个文件，实现 ImageProvider 契约：请求翻译、HTTP 调用、响应解析。当前已含 `fal.ts`、`zenmux.ts`、`siliconflow.ts`、`zhipu.ts`、`doubao.ts`、`qwen.ts` 与独立 Kling `kling.ts`。 |
+| **model-spec** | 仅 providers 内部使用的最小泛型与投影 helper；每家 Provider 在自己的 capabilities 文件中维护私有强类型 profile，公开目录只获得 `ProviderCapabilities`。 |
 | **http-client** | 封装 fetch 调用：caller deadline、默认超时、manual redirect、2 MiB 流式 JSON 上限与统一错误元数据。具体 API key 由 adapter 读取 `env > user-config` 后传入；adapter 不直接裸调 fetch。 |
 | **timeout-policy** | 解析同步生图完整响应的有界预算；四个 sync adapter 共用 180 秒上限，避免在 adapter 内分散读取环境变量。 |
 | **endpoint-policy** | 校验可配置 Provider base、bounded external ID 与 Fal exact-origin 动态 URL；把 DB/Provider 返回的字符串隔离在带凭据的请求边界之外。 |
@@ -81,6 +82,7 @@ src/lib/providers/
 ├── http-client.ts           # fetch 封装（deadline、manual redirect、bounded JSON、错误映射）
 ├── timeout-policy.ts         # sync 生图 submit 的共享三分钟预算
 ├── endpoint-policy.ts       # 受信 base / task ID / exact-origin 动态 URL
+├── model-spec.ts            # 私有 ModelSpec 定义、capabilities 投影、未知模型安全失败
 ├── adapters/
 │   ├── fal.ts               # fal.ai async queue adapter
 │   ├── zenmux.ts            # ZenMux sync OpenAI Images API adapter
@@ -103,9 +105,11 @@ src/lib/providers/
 **内部实现**（不应被外部直接 import）:
 - `adapters/*`、`http-client.ts`、`capabilities/*`
 
-**capabilities 独立文件的理由**:
-- capabilities 声明会随模型增加而膨胀，与 adapter 的协议翻译逻辑正交
-- 前端 `GET /api/providers` 需要 capabilities 但不需 adapter 实现细节
+**Provider 私有 ModelSpec 的理由**:
+- 模型 ID、端点、字段名和参数支持集合会由厂商独立变化，profile 与对应 Provider 高内聚；
+- 前端 `GET /api/providers` 只获得 capabilities 投影，不感知 `batch_size`、`image_size` 等厂商细节；
+- adapter 在网络调用前查找 spec，未知模型统一返回 `INVALID_REQUEST/not_started`，不会携带密钥发请求；
+- `model-spec.ts` 不从 providers 公共 `index.ts` 导出，不建设动态模型 DSL 或运行时插件系统。
 
 ---
 
@@ -122,11 +126,11 @@ src/lib/providers/
 
 ZenMux、SiliconFlow、智谱和 Doubao 的 `submit()` 成功响应本身承载完整图片，统一使用 `SYNC_IMAGE_GENERATION_TIMEOUT_MS`：默认 180 秒、只接受不大于 180 秒的正整数毫秒，非法配置回退默认值。fal、Qwen、Kling 的 submit 仅创建远端 task，继续使用 HTTP helper 的 30 秒 submit / 15 秒 poll 默认值。任何已进入网络的 submit 超时仍是 `unknown`，由 job-engine 终态收口，绝不自动重放。
 
-### 4.2 capabilities 静态声明，不运行时探测
+### 4.2 ModelSpec 静态声明，不运行时探测
 
 | 方案 | 代价 | 收益 |
 |------|------|------|
-| **当前: 代码内静态表** | 新增模型需手动更新 capabilities 文件 | 启动无额外 HTTP 调用；前端可即时展示选项 |
+| **当前: Provider 私有静态 ModelSpec** | 新增模型需手动更新对应 Provider 文件 | 启动无额外 HTTP 调用；协议变化局部化；前端可即时展示 capabilities 投影 |
 | 放弃: 调厂商 API 动态获取 | 数据"更准确" | 多数厂商无统一能力查询 API；增加启动延迟与失败面 |
 
 ### 4.3 透传字段（providerOptions）由 adapter 自行解析

@@ -114,4 +114,34 @@ describe('DoubaoProvider', () => {
       }
     }
   });
+
+  it.each([
+    ['doubao-seedream-4-5-251128', 'Seedream 4.5'],
+    ['doubao-seedream-5-0-260128', 'Seedream 5.0 Lite'],
+  ])('submits the selected %s model', async (model) => {
+    mockFetch({ data: [{ b64_json: 'aGVsbG8=', size: '2K' }] });
+
+    const result = await provider.submit(makeNormalizedRequest(), model);
+
+    expect(result.kind).toBe('sync');
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      model,
+      response_format: 'b64_json',
+      sequential_image_generation: 'disabled',
+      stream: false,
+    });
+  });
+
+  it('rejects unknown models before sending a request', async () => {
+    global.fetch = vi.fn();
+
+    const result = await provider.submit(makeNormalizedRequest(), 'doubao-unknown');
+
+    expect(result).toMatchObject({
+      kind: 'failed',
+      error: { code: 'INVALID_REQUEST', disposition: 'not_started' },
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
 });

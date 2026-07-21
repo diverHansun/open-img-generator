@@ -177,4 +177,16 @@ describe('KlingProvider', () => {
       expect(result.error.message).toContain('at most one reference image');
     }
   });
+
+  it('rejects unknown models before sending a request', async () => {
+    global.fetch = vi.fn();
+
+    const result = await provider.submit(makeNormalizedRequest(), 'kling-not-real');
+
+    expect(result).toMatchObject({
+      kind: 'failed',
+      error: { code: 'INVALID_REQUEST', disposition: 'not_started' },
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
 });

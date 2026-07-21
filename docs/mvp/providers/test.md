@@ -15,6 +15,7 @@
 - fal、Qwen、Kling adapter 的请求翻译、submit 句柄解析、poll 状态机（async 路径）
 - http-client 的超时与错误码映射
 - capabilities 静态声明与 model 查询
+- 私有 ModelSpec 到公开 capabilities 的单向投影、重复 model ID 和未知模型安全门
 - NormalizedRequest 到厂商请求体的字段映射
 
 ### 不覆盖
@@ -50,6 +51,8 @@
 | 厂商 422 | mock 返回 422 | SubmitResult.kind="failed"，error.code="INVALID_REQUEST" |
 | HTTP 超时 | mock 超时 | SubmitResult.kind="failed"，error.code="TIMEOUT" |
 | sync timeout budget | fake timer 在 30s 后仍未 abort、180s 时 abort | ZenMux、SiliconFlow、智谱、Doubao 都传入共享 180s 预算；已开始请求仍标记 `unknown`，不安全重投 |
+| GPT Image 1.5 | model=`openai/gpt-image-1.5` | 请求体使用所选 model；只透传 allowlist providerOptions；Base64 正常落盘 |
+| 未知模型 | 任意不在 ZenMux spec 的 model | `INVALID_REQUEST/not_started`，fetch 未调用 |
 
 ### 2.3 Fal Async 路径
 
@@ -71,6 +74,7 @@
 | SiliconFlow 正常 submit | model=`Kwai-Kolors/Kolors` | `kind="sync"`，解析 `images[].url` |
 | SiliconFlow 公开比 | `aspectRatio="9:16"` | 请求体 `image_size="720x1280"` |
 | SiliconFlow 负向词与 seed | `negativePrompt` + `seed` | 请求体分别含 `negative_prompt` + `seed` |
+| Z-Image Turbo | `Tongyi-MAI/Z-Image-Turbo` | 请求体不含 Kolors-only `batch_size` |
 | 智谱正常 submit | model=`glm-image` | `kind="sync"`，解析 `data[].url` |
 | 智谱公开比 | `aspectRatio="3:2"` | 请求体 `size="1568x1056"` |
 | 智谱固定参数 | 任意合法请求 | `quality="hd"`、`watermark_enabled=true`、`user_id` 存在 |
@@ -83,6 +87,7 @@
 | Doubao 正常 submit | model=`doubao-seedream-4-0-250828` | 请求 `response_format=b64_json`；优先解析 `data[].b64_json`，仍兼容 URL fallback |
 | Doubao 公开比/seed | `aspectRatio="4:3"` + seed | 请求体含 `size="2048x1536"` + `seed` |
 | Doubao 图生图 | `referenceImages` | 请求体含 `image[]` |
+| Doubao 新模型 | Seedream 4.5 / 5.0 Lite | model 精确透传；关闭组图/流式；请求 `b64_json` |
 | Qwen 正常 submit | model=`qwen-image-plus` | `kind="async"`，返回 `task_id` 句柄 |
 | Qwen poll | PENDING/RUNNING/SUCCEEDED/FAILED/CANCELED | 映射统一 `PollResult` 状态 |
 | Qwen HTTP 鉴权/限流/超时 | mock 401/429/TimeoutError | `AUTH_FAILED`/可重试 `RATE_LIMITED`/`TIMEOUT` |
@@ -103,6 +108,7 @@
 |------|------|------|
 | 已知模型 | capabilities("openai/gpt-image-2") | 返回完整 ProviderCapabilities，protocol="sync" |
 | 未知模型 | capabilities("nonexistent") | 返回 null |
+| adapter 未知模型 | 对七个 adapter 各传入未声明 model | 统一 `INVALID_REQUEST/not_started` 且无网络副作用 |
 | fal 模型 | capabilities("fal-ai/flux/schnell") | protocol="async"，supportsSeed=true |
 
 ### 2.8 请求翻译与公开宽高比映射

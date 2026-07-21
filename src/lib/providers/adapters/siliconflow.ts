@@ -1,7 +1,6 @@
 import type {
   ImageProvider,
   NormalizedRequest,
-  ProviderCapabilities,
   ProviderImageRef,
   SubmitResult,
 } from '../types';
@@ -11,7 +10,14 @@ import {
   createProviderError,
   createProviderErrorFromHttpError,
 } from '../http-client';
-import { siliconflowCapabilities } from '../capabilities/siliconflow';
+import {
+  siliconflowModelSpecs,
+  type SiliconFlowImageProfile,
+} from '../capabilities/siliconflow';
+import {
+  modelCapabilityMap,
+  unsupportedModelSubmitResult,
+} from '../model-spec';
 import { resolveCredential } from '../../user-config';
 import { resolveSyncImageGenerationTimeoutMs } from '../timeout-policy';
 import {
@@ -29,16 +35,9 @@ const RESERVED_KEYS = new Set([
   'seed',
 ]);
 
-function resolveSize(req: NormalizedRequest): string {
+function resolveSize(req: NormalizedRequest, profile: SiliconFlowImageProfile): string {
   if (req.width && req.height) return `${req.width}x${req.height}`;
-
-  const aspectRatioMap: Record<string, string> = {
-    '1:1': '1024x1024',
-    '3:4': '960x1280',
-    '1:2': '720x1440',
-    '9:16': '720x1280',
-  };
-  return aspectRatioMap[req.aspectRatio ?? ''] ?? '1024x1024';
+  return profile.aspectRatioSizes[req.aspectRatio ?? ''] ?? profile.defaultSize;
 }
 
 function parseDimensions(size: string): { width: number | null; height: number | null } {
@@ -51,13 +50,14 @@ function parseDimensions(size: string): { width: number | null; height: number |
 function buildRequestBody(
   req: NormalizedRequest,
   model: string,
+  profile: SiliconFlowImageProfile,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
     prompt: req.prompt,
-    image_size: resolveSize(req),
-    batch_size: req.count ?? 1,
+    image_size: resolveSize(req, profile),
   };
+  if (profile.supportsBatchSize) body.batch_size = req.count ?? 1;
   if (req.negativePrompt) body.negative_prompt = req.negativePrompt;
   if (req.seed !== undefined) body.seed = req.seed;
 
@@ -91,9 +91,7 @@ function parseImages(payload: unknown, size: string): ProviderImageRef[] {
 export class SiliconFlowProvider implements ImageProvider {
   id = 'siliconflow' as const;
   displayName = 'SiliconFlow';
-  capabilities = new Map<string, ProviderCapabilities>(
-    siliconflowCapabilities.map((capability) => [capability.model, capability]),
-  );
+  capabilities = modelCapabilityMap(siliconflowModelSpecs);
 
   private authHeaders(): Record<string, string> {
     const key = resolveCredential('SILICONFLOW_API_KEY');
@@ -101,11 +99,14 @@ export class SiliconFlowProvider implements ImageProvider {
   }
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
+    const spec = siliconflowModelSpecs.get(model);
+    if (!spec) return unsupportedModelSubmitResult(this.id);
+
     try {
-      const size = resolveSize(req);
+      const size = resolveSize(req, spec.profile);
       const data = await postJson(
         API_URL,
-        buildRequestBody(req, model),
+        buildRequestBody(req, model, spec.profile),
         this.authHeaders(),
         { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
       );

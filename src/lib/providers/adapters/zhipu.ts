@@ -1,7 +1,6 @@
 import type {
   ImageProvider,
   NormalizedRequest,
-  ProviderCapabilities,
   ProviderImageRef,
   SubmitResult,
 } from '../types';
@@ -11,7 +10,11 @@ import {
   createProviderError,
   createProviderErrorFromHttpError,
 } from '../http-client';
-import { zhipuCapabilities } from '../capabilities/zhipu';
+import { zhipuModelSpecs, type ZhipuImageProfile } from '../capabilities/zhipu';
+import {
+  modelCapabilityMap,
+  unsupportedModelSubmitResult,
+} from '../model-spec';
 import { resolveCredential } from '../../user-config';
 import { resolveSyncImageGenerationTimeoutMs } from '../timeout-policy';
 import {
@@ -31,19 +34,9 @@ const RESERVED_KEYS = new Set([
   'seed',
 ]);
 
-function resolveSize(req: NormalizedRequest): string {
+function resolveSize(req: NormalizedRequest, profile: ZhipuImageProfile): string {
   if (req.width && req.height) return `${req.width}x${req.height}`;
-
-  const aspectRatioMap: Record<string, string> = {
-    '1:1': '1280x1280',
-    '3:2': '1568x1056',
-    '2:3': '1056x1568',
-    '4:3': '1472x1088',
-    '3:4': '1088x1472',
-    '16:9': '1728x960',
-    '9:16': '960x1728',
-  };
-  return aspectRatioMap[req.aspectRatio ?? ''] ?? '1280x1280';
+  return profile.aspectRatioSizes[req.aspectRatio ?? ''] ?? profile.defaultSize;
 }
 
 function parseDimensions(size: string): { width: number | null; height: number | null } {
@@ -56,12 +49,13 @@ function parseDimensions(size: string): { width: number | null; height: number |
 function buildRequestBody(
   req: NormalizedRequest,
   model: string,
+  profile: ZhipuImageProfile,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model,
     prompt: req.prompt,
     quality: 'hd',
-    size: resolveSize(req),
+    size: resolveSize(req, profile),
     watermark_enabled: true,
     user_id: process.env.ZHIPU_USER_ID ?? 'local-user',
   };
@@ -95,9 +89,7 @@ function parseImages(payload: unknown, size: string): ProviderImageRef[] {
 export class ZhipuProvider implements ImageProvider {
   id = 'zhipu' as const;
   displayName = 'Zhipu AI';
-  capabilities = new Map<string, ProviderCapabilities>(
-    zhipuCapabilities.map((capability) => [capability.model, capability]),
-  );
+  capabilities = modelCapabilityMap(zhipuModelSpecs);
 
   private authHeaders(): Record<string, string> {
     const key = resolveCredential('ZHIPU_API_KEY');
@@ -105,11 +97,14 @@ export class ZhipuProvider implements ImageProvider {
   }
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
+    const spec = zhipuModelSpecs.get(model);
+    if (!spec) return unsupportedModelSubmitResult(this.id);
+
     try {
-      const size = resolveSize(req);
+      const size = resolveSize(req, spec.profile);
       const data = await postJson(
         API_URL,
-        buildRequestBody(req, model),
+        buildRequestBody(req, model, spec.profile),
         this.authHeaders(),
         { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
       );

@@ -3,7 +3,6 @@ import type {
   JobHandle,
   NormalizedRequest,
   PollResult,
-  ProviderCapabilities,
   ProviderImageRef,
   SubmitResult,
 } from '../types';
@@ -14,7 +13,11 @@ import {
   createProviderError,
   createProviderErrorFromHttpError,
 } from '../http-client';
-import { qwenCapabilities } from '../capabilities/qwen';
+import { qwenModelSpecs, type QwenImageProfile } from '../capabilities/qwen';
+import {
+  modelCapabilityMap,
+  unsupportedModelSubmitResult,
+} from '../model-spec';
 import {
   providerEndpointUrl,
   trustedProviderBaseUrl,
@@ -42,13 +45,8 @@ function baseUrl(): URL {
   );
 }
 
-function synthesisUrl(): string {
-  return providerEndpointUrl(baseUrl(), [
-    'services',
-    'aigc',
-    'text2image',
-    'image-synthesis',
-  ]);
+function synthesisUrl(profile: QwenImageProfile): string {
+  return providerEndpointUrl(baseUrl(), profile.path);
 }
 
 function taskUrl(taskId: string): string {
@@ -58,17 +56,9 @@ function taskUrl(taskId: string): string {
   ]);
 }
 
-function resolveSize(req: NormalizedRequest): string {
+function resolveSize(req: NormalizedRequest, profile: QwenImageProfile): string {
   if (req.width && req.height) return `${req.width}*${req.height}`;
-
-  const aspectRatioMap: Record<string, string> = {
-    '16:9': '1664*928',
-    '4:3': '1472*1104',
-    '1:1': '1328*1328',
-    '3:4': '1104*1472',
-    '9:16': '928*1664',
-  };
-  return aspectRatioMap[req.aspectRatio ?? ''] ?? '1664*928';
+  return profile.aspectRatioSizes[req.aspectRatio ?? ''] ?? profile.defaultSize;
 }
 
 function parseDimensions(size: string): { width: number | null; height: number | null } {
@@ -89,9 +79,13 @@ function contentTypeFromUrl(url: string): string {
   return 'image/png';
 }
 
-function buildRequestBody(req: NormalizedRequest, model: string): Record<string, unknown> {
+function buildRequestBody(
+  req: NormalizedRequest,
+  model: string,
+  profile: QwenImageProfile,
+): Record<string, unknown> {
   const parameters: Record<string, unknown> = {
-    size: resolveSize(req),
+    size: resolveSize(req, profile),
     n: 1,
     prompt_extend: true,
     watermark: false,
@@ -155,9 +149,7 @@ function qwenErrorCode(payload: unknown): unknown {
 export class QwenProvider implements ImageProvider {
   id = 'qwen' as const;
   displayName = 'Qwen';
-  capabilities = new Map<string, ProviderCapabilities>(
-    qwenCapabilities.map((capability) => [capability.model, capability]),
-  );
+  capabilities = modelCapabilityMap(qwenModelSpecs);
 
   private authHeaders(): Record<string, string> {
     const key = resolveCredential('DASHSCOPE_API_KEY');
@@ -165,8 +157,11 @@ export class QwenProvider implements ImageProvider {
   }
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
+    const spec = qwenModelSpecs.get(model);
+    if (!spec) return unsupportedModelSubmitResult(this.id);
+
     try {
-      const data = await postJson(synthesisUrl(), buildRequestBody(req, model), {
+      const data = await postJson(synthesisUrl(spec.profile), buildRequestBody(req, model, spec.profile), {
         ...this.authHeaders(),
         'X-DashScope-Async': 'enable',
       });

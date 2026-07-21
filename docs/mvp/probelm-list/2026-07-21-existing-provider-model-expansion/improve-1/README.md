@@ -1,6 +1,6 @@
 # Improve 1：私有 ModelSpec 与同协议模型扩展
 
-> 状态：规划完成，待用户审查后进入独立实施会话
+> 状态：代码与自动化验证完成；部分真实 Provider 准入待密钥恢复
 >
 > 基线：`mvp@a9d293b`
 
@@ -26,3 +26,11 @@
 - 不运行时自动抓取厂商模型列表。
 - 不把请求 profile 暴露给前端或写入数据库。
 - 不因 SiliconFlow 探测失败而伪造 capabilities 或绕过官方限制。
+
+## 2026-07-21 实施状态
+
+- 七个 Provider 已迁移到内部 ModelSpec；未知模型在发出网络请求前统一返回 `INVALID_REQUEST/not_started`。
+- ZenMux `openai/gpt-image-1.5` 已经真实 3000 链路生成并落盘，可经本地图片 API 读取。
+- SiliconFlow `Tongyi-MAI/Z-Image-Turbo` 已被真实 Provider 接受并返回图片 URL；首次转存因 Clash Fake-IP 未配置精确主机 `s3.siliconflow.cn` 而安全失败，该主机现已加入本机测试配置。
+- 重启后发现 SiliconFlow 与 Doubao 密钥只存在于旧进程环境，未持久化到 `.env`/user-config；因此 Turbo 的配置后复测、`Tongyi-MAI/Z-Image` 准入探测与 Doubao 两个新模型实测待重新保存密钥。
+- `Tongyi-MAI/Z-Image` 在完整产品链路验证前不进入公开 capabilities；不以 mocked test 代替动态模型可用性探测。

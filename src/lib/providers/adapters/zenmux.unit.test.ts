@@ -136,4 +136,48 @@ describe('ZenmuxProvider', () => {
     const body = JSON.parse(fetchCall[1]?.body as string);
     expect(body.size).toBe('1536x1024');
   });
+
+  it('uses the selected GPT Image model and allowlists provider options', async () => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ data: [{ b64_json: 'aGVsbG8=' }] }),
+    });
+
+    await provider.submit(
+      makeNormalizedRequest({
+        providerOptions: {
+          quality: 'medium',
+          output_format: 'png',
+          model: 'ignored',
+          prompt: 'ignored',
+          arbitrary: 'ignored',
+        },
+      }),
+      'openai/gpt-image-1.5',
+    );
+
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      prompt: 'A cat wearing a space helmet',
+      model: 'openai/gpt-image-1.5',
+      n: 1,
+      size: '1024x1024',
+      quality: 'medium',
+      output_format: 'png',
+    });
+  });
+
+  it('rejects unknown models before sending a request', async () => {
+    global.fetch = vi.fn();
+
+    const result = await provider.submit(makeNormalizedRequest(), 'openai/not-real');
+
+    expect(result).toMatchObject({
+      kind: 'failed',
+      error: { code: 'INVALID_REQUEST', disposition: 'not_started' },
+    });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
 });

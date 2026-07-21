@@ -36,7 +36,7 @@ API 层
   → registry.listEnabled()
     → 遍历注册的 provider id
     → 检查对应 env key 是否存在
-    → 存在: 读取 capabilities 静态表，组装 ProviderInfo
+    → 存在: 从 Provider 私有 ModelSpec 投影 capabilities，组装 ProviderInfo
     → 不存在: 跳过（静默，不报错）
   → 返回 ProviderInfo[] 给 API 层
 ```
@@ -48,6 +48,7 @@ job-engine
   → 构造 NormalizedRequest（prompt 已由 prompt 模块处理）
   → registry.getById("zenmux" / "siliconflow" / "zhipu" / "doubao")
   → provider.submit(req, model)
+    → adapter 在本 Provider ModelSpec 中查找 model；未知模型以 not_started 失败
     → zenmux adapter: NormalizedRequest 翻译为 OpenAI Images API 请求体
       - prompt → prompt
       - width+height 优先，否则 aspectRatio 经映射表 → size（如 "1:1"→"1024x1024"）
@@ -58,7 +59,7 @@ job-engine
 → job-engine 拿到 images[].url，交给 storage 下载转存
 ```
 
-SiliconFlow、智谱与 Doubao 的差异只存在于 adapter 内部：分别解析 `images[].url`、`data[].url` 与 Ark `data[].url`；Doubao 额外支持 `image[]` 参考图。三者均只返回厂商临时 URL，不在 providers 内下载或持久化。
+SiliconFlow、智谱与 Doubao 的差异只存在于 adapter 内部：分别解析 `images[].url`、`data[].url` 与 Ark `data[].b64_json`/URL fallback；Doubao 额外支持 `image[]` 参考图。providers 不负责最终持久化，内联图片先交由 job-engine/storage 暂存，远程 URL 则立即下载。
 
 ### 2.3 Async 路径 — Submit（fal / qwen / kling）
 
@@ -180,6 +181,8 @@ API 路由为 `POST /api/generations/:id/cancel`；取消与 submit/poll 竞争�
 |------|-----|
 | id | `ProviderId` 只读属性 |
 | capabilities | `Map<string, ProviderCapabilities>`，按 model id 查询 |
+
+ModelSpec/profile 是 providers 内部实现，不进入该公开接口、HTTP DTO、数据库或 job snapshot。
 
 ---
 

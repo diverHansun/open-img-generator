@@ -22,6 +22,7 @@
 | **ProviderImageRef** | 厂商侧临时图片引用（URL + 元数据） | Value Object |
 | **ProviderCapabilities** | 某 (provider, model) 支持的能力声明 | Value Object（静态配置） |
 | **ProviderInfo** | 对外暴露的 provider 摘要（id + 模型列表 + capabilities） | Value Object |
+| **ProviderModelSpec&lt;Profile&gt;** | Provider 内部的公开 capabilities 与私有协议 profile 绑定 | Internal Value Object |
 
 ---
 
@@ -209,7 +210,7 @@ type ProviderErrorCode =
 
 ## 4. MVP 首跑模型的 Capabilities 声明
 
-### zenmux / openai/gpt-image-2
+### zenmux / openai/gpt-image-2、openai/gpt-image-1.5
 
 | 字段 | 值 |
 |------|-----|
@@ -257,7 +258,7 @@ type ProviderErrorCode =
 
 **扇出交集提示**: fal ∩ zenmux 的公开比目前主要为 `1:1`。web-ui 多选两模型时宽高比选项取交集；服务端仍按每 target 校验。
 
-### siliconflow / Kwai-Kolors/Kolors
+### siliconflow / Kwai-Kolors/Kolors、Tongyi-MAI/Z-Image-Turbo
 
 | 字段 | 值 |
 |------|-----|
@@ -269,6 +270,8 @@ type ProviderErrorCode =
 | supportsNegativePrompt | true |
 | supportsSeed | true |
 | defaultSize | `"1024x1024"` |
+
+Kolors profile 允许 `batch_size`；Z-Image Turbo profile 明确禁止发送该 Kolors 专属字段。当前产品仍统一限制同步模型 `maxCount=1`。`Tongyi-MAI/Z-Image` 在真实密钥完成产品链路探测前不进入公开目录。
 
 #### SiliconFlow 公开比 → image_size 映射（adapter 内部）
 
@@ -294,7 +297,7 @@ type ProviderErrorCode =
 
 智谱 adapter 固定使用 `quality="hd"` 与 `watermark_enabled=true`，`user_id` 从 `ZHIPU_USER_ID` 读取，单用户默认值为 `local-user`。
 
-### doubao / doubao-seedream-4-0-250828
+### doubao / Seedream 4.0、4.5、5.0 Lite
 
 | 字段 | 值 |
 |------|-----|
@@ -307,7 +310,9 @@ type ProviderErrorCode =
 | supportsSeed | true |
 | defaultSize | `"2K"` |
 
-Doubao adapter 使用独立 Ark API（默认 `https://ark.cn-beijing.volces.com/api/v3`），文生图/图生图统一提交 `images/generations`；`referenceImages` 映射为 `image[]`，当前默认关闭组图并返回 URL。
+Doubao adapter 使用独立 Ark API（默认 `https://ark.cn-beijing.volces.com/api/v3`），文生图/图生图统一提交 `images/generations`；`referenceImages` 映射为 `image[]`，当前默认关闭组图并优先请求内联 Base64，仍兼容 URL fallback。
+
+当前 ModelSpec ID 为 `doubao-seedream-4-0-250828`、`doubao-seedream-4-5-251128`、`doubao-seedream-5-0-260128`；三者首批保持单张、非流式、`sequential_image_generation=disabled`，优先请求 `b64_json` 立即落盘。
 
 ### qwen / qwen-image-plus
 
@@ -336,6 +341,7 @@ Qwen adapter 使用 DashScope `text2image/image-synthesis` 创建任务，并通
 | JobHandle | fal / qwen adapter（submit 时） | 从 submit 到 completed/failed/cancelled | job-engine 在 generation_jobs 中持久化，providers 不持有 |
 | ProviderImageRef | adapter（解析响应时） | 厂商 URL 有效期（通常数小时） | URL 过期后不可下载；job-engine 须在过期前转存 |
 | ProviderCapabilities | capabilities 静态文件 | 编译时存在 | 随代码部署更新 |
+| ProviderModelSpec/profile | Provider capabilities 文件 | 编译时存在，仅 providers 内部可见 | 随对应 Provider 协议更新 |
 | ProviderError | adapter（错误时） | 单次调用 | 返回给 job-engine |
 
 **关键边界**: providers 产出的 ProviderImageRef.url 是临时资源。持久化由 job-engine 调用 storage 模块完成，providers 不感知转存结果。

@@ -1,7 +1,6 @@
 import type {
   ImageProvider,
   NormalizedRequest,
-  ProviderCapabilities,
   ProviderImageRef,
   SubmitResult,
 } from '../types';
@@ -11,7 +10,14 @@ import {
   postJsonWithInlineImageResponse,
   ProviderHttpError,
 } from '../http-client';
-import { zenmuxCapabilities } from '../capabilities/zenmux';
+import {
+  zenmuxModelSpecs,
+  type ZenmuxImageProfile,
+} from '../capabilities/zenmux';
+import {
+  modelCapabilityMap,
+  unsupportedModelSubmitResult,
+} from '../model-spec';
 import { resolveCredential } from '../../user-config';
 import { resolveSyncImageGenerationTimeoutMs } from '../timeout-policy';
 import {
@@ -19,35 +25,32 @@ import {
   readProviderRequestIdFromResponse,
 } from '../error-diagnostics';
 
-function resolveSize(req: NormalizedRequest): string {
+function resolveSize(req: NormalizedRequest, profile: ZenmuxImageProfile): string {
   if (req.width && req.height) {
     return `${req.width}x${req.height}`;
   }
 
-  const aspectRatioMap: Record<string, string> = {
-    '1:1': '1024x1024',
-    '3:2': '1536x1024',
-    '2:3': '1024x1536',
-  };
-
-  if (req.aspectRatio && aspectRatioMap[req.aspectRatio]) {
-    return aspectRatioMap[req.aspectRatio];
+  if (req.aspectRatio && profile.aspectRatioSizes[req.aspectRatio]) {
+    return profile.aspectRatioSizes[req.aspectRatio];
   }
 
-  return '1024x1024';
+  return profile.defaultSize;
 }
 
-function buildRequestBody(req: NormalizedRequest): Record<string, unknown> {
+function buildRequestBody(
+  req: NormalizedRequest,
+  model: string,
+  profile: ZenmuxImageProfile,
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     prompt: req.prompt,
-    model: 'openai/gpt-image-2',
+    model,
+    n: req.count ?? 1,
+    size: resolveSize(req, profile),
   };
 
-  body.n = req.count ?? 1;
-  body.size = resolveSize(req);
-
   for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
-    if (key !== 'size') {
+    if (profile.allowedProviderOptions.includes(key)) {
       body[key] = value;
     }
   }
@@ -95,9 +98,7 @@ function parseImages(payload: unknown): ProviderImageRef[] {
 export class ZenmuxProvider implements ImageProvider {
   id = 'zenmux' as const;
   displayName = 'ZenMux';
-  capabilities = new Map<string, ProviderCapabilities>(
-    zenmuxCapabilities.map((c) => [c.model, c]),
-  );
+  capabilities = modelCapabilityMap(zenmuxModelSpecs);
 
   private get apiKey(): string | undefined {
     return resolveCredential('ZENMUX_API_KEY');
@@ -109,10 +110,12 @@ export class ZenmuxProvider implements ImageProvider {
   }
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
+    const spec = zenmuxModelSpecs.get(model);
+    if (!spec) return unsupportedModelSubmitResult(this.id);
+
     const url = 'https://zenmux.ai/api/v1/images/generations';
     try {
-      const body = buildRequestBody(req);
-      body.model = model;
+      const body = buildRequestBody(req, model, spec.profile);
       const data = await postJsonWithInlineImageResponse(
         url,
         body,

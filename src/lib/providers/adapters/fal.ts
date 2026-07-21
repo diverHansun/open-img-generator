@@ -1,7 +1,6 @@
 import type {
   ImageProvider,
   NormalizedRequest,
-  ProviderCapabilities,
   ProviderImageRef,
   SubmitResult,
   PollResult,
@@ -15,7 +14,11 @@ import {
   ProviderHttpError,
   putJson,
 } from '../http-client';
-import { falCapabilities } from '../capabilities/fal';
+import { falModelSpecs, type FalImageProfile } from '../capabilities/fal';
+import {
+  modelCapabilityMap,
+  unsupportedModelSubmitResult,
+} from '../model-spec';
 import {
   providerEndpointUrl,
   trustedProviderBaseUrl,
@@ -71,23 +74,18 @@ function trustedFalHandleUrl(value: unknown): string {
   return trustedSameOriginProviderUrl(value, falBaseUrl().origin);
 }
 
-function resolveSize(req: NormalizedRequest): string {
-  const aspectRatioMap: Record<string, string> = {
-    '1:1': 'square_hd',
-    '4:3': 'landscape_4_3',
-    '3:4': 'portrait_4_3',
-    '16:9': 'landscape_16_9',
-    '9:16': 'portrait_16_9',
-  };
-
-  if (req.aspectRatio && aspectRatioMap[req.aspectRatio]) {
-    return aspectRatioMap[req.aspectRatio];
+function resolveSize(req: NormalizedRequest, profile: FalImageProfile): string {
+  if (req.aspectRatio && profile.aspectRatioSizes[req.aspectRatio]) {
+    return profile.aspectRatioSizes[req.aspectRatio];
   }
 
-  return 'square_hd';
+  return profile.defaultSize;
 }
 
-function buildRequestBody(req: NormalizedRequest): Record<string, unknown> {
+function buildRequestBody(
+  req: NormalizedRequest,
+  profile: FalImageProfile,
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     prompt: req.prompt,
   };
@@ -99,7 +97,7 @@ function buildRequestBody(req: NormalizedRequest): Record<string, unknown> {
     body.seed = req.seed;
   }
 
-  body.image_size = resolveSize(req);
+  body.image_size = resolveSize(req, profile);
 
   for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
     if (key !== 'image_size') {
@@ -155,9 +153,7 @@ function falErrorType(payload: unknown): unknown {
 export class FalProvider implements ImageProvider {
   id = 'fal' as const;
   displayName = 'fal.ai';
-  capabilities = new Map<string, ProviderCapabilities>(
-    falCapabilities.map((c) => [c.model, c]),
-  );
+  capabilities = modelCapabilityMap(falModelSpecs);
 
   private get apiKey(): string | undefined {
     return resolveCredential('FAL_KEY');
@@ -169,8 +165,11 @@ export class FalProvider implements ImageProvider {
   }
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
+    const spec = falModelSpecs.get(model);
+    if (!spec) return unsupportedModelSubmitResult(this.id);
+
     try {
-      const body = buildRequestBody(req);
+      const body = buildRequestBody(req, spec.profile);
       const data = await postJson(queueUrl(model), body, this.authHeaders());
       const handle = falHandle(data, model);
       if (!handle) {

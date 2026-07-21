@@ -1,7 +1,6 @@
 import type {
   ImageProvider,
   NormalizedRequest,
-  ProviderCapabilities,
   ProviderImageRef,
   SubmitResult,
 } from '../types';
@@ -11,7 +10,14 @@ import {
   postJsonWithInlineImageResponse,
   ProviderHttpError,
 } from '../http-client';
-import { doubaoCapabilities } from '../capabilities/doubao';
+import {
+  doubaoModelSpecs,
+  type DoubaoImageProfile,
+} from '../capabilities/doubao';
+import {
+  modelCapabilityMap,
+  unsupportedModelSubmitResult,
+} from '../model-spec';
 import { resolveCredential } from '../../user-config';
 import { resolveSyncImageGenerationTimeoutMs } from '../timeout-policy';
 import {
@@ -37,19 +43,9 @@ function apiUrl(): string {
   return `${base.replace(/\/+$/, '')}/images/generations`;
 }
 
-function resolveSize(req: NormalizedRequest): string {
+function resolveSize(req: NormalizedRequest, profile: DoubaoImageProfile): string {
   if (req.width && req.height) return `${req.width}x${req.height}`;
-
-  const aspectRatioMap: Record<string, string> = {
-    '1:1': '2048x2048',
-    '3:2': '2048x1365',
-    '2:3': '1365x2048',
-    '4:3': '2048x1536',
-    '3:4': '1536x2048',
-    '16:9': '2048x1152',
-    '9:16': '1152x2048',
-  };
-  return aspectRatioMap[req.aspectRatio ?? ''] ?? '2K';
+  return profile.aspectRatioSizes[req.aspectRatio ?? ''] ?? profile.defaultSize;
 }
 
 function parseDimensions(size: string): { width: number | null; height: number | null } {
@@ -70,15 +66,19 @@ function contentTypeFromUrl(url: string): string {
   return 'image/jpeg';
 }
 
-function buildRequestBody(req: NormalizedRequest, model: string): Record<string, unknown> {
-  const size = resolveSize(req);
+function buildRequestBody(
+  req: NormalizedRequest,
+  model: string,
+  profile: DoubaoImageProfile,
+): Record<string, unknown> {
+  const size = resolveSize(req, profile);
   const body: Record<string, unknown> = {
     model,
     prompt: req.prompt,
     size,
     sequential_image_generation: 'disabled',
     stream: false,
-    response_format: 'b64_json',
+    response_format: profile.responseFormat,
     watermark: true,
   };
   if (req.seed !== undefined) body.seed = req.seed;
@@ -127,9 +127,7 @@ function parseImages(payload: unknown, requestedSize: string): ProviderImageRef[
 export class DoubaoProvider implements ImageProvider {
   id = 'doubao' as const;
   displayName = 'Doubao';
-  capabilities = new Map<string, ProviderCapabilities>(
-    doubaoCapabilities.map((capability) => [capability.model, capability]),
-  );
+  capabilities = modelCapabilityMap(doubaoModelSpecs);
 
   private authHeaders(): Record<string, string> {
     const key = resolveCredential('ARK_API_KEY');
@@ -137,14 +135,17 @@ export class DoubaoProvider implements ImageProvider {
   }
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
+    const spec = doubaoModelSpecs.get(model);
+    if (!spec) return unsupportedModelSubmitResult(this.id);
+
     try {
       const data = await postJsonWithInlineImageResponse(
         apiUrl(),
-        buildRequestBody(req, model),
+        buildRequestBody(req, model, spec.profile),
         this.authHeaders(),
         { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
       );
-      const images = parseImages(data, resolveSize(req));
+      const images = parseImages(data, resolveSize(req, spec.profile));
       if (images.length === 0) {
         return {
           kind: 'failed',
