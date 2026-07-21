@@ -24,6 +24,7 @@ vi.mock('../providers', () => ({ getById: vi.fn() }));
 vi.mock('../storage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../storage')>()),
   downloadAndStore: vi.fn(),
+  downloadAndStoreVideo: vi.fn(),
   removeStoredFile: vi.fn(),
   stageInlineImage: vi.fn(),
   removeStagedImage: vi.fn(),
@@ -92,6 +93,7 @@ describe('durable lifecycle', () => {
   beforeEach(() => {
     vi.mocked(providers.getById).mockReset();
     vi.mocked(storage.downloadAndStore).mockReset();
+    vi.mocked(storage.downloadAndStoreVideo).mockReset();
     vi.mocked(storage.removeStoredFile).mockReset();
     vi.mocked(storage.stageInlineImage).mockReset();
     vi.mocked(storage.removeStagedImage).mockReset();
@@ -658,6 +660,52 @@ describe('durable lifecycle', () => {
       images: expect.arrayContaining([expect.anything(), expect.anything()]),
     });
     expect(storage.downloadAndStore).toHaveBeenCalledTimes(2);
+  });
+
+  it('persists a completed video result through the dedicated MP4 storage path', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db, {
+      phase: 'polling',
+      providerHandle: JSON.stringify({
+        providerId: 'doubao',
+        model: 'doubao-seedance-1-5-pro-251215',
+        externalId: 'video-task',
+        statusUrl: 'https://status.example.test/video-task',
+        responseUrl: 'https://status.example.test/video-task',
+        cancelUrl: null,
+        submittedAt: now,
+      }),
+    });
+    vi.mocked(providers.getById).mockReturnValue(provider({
+      poll: vi.fn().mockResolvedValue({
+        status: 'completed',
+        images: [],
+        videos: [{
+          url: 'https://cdn.example.test/video.mp4',
+          width: null,
+          height: null,
+          contentType: 'video/mp4',
+          index: 0,
+          durationSeconds: null,
+        }],
+      }),
+    }));
+    vi.mocked(storage.downloadAndStoreVideo).mockResolvedValue({
+      storagePath: '2026/07/video.mp4',
+      contentType: 'video/mp4',
+      sizeBytes: 24,
+    });
+
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('completed');
+
+    const generation = getGenerationWithJobsAndImages('gen-1', db)!;
+    expect(generation.status).toBe('completed');
+    expect(generation.images).toHaveLength(0);
+    expect(generation.videos).toEqual([
+      expect.objectContaining({ storagePath: '2026/07/video.mp4', contentType: 'video/mp4' }),
+    ]);
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
   });
 
   it('retries a transient image download and resumes the same storing checkpoint', async () => {

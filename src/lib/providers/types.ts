@@ -14,7 +14,7 @@ export type ProviderId =
   | 'qwen'
   | 'kling';
 
-export type ProviderMode = 'text-to-image' | 'image-to-image';
+export type ProviderMode = 'text-to-image' | 'image-to-image' | 'text-to-video';
 
 export type NormalizedRequest = {
   prompt: string;
@@ -36,6 +36,15 @@ export type ProviderImageRef = {
   contentType: string;
   index: number;
   revisedPrompt?: string;
+};
+
+export type ProviderVideoRef = {
+  url: string;
+  width: number | null;
+  height: number | null;
+  contentType: 'video/mp4';
+  index: number;
+  durationSeconds: number | null;
 };
 
 export type JobHandle = {
@@ -92,7 +101,7 @@ export type SubmitResult =
 export type PollResult =
   | { status: 'pending' }
   | { status: 'running' }
-  | { status: 'completed'; images: ProviderImageRef[] }
+  | { status: 'completed'; images: ProviderImageRef[]; videos?: ProviderVideoRef[] }
   | { status: 'failed'; error: ProviderError }
   | { status: 'cancelled' };
 
@@ -108,6 +117,7 @@ export type ProviderCapabilities = {
   supportsSeed: boolean;
   protocol: 'sync' | 'async';
   defaultSize: string;
+  mediaKind?: 'image' | 'video';
 };
 
 export type ProviderInfo = {

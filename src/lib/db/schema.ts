@@ -50,6 +50,7 @@ export const generations = sqliteTable(
       .references(() => sessions.id),
     prompt: text('prompt').notNull(),
     status: text('status').notNull(),
+    mediaKind: text('media_kind').notNull().default('image'),
     clientRequestId: text('client_request_id'),
     requestHash: text('request_hash'),
     createdAt: text('created_at').notNull(),
@@ -143,6 +144,32 @@ export const images = sqliteTable(
   }),
 );
 
+export const videos = sqliteTable(
+  'videos',
+  {
+    id: text('id').primaryKey(),
+    generationJobId: text('generation_job_id')
+      .notNull()
+      .references(() => generationJobs.id, { onDelete: 'cascade' }),
+    index: integer('index').notNull(),
+    storagePath: text('storage_path'),
+    contentType: text('content_type').notNull(),
+    width: integer('width'),
+    height: integer('height'),
+    durationSeconds: integer('duration_seconds'),
+    sizeBytes: integer('size_bytes'),
+    createdAt: text('created_at').notNull(),
+    removedAt: text('removed_at'),
+    removalReason: text('removal_reason'),
+  },
+  (table) => ({
+    uniqueJobIndex: uniqueIndex('unique_video_job_index').on(
+      table.generationJobId,
+      table.index,
+    ),
+  }),
+);
+
 export const favorites = sqliteTable(
   'favorites',
   {
@@ -176,5 +203,6 @@ export type Session = typeof sessions.$inferSelect;
 export type Generation = typeof generations.$inferSelect;
 export type GenerationJob = typeof generationJobs.$inferSelect;
 export type Image = typeof images.$inferSelect;
+export type Video = typeof videos.$inferSelect;
 export type Favorite = typeof favorites.$inferSelect;
 export type ModelPreference = typeof modelPreferences.$inferSelect;

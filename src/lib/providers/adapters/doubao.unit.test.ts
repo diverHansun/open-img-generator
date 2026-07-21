@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeNormalizedRequest } from '../../../../tests/factories';
+import { makeJobHandle, makeNormalizedRequest } from '../../../../tests/factories';
 import { DoubaoProvider } from './doubao';
 import { SYNC_IMAGE_GENERATION_TIMEOUT_MS } from '../timeout-policy';
 
@@ -143,5 +143,52 @@ describe('DoubaoProvider', () => {
       error: { code: 'INVALID_REQUEST', disposition: 'not_started' },
     });
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('submits Seedance with the documented async content task dialect', async () => {
+    mockFetch({ id: 'seedance-task-1' });
+
+    const result = await provider.submit(
+      makeNormalizedRequest({ mode: 'text-to-video', aspectRatio: '9:16' }),
+      'doubao-seedance-1-5-pro-251215',
+    );
+
+    expect(result).toMatchObject({
+      kind: 'async',
+      handle: { externalId: 'seedance-task-1', providerId: 'doubao' },
+    });
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(url).toBe('https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      model: 'doubao-seedance-1-5-pro-251215',
+      content: [{ type: 'text', text: 'A cat wearing a space helmet --ratio 9:16' }],
+    });
+  });
+
+  it('polls a succeeded Seedance task into a bounded MP4 reference', async () => {
+    mockFetch({
+      id: 'seedance-task-1',
+      status: 'succeeded',
+      content: { video_url: 'https://cdn.volcengine.com/result.mp4' },
+    });
+
+    const result = await provider.poll(makeJobHandle({
+      providerId: 'doubao',
+      model: 'doubao-seedance-2-0-fast-260128',
+      externalId: 'seedance-task-1',
+    }));
+
+    expect(result).toEqual({
+      status: 'completed',
+      images: [],
+      videos: [{
+        url: 'https://cdn.volcengine.com/result.mp4',
+        width: null,
+        height: null,
+        contentType: 'video/mp4',
+        index: 0,
+        durationSeconds: null,
+      }],
+    });
   });
 });

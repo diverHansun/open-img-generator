@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "tables": {
     "projects": ["id", "title", "created_at", "updated_at"],
     "sessions": ["id", "project_id", "title", "created_at", "updated_at"],
@@ -8,6 +8,7 @@
       "session_id",
       "prompt",
       "status",
+      "media_kind",
       "client_request_id",
       "request_hash",
       "created_at",
@@ -45,6 +46,11 @@
       "created_at",
       "removed_at",
       "removal_reason"
+    ],
+    "videos": [
+      "id", "generation_job_id", "index", "storage_path", "content_type",
+      "width", "height", "duration_seconds", "size_bytes", "created_at",
+      "removed_at", "removal_reason"
     ],
     "favorites": ["id", "image_id", "created_at"],
     "model_preferences": ["provider", "model", "enabled", "updated_at"]
@@ -111,6 +117,13 @@
       "name": "favorites_image_unique",
       "table": "favorites",
       "columns": ["image_id"],
+      "unique": true,
+      "partial": false
+    },
+    {
+      "name": "unique_video_job_index",
+      "table": "videos",
+      "columns": ["generation_job_id", "index"],
       "unique": true,
       "partial": false
     },

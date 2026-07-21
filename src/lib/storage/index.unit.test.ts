@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   downloadAndStore,
+  downloadAndStoreVideo,
   getReadStream,
   MAX_IMAGE_BYTES,
   removeStagedImage,
@@ -58,6 +59,32 @@ describe('storage', () => {
     expect(fs.readFileSync(absolutePath)).toEqual(imageBuffer);
     expect(vi.mocked(global.fetch).mock.calls[0]?.[1]).toMatchObject({
       redirect: 'manual',
+    });
+  });
+
+  it('streams and stores an MP4 after validating its ftyp signature', async () => {
+    const video = Buffer.concat([
+      Buffer.from([0, 0, 0, 24]),
+      Buffer.from('ftypisom'),
+      Buffer.from('bounded-video'),
+    ]);
+    global.fetch = vi.fn().mockResolvedValue(new Response(video, { status: 200 }));
+
+    const result = await downloadAndStoreVideo('https://cdn.example.com/video.mp4', {
+      resolveHostname: publicResolver,
+    });
+
+    expect(result).toMatchObject({ contentType: 'video/mp4', sizeBytes: video.length });
+    expect(result.storagePath).toMatch(/\.mp4$/);
+    expect(fs.readFileSync(path.join(tempDir, result.storagePath))).toEqual(video);
+  });
+
+  it('rejects a non-MP4 response on the video storage path', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(imageBuffer, { status: 200 }));
+    await expect(downloadAndStoreVideo('https://cdn.example.com/not-video', {
+      resolveHostname: publicResolver,
+    })).rejects.toMatchObject({
+      diagnostic: { category: 'remote_content_invalid' },
     });
   });
 

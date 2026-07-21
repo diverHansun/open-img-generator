@@ -17,6 +17,7 @@ const STAGING_PREFIX = 'staging:';
 const STAGING_DIRECTORY = '.staging';
 const TEMPORARY_DIRECTORY = '.tmp';
 export const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 512 * 1024 * 1024;
 // Keep .gif discoverable so unfinished pre-E3 staging rows can be safely
 // removed by lifecycle/cleanup. It is never materialized because the current
 // MIME + magic allowlist rejects it.
@@ -80,6 +81,7 @@ function extensionFromContentType(contentType: string): string {
     'image/jpeg': '.jpg',
     'image/webp': '.webp',
     'image/gif': '.gif',
+    'video/mp4': '.mp4',
   };
   return map[contentType.toLowerCase()] ?? '.bin';
 }
@@ -90,6 +92,7 @@ function contentTypeFromExtension(extension: string): string {
     '.jpg': 'image/jpeg',
     '.webp': 'image/webp',
     '.gif': 'image/gif',
+    '.mp4': 'video/mp4',
   };
   return map[extension] ?? 'application/octet-stream';
 }
@@ -286,9 +289,10 @@ function parseRetryAfterMs(response: Response): number | undefined {
 async function writeResponseToTemporary(
   response: Response,
   temporaryPath: string,
+  maxBytes = MAX_IMAGE_BYTES,
 ): Promise<{ sizeBytes: number; prefix: BytePrefix }> {
   const declaredLength = declaredBodyLength(response);
-  if (declaredLength !== null && declaredLength > MAX_IMAGE_BYTES) {
+  if (declaredLength !== null && declaredLength > maxBytes) {
     await cancelResponseBody(response);
     throw new StorageError('Image exceeds the maximum allowed size');
   }
@@ -316,7 +320,7 @@ async function writeResponseToTemporary(
       const { done, value } = read;
       if (done) break;
       sizeBytes += value.byteLength;
-      if (sizeBytes > MAX_IMAGE_BYTES) {
+      if (sizeBytes > maxBytes) {
         throw new StorageError('Image exceeds the maximum allowed size');
       }
       try {
@@ -610,6 +614,50 @@ export async function downloadAndStore(
       });
     }
     throw new StorageError('Failed to store remote image', {
+      cause: err,
+      diagnostic: { category: 'local_write_failed' },
+    });
+  }
+}
+
+function isMp4(prefix: BytePrefix): boolean {
+  return prefix.byteLength >= 12 &&
+    String.fromCharCode(...prefix.slice(4, 8)) === 'ftyp';
+}
+
+/** Streams a Provider video through the same URL/DNS/redirect safety boundary. */
+export async function downloadAndStoreVideo(
+  url: string,
+  options: DownloadAndStoreOptions = {},
+): Promise<DownloadAndStoreResult> {
+  const response = await fetchRemoteImage(url, options);
+  if (!response.ok) {
+    await cancelResponseBody(response);
+    throw new StorageError('Remote video download was rejected', {
+      retryable: response.status === 429 || response.status >= 500,
+      retryAfterMs: parseRetryAfterMs(response),
+      diagnostic: {
+        category: 'remote_http_rejected',
+        hostname: safeRemoteHostname(url),
+      },
+    });
+  }
+  const hostname = safeRemoteHostname(url);
+  let sourcePath: string | null = null;
+  try {
+    sourcePath = temporaryPath();
+    const written = await writeResponseToTemporary(response, sourcePath, MAX_VIDEO_BYTES);
+    if (!isMp4(written.prefix)) {
+      throw new StorageError('Remote video binary signature is not supported', {
+        diagnostic: { category: 'remote_content_invalid', hostname },
+      });
+    }
+    return moveTemporaryImage(sourcePath, 'video/mp4');
+  } catch (err) {
+    if (sourcePath) removeTemporaryFile(sourcePath);
+    else await cancelResponseBody(response);
+    if (err instanceof StorageError) throw err;
+    throw new StorageError('Failed to store remote video', {
       cause: err,
       diagnostic: { category: 'local_write_failed' },
     });

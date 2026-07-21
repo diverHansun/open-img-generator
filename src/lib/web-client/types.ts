@@ -9,7 +9,7 @@ export type ProviderId =
   | 'qwen'
   | 'kling';
 
-export type ProviderMode = 'text-to-image' | 'image-to-image';
+export type ProviderMode = 'text-to-image' | 'image-to-image' | 'text-to-video';
 export type GenerationStatus =
   | 'pending'
   | 'running'
@@ -29,6 +29,7 @@ export type ProviderCapabilities = {
   supportsSeed: boolean;
   protocol: 'sync' | 'async';
   defaultSize: string;
+  mediaKind?: 'image' | 'video';
 };
 
 export type ProviderInfo = {
@@ -145,10 +146,22 @@ export type GenerationView = {
   projectId: string;
   prompt: string;
   status: GenerationStatus;
+  mediaKind?: 'image' | 'video';
   createdAt: string;
   updatedAt: string;
   jobs: JobView[];
   images: ImageView[];
+  videos?: Array<{
+    id: string;
+    jobId: string;
+    index: number;
+    url: string | null;
+    width: number | null;
+    height: number | null;
+    durationSeconds: number | null;
+    availability: ImageView['availability'];
+    removedAt: string | null;
+  }>;
 };
 
 export type Project = {

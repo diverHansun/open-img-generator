@@ -320,6 +320,7 @@ describe('db:migrate', () => {
           'generation_jobs.result_snapshot',
           'generation_jobs.attempt_count',
           'generation_jobs.retry_started_at',
+          'generations.media_kind',
         ],
         deletedOrphanGenerations: 0,
         generations: 1,

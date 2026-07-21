@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, inArray, isNull, isNotNull, lte, or, sql } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
-import { generations, generationJobs, images, sessions } from '../schema';
-import type { Generation, GenerationJob, Image } from '../schema';
+import { generations, generationJobs, images, sessions, videos } from '../schema';
+import type { Generation, GenerationJob, Image, Video } from '../schema';
 
 export type GenerationStatus =
   | 'pending'
@@ -24,6 +24,7 @@ export type CreateGenerationParams = {
   sessionId: string;
   prompt: string;
   status: GenerationStatus;
+  mediaKind?: 'image' | 'video';
   createdAt: string;
   updatedAt: string;
 };
@@ -68,10 +69,11 @@ export type UpdateGenerationJobPatch = {
   updatedAt: string;
 };
 
-export type JobWithImages = GenerationJob & { images: Image[] };
+export type JobWithImages = GenerationJob & { images: Image[]; videos: Video[] };
 export type GenerationWithJobsAndImages = Generation & {
   jobs: JobWithImages[];
   images: Image[];
+  videos: Video[];
 };
 
 export type IdempotentCreateGenerationParams = CreateGenerationParams & {
@@ -158,6 +160,7 @@ export function createGenerationWithJobs(
         sessionId: genParams.sessionId,
         prompt: genParams.prompt,
         status: genParams.status,
+        mediaKind: genParams.mediaKind ?? 'image',
         createdAt: genParams.createdAt,
         updatedAt: genParams.updatedAt,
       })
@@ -212,6 +215,7 @@ export function admitGenerationWithJobs(
           sessionId: genParams.sessionId,
           prompt: genParams.prompt,
           status: genParams.status,
+          mediaKind: genParams.mediaKind ?? 'image',
           clientRequestId: genParams.clientRequestId,
           requestHash: genParams.requestHash,
           createdAt: genParams.createdAt,
@@ -781,6 +785,9 @@ export function deleteGenerationForHistory(
       const storagePaths = generation.images
         .map((image) => image.storagePath)
         .filter((value): value is string => value !== null);
+      storagePaths.push(...generation.videos
+        .map((video) => video.storagePath)
+        .filter((value): value is string => value !== null));
       const resultSnapshots = generation.jobs.map((job) => job.resultSnapshot);
       tx.delete(generations).where(eq(generations.id, id)).run();
       return { kind: 'deleted', storagePaths, resultSnapshots };
@@ -808,16 +815,23 @@ export function fetchGenerationDetails(
           .where(inArray(images.generationJobId, jobIds))
           .all()
       : [];
+  const allVideos =
+    jobIds.length > 0
+      ? client.select().from(videos)
+          .where(inArray(videos.generationJobId, jobIds)).all()
+      : [];
 
   const jobsWithImages = jobs.map((job) => ({
     ...job,
     images: allImages.filter((img) => img.generationJobId === job.id),
+    videos: allVideos.filter((video) => video.generationJobId === job.id),
   }));
 
   return {
     ...generation,
     jobs: jobsWithImages,
     images: allImages,
+    videos: allVideos,
   };
 }
 

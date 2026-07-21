@@ -147,12 +147,15 @@ export async function submitGeneration(
   const generationId = randomUUID();
   const processedPrompt = prompt.process(params.prompt);
   const jobs = buildDurableJobs(params, processedPrompt, generationId, now);
+  const firstTarget = params.targets[0]!;
+  const mediaKind = getById(firstTarget.provider)?.capabilities.get(firstTarget.model)?.mediaKind ?? 'image';
   const admission = admitGenerationWithJobs(
     {
       id: generationId,
       sessionId: params.sessionId,
       prompt: processedPrompt,
       status: 'pending',
+      mediaKind,
       clientRequestId,
       requestHash,
       createdAt: now,
@@ -266,6 +269,7 @@ function toGenerationView(
     projectId: session.projectId,
     prompt: generation.prompt,
     status: generation.status as GenerationStatus,
+    mediaKind: generation.mediaKind as 'image' | 'video',
     createdAt: generation.createdAt,
     updatedAt: generation.updatedAt,
     jobs: generation.jobs.map((job) => {
@@ -304,5 +308,16 @@ function toGenerationView(
         removedAt: image.removedAt,
       };
     }),
+    videos: generation.videos.map((video) => ({
+      id: video.id,
+      jobId: video.generationJobId,
+      index: video.index,
+      url: video.storagePath ? `/api/videos/${video.id}` : null,
+      width: video.width,
+      height: video.height,
+      durationSeconds: video.durationSeconds,
+      availability: video.storagePath ? 'available' : (video.removalReason as 'retention_expired' | 'user_deleted' | 'storage_missing'),
+      removedAt: video.removedAt,
+    })),
   };
 }

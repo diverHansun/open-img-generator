@@ -177,6 +177,7 @@ try {
         session_id TEXT NOT NULL REFERENCES sessions(id),
         prompt TEXT NOT NULL,
         status TEXT NOT NULL,
+        media_kind TEXT NOT NULL DEFAULT 'image',
         client_request_id TEXT,
         request_hash TEXT,
         created_at TEXT NOT NULL,
@@ -220,6 +221,20 @@ try {
           (storage_path IS NULL AND removed_at IS NOT NULL AND
             removal_reason IN ('retention_expired', 'user_deleted', 'storage_missing'))
         )
+      );
+      CREATE TABLE IF NOT EXISTS videos (
+        id TEXT PRIMARY KEY,
+        generation_job_id TEXT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
+        "index" INTEGER NOT NULL,
+        storage_path TEXT,
+        content_type TEXT NOT NULL,
+        width INTEGER,
+        height INTEGER,
+        duration_seconds INTEGER,
+        size_bytes INTEGER,
+        created_at TEXT NOT NULL,
+        removed_at TEXT,
+        removal_reason TEXT
       );
     `);
     createAncillarySchema();
@@ -622,6 +637,36 @@ try {
             ALTER TABLE images_v4 RENAME TO images;
             CREATE UNIQUE INDEX unique_job_index
               ON images(generation_job_id, "index");
+          `);
+        },
+      },
+    ],
+    [
+      4,
+      {
+        to: 5,
+        up() {
+          if (!columnInfo('generations', 'media_kind')) {
+            sqlite.exec("ALTER TABLE generations ADD COLUMN media_kind TEXT NOT NULL DEFAULT 'image'");
+            addedColumns.push('generations.media_kind');
+          }
+          sqlite.exec(`
+            CREATE TABLE IF NOT EXISTS videos (
+              id TEXT PRIMARY KEY,
+              generation_job_id TEXT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
+              "index" INTEGER NOT NULL,
+              storage_path TEXT,
+              content_type TEXT NOT NULL,
+              width INTEGER,
+              height INTEGER,
+              duration_seconds INTEGER,
+              size_bytes INTEGER,
+              created_at TEXT NOT NULL,
+              removed_at TEXT,
+              removal_reason TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS unique_video_job_index
+              ON videos(generation_job_id, "index");
           `);
         },
       },

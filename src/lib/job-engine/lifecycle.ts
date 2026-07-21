@@ -3,9 +3,11 @@ import { randomUUID } from 'node:crypto';
 import {
   aggregateGenerationStatus,
   createImageIfAbsent,
+  createVideoIfAbsent,
   getGenerationJob,
   getGenerationWithJobsAndImages,
   imageExists,
+  videoExists,
   markExpiredDispatchingJobOutcomeUnknown,
   persistLateProviderHandleForCancellation,
   tryClaimCancellingLease,
@@ -27,6 +29,7 @@ import { getById } from '../providers';
 import type {
   JobHandle,
   ProviderImageRef,
+  ProviderVideoRef,
   ProviderRequestDisposition,
   SubmitResult,
 } from '../providers';
@@ -154,7 +157,7 @@ function providerFailureDiagnostic(error: unknown): {
 type NormalizedPollResult =
   | { status: 'pending' }
   | { status: 'running' }
-  | { status: 'completed'; images: unknown[] | null }
+  | { status: 'completed'; images: unknown[] | null; videos: unknown[] | null }
   | {
       status: 'failed';
       error: {
@@ -187,6 +190,22 @@ function normalizeProviderImageRefs(value: unknown): unknown[] | null {
   }
 }
 
+function normalizeProviderVideoRefs(value: unknown): unknown[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  return value.map((video) => {
+    if (typeof video !== 'object' || video === null || Array.isArray(video)) return video;
+    return {
+      url: safeRecordValue(video, 'url'),
+      width: safeRecordValue(video, 'width'),
+      height: safeRecordValue(video, 'height'),
+      contentType: safeRecordValue(video, 'contentType'),
+      index: safeRecordValue(video, 'index'),
+      durationSeconds: safeRecordValue(video, 'durationSeconds'),
+    };
+  });
+}
+
 /**
  * Adapter TypeScript types cannot protect the durable worker from a malformed
  * runtime response. Read each Provider-owned field once into a plain snapshot
@@ -205,6 +224,7 @@ function normalizePollResult(value: unknown): NormalizedPollResult | null {
       return {
         status: 'completed',
         images: normalizeProviderImageRefs(safeRecordValue(value, 'images')),
+        videos: normalizeProviderVideoRefs(safeRecordValue(value, 'videos')),
       };
     case 'failed':
       {
@@ -1130,6 +1150,91 @@ async function persistProviderImages(
   return applied ? 'advanced' : 'skipped';
 }
 
+function videoRefSnapshot(refs: ProviderVideoRef[]): string {
+  const serialized = JSON.stringify({ kind: 'video', refs });
+  if (new TextEncoder().encode(serialized).byteLength > MAX_RESULT_SNAPSHOT_BYTES) {
+    throw new Error('Video result snapshot is too large');
+  }
+  return serialized;
+}
+
+function parseVideoRefSnapshot(serialized: string | null): ProviderVideoRef[] {
+  if (!serialized || new TextEncoder().encode(serialized).byteLength > MAX_RESULT_SNAPSHOT_BYTES) {
+    throw new Error('Missing video result snapshot');
+  }
+  const parsed = JSON.parse(serialized) as Record<string, unknown>;
+  if (parsed.kind !== 'video' || !Array.isArray(parsed.refs) || parsed.refs.length !== 1) {
+    throw new Error('Invalid video result snapshot');
+  }
+  return parsed.refs.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid video ref');
+    const ref = value as Record<string, unknown>;
+    if (
+      typeof ref.url !== 'string' || ref.url.length === 0 || ref.url.length > MAX_RESULT_URL_LENGTH ||
+      ref.contentType !== 'video/mp4' || ref.index !== 0 ||
+      (ref.width !== null && !Number.isInteger(ref.width)) ||
+      (ref.height !== null && !Number.isInteger(ref.height)) ||
+      (ref.durationSeconds !== null && !Number.isInteger(ref.durationSeconds))
+    ) throw new Error('Invalid video ref');
+    return ref as ProviderVideoRef;
+  });
+}
+
+async function persistProviderVideos(
+  job: GenerationJob,
+  videos: unknown,
+  client: DbClient,
+  expectedPollLeaseUntil: string,
+  expectedPhase: GenerationJobPhase,
+): Promise<AdvanceOutcome> {
+  const normalized = normalizeProviderVideoRefs(videos);
+  if (!normalized || normalized.length !== 1) {
+    return applyTerminalFailure(
+      job,
+      jobDiagnostic('PROVIDER_EMPTY_RESULT', 'Provider returned no valid video reference'),
+      client,
+      expectedPollLeaseUntil,
+      expectedPhase,
+    ) ? 'failed' : 'skipped';
+  }
+  const value = normalized[0] as Record<string, unknown>;
+  if (
+    typeof value.url !== 'string' || value.url.length === 0 || value.url.length > MAX_RESULT_URL_LENGTH ||
+    value.contentType !== 'video/mp4' || value.index !== 0
+  ) {
+    return applyTerminalFailure(
+      job,
+      jobDiagnostic('STORAGE_RESPONSE_INVALID', 'Provider returned an invalid video result'),
+      client,
+      expectedPollLeaseUntil,
+      expectedPhase,
+    ) ? 'failed' : 'skipped';
+  }
+  let resultSnapshot: string;
+  try {
+    resultSnapshot = videoRefSnapshot([value as ProviderVideoRef]);
+  } catch {
+    return applyTerminalFailure(
+      job,
+      jobDiagnostic('STORAGE_RESPONSE_INVALID', 'Provider returned an oversized video result'),
+      client,
+      expectedPollLeaseUntil,
+      expectedPhase,
+    ) ? 'failed' : 'skipped';
+  }
+  const applied = updateJobAndGeneration(job.id, job.generationId, {
+    status: 'running',
+    phase: 'storing',
+    resultSnapshot,
+    error: null,
+    pollLeaseUntil: null,
+    nextPollAt: nowIso(),
+    ...resetRetryState(),
+    updatedAt: nowIso(),
+  }, client, expectedPollLeaseUntil, { expectedPhase });
+  return applied ? 'advanced' : 'skipped';
+}
+
 async function dispatchQueuedJob(
   job: GenerationJob,
   client: DbClient,
@@ -1397,6 +1502,15 @@ async function pollJob(
       return applied ? 'advanced' : 'skipped';
     }
     case 'completed':
+      if (result.videos && result.videos.length > 0) {
+        return persistProviderVideos(
+          claimed,
+          result.videos,
+          client,
+          claimedUntil,
+          'polling',
+        );
+      }
       if (result.images === null) {
         return scheduleRetryOrFinish(
           claimed,
@@ -1490,6 +1604,63 @@ async function storeNextImage(
   }
   const claimed = getGenerationJob(job.id, client);
   if (!claimed) return 'skipped';
+  let videoRefs: ProviderVideoRef[] | null = null;
+  try {
+    const marker = JSON.parse(claimed.resultSnapshot ?? 'null') as Record<string, unknown> | null;
+    if (marker?.kind === 'video') videoRefs = parseVideoRefSnapshot(claimed.resultSnapshot);
+  } catch {
+    videoRefs = null;
+  }
+  if (videoRefs) {
+    const nextVideo = videoRefs.find((ref) => !videoExists(claimed.id, ref.index, client));
+    if (!nextVideo) {
+      const completed = updateJobAndGeneration(claimed.id, claimed.generationId, {
+        status: 'completed', phase: 'terminal', pollLeaseUntil: null, nextPollAt: null,
+        resultSnapshot: null, requestSnapshot: null, requestSnapshotVersion: null,
+        ...resetRetryState(), updatedAt: nowIso(),
+      }, client, claimedUntil, { expectedPhase: 'storing' });
+      return completed ? 'completed' : 'skipped';
+    }
+    let stored: Awaited<ReturnType<typeof storage.downloadAndStoreVideo>>;
+    try {
+      stored = await storage.downloadAndStoreVideo(nextVideo.url);
+    } catch (err) {
+      if (err instanceof StorageError && err.retryable) {
+        return scheduleRetryOrFinish(
+          claimed, 'download', jobDiagnostic('STORAGE_ERROR', 'Video download temporarily failed', true, err.diagnostic),
+          client, claimedUntil, err.retryAfterMs,
+        );
+      }
+      return applyTerminalFailure(
+        claimed, jobDiagnostic('STORAGE_ERROR', 'Video storage failed', false, err instanceof StorageError ? err.diagnostic : undefined),
+        client, claimedUntil, 'storing',
+      ) ? 'failed' : 'skipped';
+    }
+    let inserted = false;
+    try {
+      client.transaction((tx) => {
+        if (!updateGenerationJobIfLease(claimed.id, claimedUntil, { updatedAt: nowIso() }, tx, { expectedPhase: 'storing' })) return;
+        inserted = createVideoIfAbsent({
+          id: randomUUID(), jobId: claimed.id, index: nextVideo.index,
+          storagePath: stored.storagePath, contentType: stored.contentType,
+          width: nextVideo.width, height: nextVideo.height,
+          durationSeconds: nextVideo.durationSeconds, sizeBytes: stored.sizeBytes,
+          createdAt: nowIso(),
+        }, tx);
+        updateGenerationJobIfLease(claimed.id, claimedUntil, {
+          status: 'completed', phase: 'terminal', pollLeaseUntil: null, nextPollAt: null,
+          resultSnapshot: null, requestSnapshot: null, requestSnapshotVersion: null,
+          ...resetRetryState(), updatedAt: nowIso(),
+        }, tx, { expectedPhase: 'storing' });
+        updateGeneration(claimed.generationId, { status: deriveGenerationStatus(claimed.generationId, tx), updatedAt: nowIso() }, tx);
+      });
+    } catch {
+      removeUncommittedStoredFile(stored.storagePath);
+      return applyTerminalFailure(claimed, jobDiagnostic('STORAGE_ERROR', 'Video record could not be stored'), client, claimedUntil, 'storing') ? 'failed' : 'skipped';
+    }
+    if (!inserted) removeUncommittedStoredFile(stored.storagePath);
+    return inserted ? 'completed' : 'skipped';
+  }
   let refs: ProviderImageRef[];
   try {
     refs = parseImageRefSnapshot(claimed.resultSnapshot);

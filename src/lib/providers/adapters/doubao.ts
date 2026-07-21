@@ -1,13 +1,18 @@
 import type {
   ImageProvider,
+  JobHandle,
   NormalizedRequest,
+  PollResult,
   ProviderImageRef,
+  ProviderVideoRef,
   SubmitResult,
 } from '../types';
 import {
   createProviderError,
   createProviderErrorFromHttpError,
   postJsonWithInlineImageResponse,
+  postJson,
+  getJson,
   ProviderHttpError,
 } from '../http-client';
 import {
@@ -24,6 +29,11 @@ import {
   classifyProviderDiagnostic,
   readProviderRequestIdFromResponse,
 } from '../error-diagnostics';
+import {
+  providerEndpointUrl,
+  trustedProviderBaseUrl,
+  trustedProviderExternalId,
+} from '../endpoint-policy';
 
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 const RESERVED_KEYS = new Set([
@@ -38,12 +48,31 @@ const RESERVED_KEYS = new Set([
   'watermark',
 ]);
 
-function apiUrl(): string {
-  const base = process.env.ARK_BASE_URL ?? DEFAULT_BASE_URL;
-  return `${base.replace(/\/+$/, '')}/images/generations`;
+function baseUrl(): URL {
+  return trustedProviderBaseUrl(process.env.ARK_BASE_URL ?? DEFAULT_BASE_URL);
 }
 
-function resolveSize(req: NormalizedRequest, profile: DoubaoImageProfile): string {
+function apiUrl(): string {
+  return providerEndpointUrl(baseUrl(), ['images', 'generations']);
+}
+
+function videoTasksUrl(): string {
+  return providerEndpointUrl(baseUrl(), ['contents', 'generations', 'tasks']);
+}
+
+function videoTaskUrl(taskId: string): string {
+  return providerEndpointUrl(baseUrl(), [
+    'contents',
+    'generations',
+    'tasks',
+    trustedProviderExternalId(taskId),
+  ]);
+}
+
+function resolveSize(
+  req: NormalizedRequest,
+  profile: Extract<DoubaoImageProfile, { kind: 'seedream-images' }>,
+): string {
   if (req.width && req.height) return `${req.width}x${req.height}`;
   return profile.aspectRatioSizes[req.aspectRatio ?? ''] ?? profile.defaultSize;
 }
@@ -69,7 +98,7 @@ function contentTypeFromUrl(url: string): string {
 function buildRequestBody(
   req: NormalizedRequest,
   model: string,
-  profile: DoubaoImageProfile,
+  profile: Extract<DoubaoImageProfile, { kind: 'seedream-images' }>,
 ): Record<string, unknown> {
   const size = resolveSize(req, profile);
   const body: Record<string, unknown> = {
@@ -90,6 +119,55 @@ function buildRequestBody(
     if (!RESERVED_KEYS.has(key)) body[key] = value;
   }
   return body;
+}
+
+function buildVideoRequestBody(
+  req: NormalizedRequest,
+  model: string,
+  profile: Extract<DoubaoImageProfile, { kind: 'seedance-video' }>,
+): Record<string, unknown> {
+  const ratio = req.aspectRatio ?? profile.defaultAspectRatio;
+  return {
+    model,
+    content: [{ type: 'text', text: `${req.prompt} --ratio ${ratio}` }],
+  };
+}
+
+function videoHandle(payload: unknown, model: string): JobHandle | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const id = (payload as Record<string, unknown>).id;
+  if (typeof id !== 'string' || id.length === 0) return null;
+  try {
+    const url = videoTaskUrl(id);
+    return {
+      providerId: 'doubao',
+      model,
+      externalId: trustedProviderExternalId(id),
+      statusUrl: url,
+      responseUrl: url,
+      cancelUrl: null,
+      submittedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function parseVideo(payload: unknown): ProviderVideoRef[] {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
+  const root = payload as Record<string, unknown>;
+  const content = root.content;
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return [];
+  const url = (content as Record<string, unknown>).video_url;
+  if (typeof url !== 'string' || url.length === 0) return [];
+  return [{
+    url,
+    width: null,
+    height: null,
+    contentType: 'video/mp4',
+    index: 0,
+    durationSeconds: null,
+  }];
 }
 
 function parseImages(payload: unknown, requestedSize: string): ProviderImageRef[] {
@@ -139,6 +217,22 @@ export class DoubaoProvider implements ImageProvider {
     if (!spec) return unsupportedModelSubmitResult(this.id);
 
     try {
+      if (spec.profile.kind === 'seedance-video') {
+        const data = await postJson(
+          videoTasksUrl(),
+          buildVideoRequestBody(req, model, spec.profile),
+          this.authHeaders(),
+        );
+        const handle = videoHandle(data, model);
+        return handle
+          ? { kind: 'async', handle }
+          : {
+              kind: 'failed',
+              error: createProviderError(500, 'Seedance returned an invalid task reference', false, {
+                disposition: 'unknown',
+              }),
+            };
+      }
       const data = await postJsonWithInlineImageResponse(
         apiUrl(),
         buildRequestBody(req, model, spec.profile),
@@ -157,6 +251,57 @@ export class DoubaoProvider implements ImageProvider {
       return { kind: 'sync', images };
     } catch (err) {
       return { kind: 'failed', error: this.mapError(err) };
+    }
+  }
+
+  async poll(handle: JobHandle): Promise<PollResult> {
+    const spec = doubaoModelSpecs.get(handle.model);
+    if (!spec || spec.profile.kind !== 'seedance-video') {
+      return {
+        status: 'failed',
+        error: createProviderError(400, 'Doubao task model is invalid', false),
+      };
+    }
+    try {
+      const data = await getJson(
+        videoTaskUrl(handle.externalId),
+        this.authHeaders(),
+        15_000,
+      ) as Record<string, unknown>;
+      const status = String(data.status ?? '').toLowerCase();
+      if (status === 'queued') return { status: 'pending' };
+      if (status === 'running') return { status: 'running' };
+      if (status === 'cancelled') return { status: 'cancelled' };
+      if (status === 'failed') {
+        return {
+          status: 'failed',
+          error: createProviderError(422, 'Seedance task failed', false, {
+            diagnostic: classifyProviderDiagnostic('doubao', {
+              httpStatus: 422,
+              providerCode: data.error,
+              providerRequestId: readProviderRequestIdFromResponse(data),
+              upstreamRejected: true,
+            }),
+          }),
+        };
+      }
+      if (status !== 'succeeded') {
+        return {
+          status: 'failed',
+          error: createProviderError(500, 'Seedance returned an unknown task status', true),
+        };
+      }
+      const videos = parseVideo(data);
+      return videos.length > 0
+        ? { status: 'completed', images: [], videos }
+        : {
+            status: 'failed',
+            error: createProviderError(500, 'No video in Seedance response', false, {
+              diagnostic: classifyProviderDiagnostic('doubao', { noResult: true }),
+            }),
+          };
+    } catch (err) {
+      return { status: 'failed', error: this.mapError(err) };
     }
   }
 

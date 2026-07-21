@@ -28,6 +28,7 @@ export function initializeTestSchema(sqlite: Database.Database): void {
       session_id TEXT NOT NULL REFERENCES sessions(id),
       prompt TEXT NOT NULL,
       status TEXT NOT NULL,
+      media_kind TEXT NOT NULL DEFAULT 'image',
       client_request_id TEXT,
       request_hash TEXT,
       created_at TEXT NOT NULL,
@@ -81,6 +82,21 @@ export function initializeTestSchema(sqlite: Database.Database): void {
       )
     );
     CREATE UNIQUE INDEX unique_job_index ON images(generation_job_id, "index");
+    CREATE TABLE videos (
+      id TEXT PRIMARY KEY,
+      generation_job_id TEXT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
+      "index" INTEGER NOT NULL,
+      storage_path TEXT,
+      content_type TEXT NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      duration_seconds INTEGER,
+      size_bytes INTEGER,
+      created_at TEXT NOT NULL,
+      removed_at TEXT,
+      removal_reason TEXT
+    );
+    CREATE UNIQUE INDEX unique_video_job_index ON videos(generation_job_id, "index");
     CREATE TABLE favorites (
       id TEXT PRIMARY KEY,
       image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,

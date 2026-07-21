@@ -55,6 +55,7 @@ export function validate(
     throw new ValidationError('Image-to-image mode requires at least one reference image');
   }
   const seenTargets = new Set<string>();
+  let requestedMediaKind: 'image' | 'video' | undefined;
 
   for (const target of params.targets) {
     if (!target || typeof target.provider !== 'string' || typeof target.model !== 'string') {
@@ -75,6 +76,11 @@ export function validate(
       throw new ValidationError(`Model not found: ${target.model}`);
     }
     const mode = params.mode ?? 'text-to-image';
+    const mediaKind = capabilities.mediaKind ?? 'image';
+    if (requestedMediaKind && requestedMediaKind !== mediaKind) {
+      throw new ValidationError('Image and video targets cannot be mixed');
+    }
+    requestedMediaKind = mediaKind;
     if (!capabilities.modes.includes(mode)) {
       throw new ValidationError(`Mode ${mode} not supported by ${target.model}`);
     }

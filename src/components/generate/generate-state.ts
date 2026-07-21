@@ -24,6 +24,7 @@ export function buildAvailableModelTargets(
     provider.models
       .filter(
         (model) =>
+          (model.mediaKind ?? 'image') === 'image' &&
           preferenceLookup.get(provider.id + ':' + model.model) !== false,
       )
       .map((model) => ({

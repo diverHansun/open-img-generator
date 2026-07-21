@@ -109,7 +109,7 @@ function optionalInteger(value: unknown): number | undefined {
 
 function optionalMode(value: unknown): ProviderMode | undefined {
   if (value === undefined) return undefined;
-  if (value !== 'text-to-image' && value !== 'image-to-image') throw snapshotError();
+  if (value !== 'text-to-image' && value !== 'image-to-image' && value !== 'text-to-video') throw snapshotError();
   return value;
 }
 

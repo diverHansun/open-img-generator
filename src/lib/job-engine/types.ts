@@ -68,14 +68,28 @@ export type ImageView = {
   removedAt: string | null;
 };
 
+export type VideoView = {
+  id: string;
+  jobId: string;
+  index: number;
+  url: string | null;
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;
+  availability: 'available' | 'retention_expired' | 'user_deleted' | 'storage_missing';
+  removedAt: string | null;
+};
+
 export type GenerationView = {
   id: string;
   sessionId: string;
   projectId: string;
   prompt: string;
   status: GenerationStatus;
+  mediaKind?: 'image' | 'video';
   createdAt: string;
   updatedAt: string;
   jobs: JobView[];
   images: ImageView[];
+  videos?: VideoView[];
 };
