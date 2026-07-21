@@ -55,8 +55,8 @@ API 层: GET /api/images/:id
 | 输出 | `{ storagePath: string; contentType: string; sizeBytes: number }` |
 | 失败 | 下载/URL/DNS/redirect/大小/类型/signature 任一失败均抛不含原 URL 的 `StorageError` |
 | 超时 | 建议 60s（图片文件可能较大） |
-| 网络安全 | 默认拒绝 `http:`、userinfo、localhost、loopback、RFC1918、link-local、multicast、IPv4-mapped IPv6；仅 `TRUSTED_PROXY_IMAGE_HOSTS` 的精确 HTTPS host 且所有 DNS answer 在 `198.18.0.0/15` 时例外，redirect 逐跳复核；本地 fake provider 才可用显式 `http` + private 开关 |
-| 内容边界 | `Content-Length` 预检 + 流式计数均限制为 25 MiB；只接受 PNG/JPEG/WebP，MIME 与 magic bytes 必须匹配 |
+| 网络安全 | 默认拒绝 `http:`、userinfo、localhost、loopback、RFC1918、link-local、multicast、IPv4-mapped IPv6；仅 `TRUSTED_PROXY_IMAGE_HOSTS` 的精确 HTTPS host 且所有 DNS answer 在 `198.18.0.0/15` 时例外，redirect 逐跳复核；本地 fake provider 才可用显式 `http` + private 开关；远端 MIME 仅作提示，落盘格式由 PNG/JPEG/WebP magic bytes 决定 |
+| 内容边界 | `Content-Length` 预检 + 流式计数均限制为 25 MiB；只接受 magic bytes 可识别的 PNG/JPEG/WebP，并以实际格式决定扩展名与响应 MIME |
 
 ### storage.getReadStream(storagePath)
 

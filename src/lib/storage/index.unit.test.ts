@@ -184,10 +184,45 @@ describe('storage', () => {
 
     await expect(downloadAndStore('https://cdn.example.com/result.png', {
       resolveHostname: publicResolver,
-    })).rejects.toThrow('binary signature');
+    })).rejects.toMatchObject({
+      diagnostic: {
+        category: 'remote_content_invalid',
+        hostname: 'cdn.example.com',
+      },
+    });
 
     const temporaryRoot = path.join(tempDir, '.tmp');
     expect(fs.existsSync(temporaryRoot) ? fs.readdirSync(temporaryRoot) : []).toHaveLength(0);
+  });
+
+  it('uses the binary signature when a CDN sends a mismatched image content type', async () => {
+    const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, ...Buffer.from('jpeg-payload')]);
+    global.fetch = vi.fn().mockResolvedValue(new Response(jpegBuffer, {
+      status: 200,
+      headers: { 'content-type': 'image/png' },
+    }));
+
+    const result = await downloadAndStore('https://cdn.example.com/result.png', {
+      resolveHostname: publicResolver,
+    });
+
+    expect(result.contentType).toBe('image/jpeg');
+    expect(result.storagePath).toMatch(/\.jpg$/);
+    expect(fs.readFileSync(path.join(tempDir, result.storagePath))).toEqual(jpegBuffer);
+  });
+
+  it('uses the binary signature when a CDN sends a generic content type', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response(imageBuffer, {
+      status: 200,
+      headers: { 'content-type': 'application/octet-stream' },
+    }));
+
+    const result = await downloadAndStore('https://cdn.example.com/result', {
+      resolveHostname: publicResolver,
+    });
+
+    expect(result.contentType).toBe('image/png');
+    expect(result.storagePath).toMatch(/\.png$/);
   });
 
   it('cancels an advertised oversized image before opening a file', async () => {

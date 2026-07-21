@@ -571,26 +571,44 @@ export async function downloadAndStore(
       },
     });
   }
-  const contentType = normalizeImageContentType(response.headers.get('content-type'));
-  if (!contentType) {
-    await cancelResponseBody(response);
-    throw new StorageError('Remote image content type is not supported', {
-      diagnostic: {
-        category: 'remote_content_invalid',
-        hostname: safeRemoteHostname(url),
-      },
-    });
-  }
+  const hostname = safeRemoteHostname(url);
   let sourcePath: string | null = null;
   try {
     sourcePath = temporaryPath();
     const written = await writeResponseToTemporary(response, sourcePath);
-    assertImageMagic(contentType, written.prefix);
+    // Provider CDNs do not consistently preserve Content-Type through
+    // watermarking and signed-URL layers. The allowlisted binary signature is
+    // authoritative, so a valid image remains usable even when its HTTP
+    // metadata says application/octet-stream or names another image format.
+    const contentType = imageContentTypeFromMagic(written.prefix);
+    if (!contentType) {
+      throw new StorageError('Remote image binary signature is not supported', {
+        diagnostic: { category: 'remote_content_invalid', hostname },
+      });
+    }
     return moveTemporaryImage(sourcePath, contentType);
   } catch (err) {
     if (sourcePath) removeTemporaryFile(sourcePath);
     else await cancelResponseBody(response);
-    if (err instanceof StorageError) throw err;
+    if (err instanceof StorageError) {
+      if (err.diagnostic) throw err;
+      const localWriteFailure =
+        err.message === 'Failed to write remote image data' ||
+        err.message === 'Failed to finalize stored image';
+      throw new StorageError(err.message, {
+        cause: err.cause,
+        retryable: err.retryable,
+        retryAfterMs: err.retryAfterMs,
+        diagnostic: {
+          category: localWriteFailure
+            ? 'local_write_failed'
+            : err.retryable
+              ? 'remote_download_failed'
+              : 'remote_content_invalid',
+          ...(!localWriteFailure && hostname ? { hostname } : {}),
+        },
+      });
+    }
     throw new StorageError('Failed to store remote image', {
       cause: err,
       diagnostic: { category: 'local_write_failed' },
