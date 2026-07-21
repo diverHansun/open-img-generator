@@ -52,9 +52,12 @@
 | HTTP 超时 | mock 超时 | SubmitResult.kind="failed"，error.code="TIMEOUT" |
 | sync timeout budget | fake timer 在 30s 后仍未 abort、180s 时 abort | ZenMux、SiliconFlow、智谱、Doubao 都传入共享 180s 预算；已开始请求仍标记 `unknown`，不安全重投 |
 | GPT Image 1.5 | model=`openai/gpt-image-1.5` | 请求体使用所选 model；只透传 allowlist providerOptions；Base64 正常落盘 |
+| Gemini 图片模型 | Nano Banana/2/Pro/Lite | 使用 Vertex `generateContent`，只发送 text + imageConfig；inlineData 转入 Base64 staging |
 | 未知模型 | 任意不在 ZenMux spec 的 model | `INVALID_REQUEST/not_started`，fetch 未调用 |
 
 ### 2.3 Fal Async 路径
+
+Fal 还需逐 profile 验证：原版/Lite Banana 不发送 resolution；Nano Banana 2/Pro 只发送支持的 resolution；FLUX 2 Dev/Pro/Flex/Klein 的 count、negative prompt 和 providerOptions 严格按模型 allowlist，任意未知字段被丢弃。
 
 | 场景 | 输入 | 预期 |
 |------|------|------|

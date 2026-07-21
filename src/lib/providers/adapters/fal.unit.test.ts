@@ -159,6 +159,80 @@ describe('FalProvider', () => {
     });
   });
 
+  it.each([
+    ['fal-ai/nano-banana', '1:1'],
+    ['google/nano-banana-lite', 'auto'],
+  ])('omits unsupported resolution for %s', async (model, aspectRatio) => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        request_id: 'banana-basic',
+        status_url: `https://queue.fal.run/${model}/requests/banana-basic/status`,
+        response_url: `https://queue.fal.run/${model}/requests/banana-basic/response`,
+      }),
+    });
+
+    await provider.submit(
+      makeNormalizedRequest({ providerOptions: { resolution: '4K' } }),
+      model,
+    );
+
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({
+      prompt: 'A cat wearing a space helmet',
+      num_images: 1,
+      aspect_ratio: aspectRatio,
+      output_format: 'png',
+      limit_generations: true,
+    });
+  });
+
+  it.each([
+    ['fal-ai/flux-2', true, true],
+    ['fal-ai/flux-2-pro', false, false],
+    ['fal-ai/flux-2-flex', false, true],
+    ['fal-ai/flux-2/klein/4b', true, true],
+    ['fal-ai/flux-2/klein/4b/base', true, true],
+  ])('uses an allowlisted FLUX profile for %s', async (model, supportsCount, supportsSteps) => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        request_id: 'flux-profile',
+        status_url: `https://queue.fal.run/${model}/requests/flux-profile/status`,
+        response_url: `https://queue.fal.run/${model}/requests/flux-profile/response`,
+      }),
+    });
+
+    await provider.submit(
+      makeNormalizedRequest({
+        count: 2,
+        negativePrompt: 'blur',
+        providerOptions: {
+          output_format: 'png',
+          num_inference_steps: 4,
+          arbitrary: 'ignored',
+          image_size: 'ignored',
+        },
+      }),
+      model,
+    );
+
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body));
+    expect(body.image_size).toBe('square_hd');
+    expect(body.output_format).toBe('png');
+    expect(body.num_inference_steps).toBe(supportsSteps ? 4 : undefined);
+    expect(body.num_images).toBe(supportsCount ? 2 : undefined);
+    expect(body.arbitrary).toBeUndefined();
+    expect(body.negative_prompt).toBe(
+      model === 'fal-ai/flux-2/klein/4b/base' ? 'blur' : undefined,
+    );
+  });
+
   it('does not persist attacker-controlled task endpoints from a submit response', async () => {
     mockFetch({
       ok: true,

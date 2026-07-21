@@ -10,21 +10,43 @@ export type FalImageProfile =
       kind: 'flux-image-size';
       defaultSize: string;
       aspectRatioSizes: Readonly<Record<string, string>>;
+      allowedProviderOptions: readonly string[];
+      supportsCount: boolean;
+      supportsNegativePrompt: boolean;
     }>
   | Readonly<{
       kind: 'banana-aspect-ratio';
       defaultAspectRatio: string;
-      defaultResolution: string;
+      defaultResolution?: string;
       supportedResolutions: readonly string[];
+      safetyToleranceValues: readonly string[];
     }>;
 
-function bananaSpec(
+const FAL_IMAGE_SIZES = [
+  'square_hd',
+  'square',
+  'portrait_4_3',
+  'portrait_16_9',
+  'landscape_4_3',
+  'landscape_16_9',
+] as const;
+
+const FAL_ASPECT_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16'] as const;
+const FAL_ASPECT_RATIO_SIZES = {
+  '1:1': 'square_hd',
+  '4:3': 'landscape_4_3',
+  '3:4': 'portrait_4_3',
+  '16:9': 'landscape_16_9',
+  '9:16': 'portrait_16_9',
+} as const;
+
+function fluxSpec(
   model: string,
   displayName: string,
   options: {
-    defaultAspectRatio: string;
-    supportedAspectRatios: string[];
-    supportedResolutions: string[];
+    maxCount: number;
+    supportsNegativePrompt?: boolean;
+    allowedProviderOptions?: readonly string[];
   },
 ): ProviderModelSpec<FalImageProfile> {
   return {
@@ -33,57 +55,80 @@ function bananaSpec(
       model,
       displayName,
       modes: ['text-to-image'],
-      maxCount: 4,
+      maxCount: options.maxCount,
+      supportedSizes: [...FAL_IMAGE_SIZES],
+      supportedAspectRatios: [...FAL_ASPECT_RATIOS],
+      supportsNegativePrompt: options.supportsNegativePrompt ?? false,
+      supportsSeed: true,
+      protocol: 'async',
+      defaultSize: 'square_hd',
+    },
+    profile: {
+      kind: 'flux-image-size',
+      defaultSize: 'square_hd',
+      aspectRatioSizes: FAL_ASPECT_RATIO_SIZES,
+      allowedProviderOptions: options.allowedProviderOptions ?? [],
+      supportsCount: options.maxCount > 1,
+      supportsNegativePrompt: options.supportsNegativePrompt ?? false,
+    },
+  };
+}
+
+function bananaSpec(
+  model: string,
+  displayName: string,
+  options: {
+    defaultAspectRatio: string;
+    supportedAspectRatios: string[];
+    supportedResolutions: string[];
+    defaultResolution?: string;
+    maxCount?: number;
+    safetyToleranceValues?: string[];
+  },
+): ProviderModelSpec<FalImageProfile> {
+  return {
+    capabilities: {
+      providerId: 'fal',
+      model,
+      displayName,
+      modes: ['text-to-image'],
+      maxCount: options.maxCount ?? 4,
       supportedSizes: options.supportedResolutions,
       supportedAspectRatios: options.supportedAspectRatios,
       supportsNegativePrompt: false,
       supportsSeed: true,
       protocol: 'async',
-      defaultSize: '1K',
+      defaultSize: options.defaultResolution ?? options.supportedResolutions[0] ?? '1K',
     },
     profile: {
       kind: 'banana-aspect-ratio',
       defaultAspectRatio: options.defaultAspectRatio,
-      defaultResolution: '1K',
+      ...(options.supportedResolutions.length > 0
+        ? { defaultResolution: options.defaultResolution ?? options.supportedResolutions[0] }
+        : {}),
       supportedResolutions: options.supportedResolutions,
+      safetyToleranceValues: options.safetyToleranceValues ?? ['1', '2', '3', '4', '5', '6'],
     },
   };
 }
 
 const specs = [
-  {
-    capabilities: {
-      providerId: 'fal',
-      model: 'fal-ai/flux/schnell',
-      displayName: 'FLUX Schnell',
-      modes: ['text-to-image'],
-      maxCount: 4,
-      supportedSizes: [
-        'square_hd',
-        'square',
-        'portrait_4_3',
-        'portrait_16_9',
-        'landscape_4_3',
-        'landscape_16_9',
-      ],
-      supportedAspectRatios: ['1:1', '4:3', '3:4', '16:9', '9:16'],
-      supportsNegativePrompt: false,
-      supportsSeed: true,
-      protocol: 'async',
-      defaultSize: 'square_hd',
-    } satisfies ProviderCapabilities,
-    profile: {
-      kind: 'flux-image-size',
-      defaultSize: 'square_hd',
-      aspectRatioSizes: {
-        '1:1': 'square_hd',
-        '4:3': 'landscape_4_3',
-        '3:4': 'portrait_4_3',
-        '16:9': 'landscape_16_9',
-        '9:16': 'portrait_16_9',
-      },
-    },
-  },
+  fluxSpec('fal-ai/flux/schnell', 'FLUX Schnell', { maxCount: 4 }),
+  bananaSpec('fal-ai/nano-banana', 'Nano Banana', {
+    defaultAspectRatio: '1:1',
+    supportedAspectRatios: [
+      '21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16',
+    ],
+    supportedResolutions: [],
+  }),
+  bananaSpec('google/nano-banana-lite', 'Nano Banana Lite', {
+    defaultAspectRatio: 'auto',
+    supportedAspectRatios: [
+      '21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3',
+      '9:16', '4:1', '1:4', '8:1', '1:8',
+    ],
+    supportedResolutions: [],
+  }),
   bananaSpec('fal-ai/nano-banana-2', 'Nano Banana 2', {
     defaultAspectRatio: 'auto',
     supportedAspectRatios: [
@@ -91,6 +136,7 @@ const specs = [
       '9:16', '4:1', '1:4', '8:1', '1:8',
     ],
     supportedResolutions: ['0.5K', '1K', '2K', '4K'],
+    defaultResolution: '1K',
   }),
   bananaSpec('fal-ai/nano-banana-pro', 'Nano Banana Pro', {
     defaultAspectRatio: '1:1',
@@ -98,6 +144,57 @@ const specs = [
       '21:9', '16:9', '3:2', '4:3', '5:4', '1:1', '4:5', '3:4', '2:3', '9:16',
     ],
     supportedResolutions: ['1K', '2K', '4K'],
+    defaultResolution: '1K',
+  }),
+  fluxSpec('fal-ai/flux-2', 'FLUX 2 Dev', {
+    maxCount: 4,
+    allowedProviderOptions: [
+      'guidance_scale',
+      'num_inference_steps',
+      'acceleration',
+      'enable_prompt_expansion',
+      'enable_safety_checker',
+      'output_format',
+    ],
+  }),
+  fluxSpec('fal-ai/flux-2-pro', 'FLUX 2 Pro', {
+    maxCount: 1,
+    allowedProviderOptions: [
+      'safety_tolerance',
+      'enable_safety_checker',
+      'output_format',
+    ],
+  }),
+  fluxSpec('fal-ai/flux-2-flex', 'FLUX 2 Flex', {
+    maxCount: 1,
+    allowedProviderOptions: [
+      'safety_tolerance',
+      'enable_safety_checker',
+      'output_format',
+      'guidance_scale',
+      'num_inference_steps',
+    ],
+  }),
+  // The public 4B endpoint is the distilled four-step model. Fal's full-CFG
+  // variant is explicitly named `/base`; there is no `/distilled` endpoint.
+  fluxSpec('fal-ai/flux-2/klein/4b', 'FLUX 2 Klein 4B', {
+    maxCount: 4,
+    allowedProviderOptions: [
+      'num_inference_steps',
+      'enable_safety_checker',
+      'output_format',
+    ],
+  }),
+  fluxSpec('fal-ai/flux-2/klein/4b/base', 'FLUX 2 Klein 4B Base', {
+    maxCount: 4,
+    supportsNegativePrompt: true,
+    allowedProviderOptions: [
+      'guidance_scale',
+      'num_inference_steps',
+      'acceleration',
+      'enable_safety_checker',
+      'output_format',
+    ],
   }),
 ] satisfies readonly ProviderModelSpec<FalImageProfile>[];
 

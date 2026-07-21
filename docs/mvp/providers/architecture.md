@@ -85,7 +85,7 @@ src/lib/providers/
 ├── model-spec.ts            # 私有 ModelSpec 定义、capabilities 投影、未知模型安全失败
 ├── adapters/
 │   ├── fal.ts               # fal.ai async queue adapter
-│   ├── zenmux.ts            # ZenMux sync OpenAI Images API adapter
+│   ├── zenmux.ts            # ZenMux sync OpenAI Images + Gemini generateContent adapter
 │   ├── siliconflow.ts        # SiliconFlow sync image generations adapter
 │   ├── zhipu.ts              # Zhipu GLM-Image sync adapter
 │   ├── doubao.ts              # Doubao/Ark Seedream sync adapter
@@ -124,7 +124,9 @@ src/lib/providers/
 
 ### 4.1.1 同步与异步的 timeout 边界
 
-ZenMux、SiliconFlow、智谱、Doubao 与 Qwen `multimodal-sync` 模型的 `submit()` 成功响应本身承载完整图片，统一使用 `SYNC_IMAGE_GENERATION_TIMEOUT_MS`：默认 180 秒、只接受不大于 180 秒的正整数毫秒，非法配置回退默认值。fal、Qwen async profiles 与 Kling 的 submit 仅创建远端 task，继续使用 HTTP helper 的 30 秒 submit / 15 秒 poll 默认值。任何已进入网络的 submit 超时仍是 `unknown`，由 job-engine 终态收口，绝不自动重放。
+ZenMux（OpenAI Images 与 Gemini `generateContent`）、SiliconFlow、智谱、Doubao 与 Qwen `multimodal-sync` 模型的 `submit()` 成功响应本身承载完整图片，统一使用 `SYNC_IMAGE_GENERATION_TIMEOUT_MS`：默认 180 秒、只接受不大于 180 秒的正整数毫秒，非法配置回退默认值。fal、Qwen async profiles 与 Kling 的 submit 仅创建远端 task，继续使用 HTTP helper 的 30 秒 submit / 15 秒 poll 默认值。任何已进入网络的 submit 超时仍是 `unknown`，由 job-engine 终态收口，绝不自动重放。
+
+Fal 的 Banana/FLUX 私有 profile 各自声明允许字段。未知 `providerOptions` 不再透传；原版/Lite Banana 不发送 `resolution`，FLUX Pro/Flex 不伪造 `num_images`，Klein `4b` 与 `4b/base` 分别表示 distilled 与 full-CFG 方言。
 
 ### 4.2 ModelSpec 静态声明，不运行时探测
 

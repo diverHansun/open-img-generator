@@ -97,7 +97,7 @@ function buildRequestBody(
     prompt: req.prompt,
   };
 
-  if (req.count && req.count > 1) {
+  if (profile.supportsCount && req.count && req.count > 1) {
     body.num_images = req.count;
   }
   if (req.seed !== undefined) {
@@ -106,8 +106,12 @@ function buildRequestBody(
 
   body.image_size = resolveFluxSize(req, profile);
 
+  if (profile.supportsNegativePrompt && req.negativePrompt) {
+    body.negative_prompt = req.negativePrompt;
+  }
+
   for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
-    if (key !== 'image_size') {
+    if (profile.allowedProviderOptions.includes(key)) {
       body[key] = value;
     }
   }
@@ -120,26 +124,27 @@ function buildBananaRequestBody(
   profile: BananaImageProfile,
 ): Record<string, unknown> {
   const requestedResolution = req.providerOptions?.resolution;
-  const resolution =
-    typeof requestedResolution === 'string' &&
-    profile.supportedResolutions.includes(requestedResolution)
-      ? requestedResolution
-      : profile.defaultResolution;
   const outputFormat = req.providerOptions?.output_format;
   const safetyTolerance = req.providerOptions?.safety_tolerance;
   const body: Record<string, unknown> = {
     prompt: req.prompt,
     num_images: req.count ?? 1,
     aspect_ratio: req.aspectRatio ?? profile.defaultAspectRatio,
-    resolution,
     output_format:
       outputFormat === 'jpeg' || outputFormat === 'webp' ? outputFormat : 'png',
     limit_generations: true,
   };
+  if (profile.defaultResolution) {
+    body.resolution =
+      typeof requestedResolution === 'string' &&
+      profile.supportedResolutions.includes(requestedResolution)
+        ? requestedResolution
+        : profile.defaultResolution;
+  }
   if (req.seed !== undefined) body.seed = req.seed;
   if (
     typeof safetyTolerance === 'string' &&
-    ['1', '2', '3', '4', '5', '6'].includes(safetyTolerance)
+    profile.safetyToleranceValues.includes(safetyTolerance)
   ) {
     body.safety_tolerance = safetyTolerance;
   }
