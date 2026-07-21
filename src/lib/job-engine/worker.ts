@@ -2,6 +2,7 @@ import { db, listDueGenerationJobs, type DbClient } from '../db';
 import { advance } from './lifecycle';
 import type { AdvanceOutcome } from './state-machine';
 import { cleanupStoredImages } from '../storage';
+import { logSafeEvent } from '../observability/safe-logger';
 
 export type WorkerOptions = {
   db?: DbClient;
@@ -136,8 +137,8 @@ export function startWorker(options: WorkerOptions = {}): () => void {
         cleanupStoredImages({ db: client });
         lastCleanupAt = Date.now();
       }
-    } catch (err) {
-      console.error('[job-worker] tick failed', err instanceof Error ? err.message : String(err));
+    } catch {
+      logSafeEvent({ event: 'worker.tick_failed', code: 'WORKER_TICK_FAILED' });
     } finally {
       running = false;
     }
