@@ -17,6 +17,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate-db.mjs",
     "db:push": "drizzle-kit push",
+    "recover:missing-media": "vite-node scripts/recover-missing-media.ts",
     "test": "vitest run",
     "test:unit": "vitest run .unit.test.ts",
     "test:contract": "vitest run .contract.test.ts",
