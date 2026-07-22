@@ -319,6 +319,7 @@
 .parameterGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: var(--space-3);
   padding: var(--space-4) 0;
 }
