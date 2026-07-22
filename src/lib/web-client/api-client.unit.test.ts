@@ -22,6 +22,29 @@ describe('web API client', () => {
     expect(fetcher).toHaveBeenCalledWith('/api/health', undefined);
   });
 
+  it('reads and updates the local settings through the typed client', async () => {
+    const payload = {
+      settings: { imageRetentionDays: null },
+      localData: { mediaBytes: 4, databaseBytes: 2, logBytes: 3, totalBytes: 9 },
+      webCapabilities: { managesDownloadLocation: false, canOpenDataDirectory: false },
+      app: { version: '0.1.0', license: 'Apache-2.0' },
+    };
+    const response = () => new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const fetcher = vi.fn().mockImplementation(response);
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.getAppSettings()).resolves.toEqual(payload);
+    await expect(client.updateAppSettings({ imageRetentionDays: 7 })).resolves.toEqual(payload);
+    expect(fetcher).toHaveBeenLastCalledWith('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageRetentionDays: 7 }),
+    });
+  });
+
   it('preserves API validation messages for the workbench error state', async () => {
     const fetcher = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ error: 'Unsupported aspect ratio' }), {

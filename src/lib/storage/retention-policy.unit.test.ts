@@ -8,8 +8,8 @@ import {
 describe('image retention policy', () => {
   beforeEach(() => resetRetentionPolicyWarningForTests());
 
-  it('defaults to seven days and lets zero disable automatic expiry', () => {
-    expect(parseImageRetentionDays(undefined)).toEqual({ days: 7, enabled: true });
+  it('defaults to never expiring and lets zero disable automatic expiry', () => {
+    expect(parseImageRetentionDays(undefined)).toEqual({ days: 0, enabled: false });
     expect(parseImageRetentionDays('0')).toEqual({ days: 0, enabled: false });
   });
 
@@ -24,8 +24,8 @@ describe('image retention policy', () => {
     'falls back safely for %s',
     (value) => {
       const warn = vi.fn();
-      expect(parseImageRetentionDays(value, warn)).toEqual({ days: 7, enabled: true });
-      expect(parseImageRetentionDays(value, warn)).toEqual({ days: 7, enabled: true });
+      expect(parseImageRetentionDays(value, warn)).toEqual({ days: 0, enabled: false });
+      expect(parseImageRetentionDays(value, warn)).toEqual({ days: 0, enabled: false });
       expect(warn).toHaveBeenCalledTimes(1);
     },
   );
