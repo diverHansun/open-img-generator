@@ -4,6 +4,7 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "main": ".desktop-build/main.cjs",
   "engines": {
     "node": "^20.0.0 || ^22.0.0 || ^24.0.0"
   },
@@ -12,6 +13,12 @@
     "predev": "npm run db:migrate",
     "dev": "next dev",
     "build": "next build",
+    "desktop:compile": "node scripts/build-electron.mjs",
+    "desktop:dev": "npm run desktop:compile && electron .",
+    "desktop:smoke": "node scripts/smoke-desktop-runtime.mjs",
+    "desktop:package:mac": "node scripts/package-desktop.mjs arm64 x64",
+    "desktop:package:mac:arm64": "node scripts/package-desktop.mjs arm64",
+    "desktop:package:mac:x64": "node scripts/package-desktop.mjs x64",
     "prestart": "npm run db:migrate",
     "start": "next start",
     "typecheck": "tsc --noEmit",
@@ -50,6 +57,7 @@
     "yazl": "^3.3.1"
   },
   "devDependencies": {
+    "@electron/rebuild": "4.2.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
@@ -58,6 +66,9 @@
     "@types/yazl": "^3.3.1",
     "client-only": "0.0.1",
     "drizzle-kit": "^0.28.0",
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.1",
     "msw": "^2.6.0",
     "postcss": "^8.5.19",
     "tailwindcss": "^4.3.3",

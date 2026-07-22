@@ -11,7 +11,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    include: [
+      'src/**/*.test.ts',
+      'electron/**/*.test.ts',
+      'tests/**/*.test.ts',
+    ],
     pool: 'forks',
     poolOptions: {
       forks: {

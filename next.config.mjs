@@ -9,6 +9,7 @@ const distDir = hasSafeSmokeDistDir
     : undefined;
 
 const nextConfig = {
+  output: 'standalone',
   ...(distDir ? { distDir } : {}),
   serverExternalPackages: ["better-sqlite3"],
   experimental: {

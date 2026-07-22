@@ -9,6 +9,8 @@ node_modules/
 .next-smoke-*/
 out/
 build/
+.desktop-build/
+.desktop-runtime/
 
 # production
 dist/
@@ -26,6 +28,12 @@ data/
 # misc
 .DS_Store
 *.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
 .idea/
 .vscode/
 

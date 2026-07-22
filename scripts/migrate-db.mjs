@@ -1,11 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
 
+const scriptDirectory =
+  typeof __dirname === 'string'
+    ? __dirname
+    : path.dirname(fileURLToPath(import.meta.url));
 const schemaManifest = JSON.parse(
   fs.readFileSync(
-    new URL('../src/lib/db/schema-manifest.json', import.meta.url),
+    path.join(scriptDirectory, '..', 'src', 'lib', 'db', 'schema-manifest.json'),
     'utf8',
   ),
 );
@@ -47,10 +52,11 @@ function releaseMigrationLock(lockDatabase) {
   }
 }
 
-const migrationLock = acquireMigrationLock();
-let sqlite;
+async function main() {
+  const migrationLock = acquireMigrationLock();
+  let sqlite;
 
-try {
+  try {
   const fileExisted =
     databasePath !== ':memory:' && fs.existsSync(databasePath);
   const fileSize = fileExisted ? fs.statSync(databasePath).size : 0;
@@ -820,7 +826,13 @@ try {
   };
 
   process.stdout.write(`${JSON.stringify(result)}\n`);
-} finally {
-  sqlite?.close();
-  releaseMigrationLock(migrationLock);
+  } finally {
+    sqlite?.close();
+    releaseMigrationLock(migrationLock);
+  }
 }
+
+void main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
