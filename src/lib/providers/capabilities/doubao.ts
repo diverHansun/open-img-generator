@@ -82,7 +82,8 @@ function seedanceSpec(
 const specs = [
   seedreamSpec('doubao-seedream-4-0-250828', 'Seedream 4.0'),
   seedreamSpec('doubao-seedream-4-5-251128', 'Seedream 4.5'),
-  seedreamSpec('doubao-seedream-5-0-260128', 'Seedream 5.0 Lite'),
+  seedreamSpec('doubao-seedream-5-0-lite-260128', 'Seedream 5.0 Lite'),
+  seedreamSpec('doubao-seedream-5-0-260128', 'Seedream 5.0 Pro'),
   seedanceSpec('doubao-seedance-1-5-pro-251215', 'Seedance 1.5 Pro'),
   seedanceSpec('doubao-seedance-2-0-260128', 'Seedance 2.0'),
   seedanceSpec('doubao-seedance-2-0-fast-260128', 'Seedance 2.0 Fast'),

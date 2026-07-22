@@ -6,7 +6,6 @@ import { siliconflowCapabilities } from '../providers/capabilities/siliconflow';
 import { zhipuCapabilities } from '../providers/capabilities/zhipu';
 import { doubaoCapabilities } from '../providers/capabilities/doubao';
 import { qwenCapabilities } from '../providers/capabilities/qwen';
-import { klingCapabilities } from '../providers/capabilities/kling';
 
 export type ProviderCatalogEntry = {
   providerId: ProviderId;
@@ -62,13 +61,6 @@ export const providerCatalog: readonly ProviderCatalogEntry[] = [
     credentialName: 'DASHSCOPE_API_KEY',
     keyApplyUrl: 'https://bailian.console.aliyun.com/?tab=model#/api-key',
     models: qwenCapabilities,
-  },
-  {
-    providerId: 'kling',
-    displayName: 'Kling AI',
-    credentialName: 'KLING_API_KEY',
-    keyApplyUrl: 'https://app.klingai.com/global/dev/api-key',
-    models: klingCapabilities,
   },
 ];
 

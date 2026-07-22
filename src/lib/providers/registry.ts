@@ -5,7 +5,6 @@ import { SiliconFlowProvider } from './adapters/siliconflow';
 import { ZhipuProvider } from './adapters/zhipu';
 import { DoubaoProvider } from './adapters/doubao';
 import { QwenProvider } from './adapters/qwen';
-import { KlingProvider } from './adapters/kling';
 import { hasCredential } from '../user-config';
 
 const registry = new Map<ProviderId, ImageProvider>();
@@ -23,7 +22,6 @@ const providerOrder: ProviderId[] = [
   'zhipu',
   'doubao',
   'qwen',
-  'kling',
 ];
 
 const definitions: Partial<Record<ProviderId, ProviderDefinition>> = {
@@ -47,10 +45,6 @@ const definitions: Partial<Record<ProviderId, ProviderDefinition>> = {
   qwen: {
     isEnabled: () => hasCredential('DASHSCOPE_API_KEY'),
     create: () => new QwenProvider(),
-  },
-  kling: {
-    isEnabled: () => hasCredential('KLING_API_KEY'),
-    create: () => new KlingProvider(),
   },
 };
 

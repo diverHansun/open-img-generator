@@ -6,8 +6,7 @@ export type ProviderId =
   | 'siliconflow'
   | 'zhipu'
   | 'doubao'
-  | 'qwen'
-  | 'kling';
+  | 'qwen';
 
 export type ProviderMode = 'text-to-image' | 'image-to-image' | 'text-to-video';
 export type GenerationStatus =

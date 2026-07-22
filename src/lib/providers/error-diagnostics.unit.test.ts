@@ -13,7 +13,6 @@ describe('provider error diagnostics', () => {
     ['zhipu', '1301', 'content_policy', undefined],
     ['doubao', 'InputImageSensitiveContentDetected', 'content_policy', undefined],
     ['qwen', 'InvalidParameter.DataInspection', 'remote_asset_unavailable', undefined],
-    ['kling', '1102', 'billing_or_access', undefined],
   ] as const)(
     'classifies %s errors only from documented safe codes',
     (providerId, providerCode, category, httpStatus) => {

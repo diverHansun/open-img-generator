@@ -11,7 +11,6 @@ describe('registry', () => {
     delete process.env.ZHIPU_API_KEY;
     delete process.env.ARK_API_KEY;
     delete process.env.DASHSCOPE_API_KEY;
-    delete process.env.KLING_API_KEY;
   });
 
   afterEach(() => {
@@ -25,7 +24,6 @@ describe('registry', () => {
     expect(getById('zhipu')).toBeUndefined();
     expect(getById('doubao')).toBeUndefined();
     expect(getById('qwen')).toBeUndefined();
-    expect(getById('kling')).toBeUndefined();
   });
 
   it('returns fal provider when FAL_KEY is set', () => {
@@ -71,6 +69,7 @@ describe('registry', () => {
     expect(provider?.id).toBe('doubao');
     expect(provider?.capabilities.has('doubao-seedream-4-0-250828')).toBe(true);
     expect(provider?.capabilities.has('doubao-seedream-4-5-251128')).toBe(true);
+    expect(provider?.capabilities.has('doubao-seedream-5-0-lite-260128')).toBe(true);
     expect(provider?.capabilities.has('doubao-seedream-5-0-260128')).toBe(true);
   });
 
@@ -82,14 +81,6 @@ describe('registry', () => {
     expect(provider?.capabilities.has('qwen-image-plus')).toBe(true);
     expect(provider?.capabilities.has('qwen-image-2.0-pro')).toBe(true);
     expect(provider?.capabilities.has('wan2.7-image-pro')).toBe(true);
-  });
-
-  it('returns kling provider when KLING_API_KEY is set', () => {
-    process.env.KLING_API_KEY = 'test-key';
-    const provider = getById('kling');
-    expect(provider).toBeDefined();
-    expect(provider?.id).toBe('kling');
-    expect(provider?.capabilities.has('kling-v3')).toBe(true);
   });
 
   it('lists only enabled providers', () => {

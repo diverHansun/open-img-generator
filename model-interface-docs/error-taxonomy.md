@@ -2,7 +2,7 @@
 
 > 状态：第一版运行时代码契约已实施；映射仅覆盖下文明确列出的官方信号。
 > 最后核对：2026-07-20。
-> 范围：`fal`、`zenmux`、`siliconflow`、`zhipu`、`doubao`、`qwen`、`kling` 的图像生成调用。
+> 范围：`fal`、`zenmux`、`siliconflow`、`zhipu`、`doubao`、`qwen` 的图像生成调用。
 > 目标：把上游的 HTTP / 业务错误映射为可行动、可测试、且不泄漏 prompt、参考图 URL 或签名结果 URL 的产品诊断。
 
 ## 1. 为什么需要这一层
@@ -12,7 +12,7 @@ Provider 的错误语义并不等价：
 - ZenMux 用 HTTP 402 表示余额/订阅额度，并以 `error.type` 区分上游不可处理、模型不可用等原因；
 - fal 在 422 的 `detail[].type` 中明确区分内容策略、字段校验和“未生成媒体”，并通过响应头表达是否可重试；
 - 智谱与 Qwen 需要同时看 HTTP 状态和正文业务码，`429` 在不同业务码下可能是限流、余额或服务过载；
-- Doubao、Kling 的图像接口也返回业务错误字段，但公开文档的细粒度错误表需要按其版本和模型再次核实。
+- Doubao 图像接口也返回业务错误字段，但公开文档的细粒度错误表需要按其版本和模型再次核实。
 
 现有实现只在 [http-client.ts](../src/lib/providers/http-client.ts) 按 HTTP 状态映射为七类 `ProviderErrorCode`。这保证了最小实现的一致性，但会丢失上述差异：例如 ZenMux 的 402、模型不可用的 404、以及 Qwen / 智谱正文中可明确归类的内容拦截或余额错误。
 
@@ -183,29 +183,6 @@ Qwen 图像接口在提交或任务完成失败时返回 `request_id`、`code`�
 - [Model Studio Error Codes](https://help.aliyun.com/en/model-studio/error-code)
 - [Qwen Image API](https://help.aliyun.com/en/model-studio/qwen-image-api)
 
-### 4.7 Kling
-
-Kling 的官方图片接口在成功及失败信封中都定义了顶层 `code`、`message`、`request_id`。`request_id` 是官方明确的跟踪编号；运行时代码只保留结构化字段，绝不保存 `message` 或任务的 `task_status_msg`。
-
-| 官方业务码 | 安全类别 | 重试 | 说明 |
-|---|---|---|---|
-| 1000–1004 | `AUTHENTICATION` | 否 | Authorization 缺失、非法、未生效或已过期 |
-| 1100–1102 | `BILLING_OR_ACCESS` | 否 | 账户异常、欠费或资源包用尽/过期 |
-| 1103、1304 | `BILLING_OR_ACCESS` | 否 | 接口/模型权限或 IP 白名单限制 |
-| 1200、1201 | `INPUT_INVALID` | 否 | 请求参数/值非法 |
-| 1202、1203 | `MODEL_OR_ENDPOINT` | 否 | HTTP 方法或模型等资源不存在 |
-| 1300、1301 | `CONTENT_POLICY` | 否 | 平台策略或内容安全策略 |
-| 1302、1303 | `RATE_LIMITED` | 是 | 请求频率、并发或 QPS 超限 |
-| 5000、5001 | `PROVIDER_OVERLOADED` | 是 | 内部错误或维护导致暂不可用 |
-| 5002 | `REQUEST_TIMEOUT` | 是 | Provider 内部超时/积压 |
-
-`task_status=failed` 但没有机器码时，使用 `UPSTREAM_REJECTED`，不推断为内容安全或参数问题。
-
-官方来源：
-
-- [Kling Image Generation API](https://klingai.com/document-api/apiReference/model/imageGeneration)
-- [Kling API Error Codes](https://klingai.com/document-api/api/get-started/error-codes)
-
 ## 5. 与当前实现的差距
 
 | 位置 | 当前行为 | 影响 |
@@ -213,7 +190,7 @@ Kling 的官方图片接口在成功及失败信封中都定义了顶层 `code`�
 | `mapHttpStatusToErrorCode()` | 统一 400/401/402/403/404/422/429/5xx 的稳定调度码 | 新的诊断类别补足 Provider 差异，稳定码不承担细粒度用户文案 |
 | `ProviderHttpError` | 短暂持有受信响应头并提供只读读取方法 | Adapter 只提取文档定义的请求 ID；不会持久化任意 header |
 | 各 adapter `mapError()` | 解析官方 code/type 并分类 | 原始 message 仍仅在内存中用于 Adapter 调试，生命周期不持久化它 |
-| Qwen / Kling `poll()` | 对已知机器码按类别映射 | 未知终态失败保留为 `UPSTREAM_REJECTED` |
+| Qwen `poll()` | 对已知机器码按类别映射 | 未知终态失败保留为 `UPSTREAM_REJECTED` |
 | `serializeSafeJobError()` | 保存分类、已识别机器码与安全请求编号 | 写入和读出各做一次 provider-id 绑定的白名单验证 |
 | 终态生命周期 | 清除 `requestSnapshot` | 无法在历史任务中对比最终尺寸、参数键与模型配置 |
 
@@ -224,7 +201,7 @@ Kling 的官方图片接口在成功及失败信封中都定义了顶层 `code`�
 3. **分类优先于文案。** 前端只根据安全类别和 retry 状态选择本地化文案；绝不直接渲染上游 `message`。
 4. **重试由“副作用事实 + 类别”共同决定。** 4xx 明确拒绝默认不重放；429/5xx 仅在文档与响应标记允许时有界退避；结果未知仍保持“不盲目重放”。
 5. **将支持编号分层展示。** 普通用户看到行动建议；“复制诊断编号”可在高级排障区提供，管理员/日志可关联 Provider request ID。
-6. **所有 Provider 均有保守兜底。** ZenMux、fal、Zhipu、Qwen、Doubao、Kling 使用上表已核对的码表；SiliconFlow 只按其官方 HTTP 语义分类，不从自由文本猜测原因。
+6. **所有 Provider 均有保守兜底。** ZenMux、fal、Zhipu、Qwen、Doubao 使用上表已核对的码表；SiliconFlow 只按其官方 HTTP 语义分类，不从自由文本猜测原因。
 
 ## 7. 验收问题
 

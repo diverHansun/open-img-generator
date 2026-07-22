@@ -37,7 +37,7 @@ describe('job error presentation', () => {
   it('uses the provider diagnostic category and only exposes safe references', () => {
     expect(
       getJobErrorMessageKey('INVALID_REQUEST', {
-        providerId: 'kling',
+        providerId: 'doubao',
         category: 'content_policy',
         providerCode: '1301',
       }),
@@ -48,7 +48,7 @@ describe('job error presentation', () => {
         message: 'internal',
         retryable: false,
         diagnostic: {
-          providerId: 'kling',
+          providerId: 'doubao',
           category: 'content_policy',
           providerCode: '1301',
           providerRequestId: 'req-123',

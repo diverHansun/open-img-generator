@@ -7,7 +7,6 @@ export const GALLERY_PROVIDER_IDS = [
   'zhipu',
   'doubao',
   'qwen',
-  'kling',
 ] as const satisfies ReadonlyArray<ProviderId>;
 
 export type GalleryFilters = {

@@ -117,7 +117,8 @@ describe('DoubaoProvider', () => {
 
   it.each([
     ['doubao-seedream-4-5-251128', 'Seedream 4.5'],
-    ['doubao-seedream-5-0-260128', 'Seedream 5.0 Lite'],
+    ['doubao-seedream-5-0-lite-260128', 'Seedream 5.0 Lite'],
+    ['doubao-seedream-5-0-260128', 'Seedream 5.0 Pro'],
   ])('submits the selected %s model', async (model) => {
     mockFetch({ data: [{ b64_json: 'aGVsbG8=', size: '2K' }] });
 

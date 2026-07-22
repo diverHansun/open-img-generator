@@ -77,9 +77,9 @@ describe('public job error DTO', () => {
       false,
       'PROVIDER_ERROR',
       {
-        providerId: 'kling',
+        providerId: 'doubao',
         category: 'content_policy',
-        providerCode: '1301',
+        providerCode: 'SensitiveContentDetected',
         providerRequestId: 'req-123',
         rawMessage: 'prompt https://signed.example/image?token=secret',
       },
@@ -91,9 +91,9 @@ describe('public job error DTO', () => {
       message: 'Provider rejected the request',
       retryable: false,
       diagnostic: {
-        providerId: 'kling',
+        providerId: 'doubao',
         category: 'content_policy',
-        providerCode: '1301',
+        providerCode: 'SensitiveContentDetected',
         providerRequestId: 'req-123',
       },
     });

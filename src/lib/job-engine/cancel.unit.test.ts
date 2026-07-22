@@ -48,8 +48,8 @@ function seedJob(
     {
       id: 'job-cancel',
       generationId: 'gen-cancel',
-      provider: 'kling',
-      model: 'kling-v3',
+      provider: 'doubao',
+      model: 'doubao-seedream-4-0-250828',
       status: options.handle ? 'running' : 'pending',
       phase: options.handle ? 'polling' : 'queued',
       requestSnapshot: createRequestSnapshot({ prompt: 'cancel test' }),
@@ -65,11 +65,11 @@ function seedJob(
     db.update(generationJobs)
       .set({
         providerHandle: JSON.stringify({
-          providerId: 'kling',
-          model: 'kling-v3',
-          externalId: 'kling-task',
-          statusUrl: 'https://status.example.test/kling-task',
-          responseUrl: 'https://response.example.test/kling-task',
+          providerId: 'doubao',
+          model: 'doubao-seedream-4-0-250828',
+          externalId: 'doubao-task',
+          statusUrl: 'https://status.example.test/doubao-task',
+          responseUrl: 'https://response.example.test/doubao-task',
           cancelUrl: null,
           submittedAt: now,
         }),
@@ -104,8 +104,8 @@ describe('durable cancellation', () => {
     seedJob(db, { handle: true });
     const cancel = vi.fn().mockResolvedValue({ status: 'cancelled' });
     const provider: ImageProvider = {
-      id: 'kling',
-      displayName: 'Kling AI',
+      id: 'doubao',
+      displayName: 'Doubao Ark',
       capabilities: new Map(),
       submit: vi.fn(),
       cancel,
@@ -131,8 +131,8 @@ describe('durable cancellation', () => {
     const { db } = createTestDb();
     seedJob(db, { handle: true });
     vi.mocked(providers.getById).mockReturnValue({
-      id: 'kling',
-      displayName: 'Kling AI',
+      id: 'doubao',
+      displayName: 'Doubao Ark',
       capabilities: new Map(),
       submit: vi.fn(),
     } as ImageProvider);
@@ -204,8 +204,8 @@ describe('durable cancellation', () => {
         })
         .mockResolvedValueOnce({ status: 'cancelled' });
       vi.mocked(providers.getById).mockReturnValue({
-        id: 'kling',
-        displayName: 'Kling AI',
+        id: 'doubao',
+        displayName: 'Doubao Ark',
         capabilities: new Map(),
         submit: vi.fn(),
         cancel,
@@ -255,8 +255,8 @@ describe('durable cancellation', () => {
       seedJob(db, { handle: true });
       const cancel = vi.fn().mockResolvedValue({ status: remoteStatus });
       vi.mocked(providers.getById).mockReturnValue({
-        id: 'kling',
-        displayName: 'Kling AI',
+        id: 'doubao',
+        displayName: 'Doubao Ark',
         capabilities: new Map(),
         submit: vi.fn(),
         cancel,
@@ -292,8 +292,8 @@ describe('durable cancellation', () => {
       seedJob(db, { handle: true });
       const cancel = vi.fn().mockResolvedValue(undefined);
       vi.mocked(providers.getById).mockReturnValue({
-        id: 'kling',
-        displayName: 'Kling AI',
+        id: 'doubao',
+        displayName: 'Doubao Ark',
         capabilities: new Map(),
         submit: vi.fn(),
         cancel,
@@ -326,8 +326,8 @@ describe('durable cancellation', () => {
       .fn()
       .mockResolvedValue({ status: 'completed', images: [] });
     vi.mocked(providers.getById).mockReturnValue({
-      id: 'kling',
-      displayName: 'Kling AI',
+      id: 'doubao',
+      displayName: 'Doubao Ark',
       capabilities: new Map(),
       submit: vi.fn(),
       cancel,
@@ -364,8 +364,8 @@ describe('durable cancellation', () => {
         error: { code: 'TIMEOUT', message: 'still down', retryable: true },
       });
       vi.mocked(providers.getById).mockReturnValue({
-        id: 'kling',
-        displayName: 'Kling AI',
+        id: 'doubao',
+        displayName: 'Doubao Ark',
         capabilities: new Map(),
         submit: vi.fn(),
         cancel,
@@ -408,7 +408,7 @@ describe('durable cancellation', () => {
     const submitResult = deferred<{
       kind: 'async';
       handle: {
-        providerId: 'kling';
+        providerId: 'doubao';
         model: string;
         externalId: string;
         statusUrl: string;
@@ -423,8 +423,8 @@ describe('durable cancellation', () => {
     });
     const cancel = vi.fn().mockResolvedValue({ status: 'cancelled' });
     vi.mocked(providers.getById).mockReturnValue({
-      id: 'kling',
-      displayName: 'Kling AI',
+      id: 'doubao',
+      displayName: 'Doubao Ark',
       capabilities: new Map(),
       submit,
       cancel,
@@ -445,8 +445,8 @@ describe('durable cancellation', () => {
     submitResult.resolve({
       kind: 'async',
       handle: {
-        providerId: 'kling',
-        model: 'kling-v3',
+        providerId: 'doubao',
+        model: 'doubao-seedream-4-0-250828',
         externalId: 'late-handle',
         statusUrl: 'https://status.example.test/late-handle',
         responseUrl: 'https://response.example.test/late-handle',
@@ -478,8 +478,8 @@ describe('durable cancellation', () => {
     const { db, sqlite } = createTestDb();
     const job = {
       generationId: 'gen-fanout-cancel',
-      provider: 'kling',
-      model: 'kling-v3',
+      provider: 'doubao',
+      model: 'doubao-seedream-4-0-250828',
       status: 'pending' as const,
       phase: 'queued' as const,
       requestSnapshot: createRequestSnapshot({ prompt: 'cancel fanout' }),

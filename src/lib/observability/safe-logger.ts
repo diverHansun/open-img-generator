@@ -75,7 +75,7 @@ const SAFE_EVENT_ENUM = new Set([
   'preview', 'download',
 ]);
 const SAFE_PROVIDER = new Set([
-  'fal', 'zenmux', 'siliconflow', 'zhipu', 'doubao', 'qwen', 'kling', 'local',
+  'fal', 'zenmux', 'siliconflow', 'zhipu', 'doubao', 'qwen', 'local',
 ]);
 
 function safeEventString(key: string, value: string): string | undefined {

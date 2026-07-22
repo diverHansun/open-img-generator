@@ -47,7 +47,7 @@ describe('frontend-overhaul backend data integration', () => {
     process.env.USER_CONFIG_DIR = credentialsDir;
     process.env.USER_CONFIG_ENCRYPTION_KEY = 'integration-master-key';
     delete process.env.FAL_KEY;
-    delete process.env.KLING_API_KEY;
+    delete process.env.ARK_API_KEY;
     resetProviderConfigurationState();
   });
 
@@ -208,18 +208,18 @@ describe('frontend-overhaul backend data integration', () => {
   it('persists independent credential updates atomically and never returns the secret in summaries', async () => {
     const canary = 'secret-e2e-canary-integration';
 
-    const [fal, kling] = await Promise.all([
+    const [fal, doubao] = await Promise.all([
       setProviderCredential('fal', canary, db),
-      setProviderCredential('kling', 'kling-key', db),
+      setProviderCredential('doubao', 'ark-key', db),
     ]);
     const summaries = listProviderConfigurations(db);
     await removeProviderCredential('fal', db);
 
     expect(JSON.stringify(fal)).not.toContain(canary);
-    expect(JSON.stringify(kling)).not.toContain(canary);
+    expect(JSON.stringify(doubao)).not.toContain(canary);
     expect(JSON.stringify(summaries)).not.toContain(canary);
     expect(fs.readFileSync(getCredentialsFilePath(), 'utf8')).not.toContain(canary);
-    expect(readEncryptedCredentials()).toEqual({ KLING_API_KEY: 'kling-key' });
+    expect(readEncryptedCredentials()).toEqual({ ARK_API_KEY: 'ark-key' });
   });
 
   it('does not leak or overwrite credentials when encrypted storage is unavailable', async () => {

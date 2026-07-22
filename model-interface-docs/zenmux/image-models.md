@@ -377,30 +377,12 @@ curl https://zenmux.ai/api/v1/images/generations \
 
 ---
 
-### 15. KlingAI: Kling-v2
-
-| 属性 | 值 |
-|------|-----|
-| **Model ID** | `klingai/kling-v2` |
-| **开发者** | Kling AI |
-| **输入类型** | 文本、图片 |
-| **输出类型** | 图片 |
-| **输出价格** | $0.014 / 次 |
-| **可用率** | - |
-| **供应商** | KlingAI |
-| **支持的 API** | Imagen |
-
-**描述**: Kling AI 推出的图像生成模型。
-
----
-
 ## 模型价格速查
 
 按价格从低到高（仅图片输出，每张图计价模型）：
 
 | Model ID | 输出价格 | 输入价格 |
 |----------|----------|----------|
-| `klingai/kling-v2` | $0.014/次 | - |
 | `z-ai/glm-image` | $0.0146/次 | - |
 | `qwen/qwen-image-2.0` | $0.0289/次 | - |
 | `tencent/hy-image-v3.0` | $0.029/次 | - |

@@ -21,8 +21,11 @@ const KNOWN_KEYS = new Set<ProviderCredentialName>([
   'ZHIPU_API_KEY',
   'ARK_API_KEY',
   'DASHSCOPE_API_KEY',
-  'KLING_API_KEY',
 ]);
+
+// Ignore the retired provider key when loading existing encrypted stores so
+// users can continue using their remaining credentials after this upgrade.
+const RETIRED_CREDENTIAL_KEYS = new Set(['KLING_API_KEY']);
 
 function getMasterSecret(): string {
   const secret = process.env.USER_CONFIG_ENCRYPTION_KEY;
@@ -42,6 +45,7 @@ function normalizeCredentials(value: unknown): StoredCredentials {
   }
   const result: StoredCredentials = {};
   for (const [key, rawValue] of Object.entries(value)) {
+    if (RETIRED_CREDENTIAL_KEYS.has(key)) continue;
     if (!KNOWN_KEYS.has(key as ProviderCredentialName)) {
       throw new Error(`Unknown provider credential: ${key}`);
     }

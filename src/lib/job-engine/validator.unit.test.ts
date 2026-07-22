@@ -129,13 +129,13 @@ describe('validator', () => {
   });
 
   it('requires reference images for image-to-image mode', () => {
-    process.env.KLING_API_KEY = 'test-kling-key';
+    process.env.ARK_API_KEY = 'test-ark-key';
     expect(() => validate(makeParams({
-      targets: [{ provider: 'kling', model: 'kling-v3' }],
+      targets: [{ provider: 'doubao', model: 'doubao-seedream-4-0-250828' }],
       mode: 'image-to-image',
     }), { db })).toThrow('Image-to-image mode requires at least one reference image');
     expect(() => validate(makeParams({
-      targets: [{ provider: 'kling', model: 'kling-v3' }],
+      targets: [{ provider: 'doubao', model: 'doubao-seedream-4-0-250828' }],
       mode: 'image-to-image',
       referenceImages: ['data:image/png;base64,ZmFrZQ=='],
     }), { db })).not.toThrow();

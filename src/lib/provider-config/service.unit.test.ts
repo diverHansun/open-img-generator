@@ -43,20 +43,9 @@ describe('provider configuration service', () => {
   it('returns a fixed, safe catalog even before any provider is configured', () => {
     const configurations = listProviderConfigurations(testDb.db);
 
-    expect(configurations).toHaveLength(7);
+    expect(configurations).toHaveLength(6);
     expect(configurations.map((configuration) => configuration.providerId)).toEqual(
       providerCatalog.map((entry) => entry.providerId),
-    );
-    expect(configurations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          providerId: 'kling',
-          credentialName: 'KLING_API_KEY',
-          source: 'none',
-          configured: false,
-          editable: true,
-        }),
-      ]),
     );
     for (const configuration of configurations) {
       expect(configuration.keyApplyUrl).toMatch(/^https:\/\//);
@@ -97,12 +86,12 @@ describe('provider configuration service', () => {
   it('serializes simultaneous provider saves so neither key is lost', async () => {
     await Promise.all([
       setProviderCredential('fal', 'fal-user-key', testDb.db),
-      setProviderCredential('kling', 'kling-user-key', testDb.db),
+      setProviderCredential('doubao', 'ark-user-key', testDb.db),
     ]);
 
     expect(readEncryptedCredentials()).toMatchObject({
       FAL_KEY: 'fal-user-key',
-      KLING_API_KEY: 'kling-user-key',
+      ARK_API_KEY: 'ark-user-key',
     });
   });
 

@@ -27,9 +27,9 @@ ZENMUX_API_KEY=
 
 ### 网络可靠性与透明代理
 
-ZenMux、SiliconFlow、智谱和豆包这类同步生图 API 的完整生成响应默认最多等待 3 分钟；环境变量 `SYNC_IMAGE_GENERATION_TIMEOUT_MS` 只能设为不超过 `180000` 的正整数毫秒，非法值会安全回退到 3 分钟。fal、Qwen、Kling 的异步 submit/poll 预算不受此项影响；已开始但超时的生图请求仍会进入“结果未知”，系统不会自动重投可能已收费的请求。
+ZenMux、SiliconFlow、智谱和豆包这类同步生图 API 的完整生成响应默认最多等待 3 分钟；环境变量 `SYNC_IMAGE_GENERATION_TIMEOUT_MS` 只能设为不超过 `180000` 的正整数毫秒，非法值会安全回退到 3 分钟。fal、Qwen 的异步 submit/poll 预算不受此项影响；已开始但超时的生图请求仍会进入“结果未知”，系统不会自动重投可能已收费的请求。
 
-ZenMux 与豆包在官方响应允许时优先接收 Base64，并通过有界 staging 直接落入本地文件，减少一次临时 CDN 下载。fal、SiliconFlow、智谱、Qwen、Kling 仍按厂商契约返回 URL，job-engine 会在任务完成后立即执行 HTTPS/DNS/IP、大小、MIME 与 magic 校验并转存，不把临时 URL 当作历史资产。
+ZenMux 与豆包在官方响应允许时优先接收 Base64，并通过有界 staging 直接落入本地文件，减少一次临时 CDN 下载。fal、SiliconFlow、智谱、Qwen 仍按厂商契约返回 URL，job-engine 会在任务完成后立即执行 HTTPS/DNS/IP、大小、MIME 与 magic 校验并转存，不把临时 URL 当作历史资产。
 
 若本机透明代理把确认过的外部图片 CDN 解析为 `198.18.0.0/15`，可配置精确 host 白名单，例如：
 

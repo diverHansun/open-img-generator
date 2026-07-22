@@ -184,26 +184,6 @@ function classifyDoubao(code: string): ClassifiedCode | undefined {
   return undefined;
 }
 
-function classifyKling(code: string): ClassifiedCode | undefined {
-  if (isOneOf(code, ['1000', '1001', '1002', '1003', '1004'])) {
-    return classified('authentication', code);
-  }
-  if (isOneOf(code, ['1100', '1101', '1102', '1103', '1304'])) {
-    return classified('billing_or_access', code);
-  }
-  if (isOneOf(code, ['1200', '1201'])) return classified('input_invalid', code);
-  if (isOneOf(code, ['1202', '1203'])) {
-    return classified('model_or_endpoint', code);
-  }
-  if (isOneOf(code, ['1300', '1301'])) return classified('content_policy', code);
-  if (isOneOf(code, ['1302', '1303'])) return classified('rate_limited', code);
-  if (code === '5002') return classified('request_timeout', code);
-  if (isOneOf(code, ['5000', '5001'])) {
-    return classified('provider_unavailable', code);
-  }
-  return undefined;
-}
-
 function classifyProviderCode(
   providerId: ProviderId,
   providerCode: string,
@@ -219,8 +199,6 @@ function classifyProviderCode(
       return classifyZhipu(providerCode);
     case 'doubao':
       return classifyDoubao(providerCode);
-    case 'kling':
-      return classifyKling(providerCode);
     case 'siliconflow':
       return undefined;
   }
@@ -321,7 +299,7 @@ export function toSafeProviderDiagnostic(value: unknown): ProviderDiagnostic | u
   const category = record.category;
   if (
     typeof providerId !== 'string' ||
-    !isOneOf(providerId, ['fal', 'zenmux', 'siliconflow', 'zhipu', 'doubao', 'qwen', 'kling']) ||
+    !isOneOf(providerId, ['fal', 'zenmux', 'siliconflow', 'zhipu', 'doubao', 'qwen']) ||
     typeof category !== 'string' ||
     !(PROVIDER_DIAGNOSTIC_CATEGORIES as readonly string[]).includes(category)
   ) {

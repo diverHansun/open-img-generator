@@ -2,7 +2,6 @@ import { isIP } from 'node:net';
 
 import { doubaoModelSpecs } from '../providers/capabilities/doubao';
 import { falModelSpecs } from '../providers/capabilities/fal';
-import { klingModelSpecs } from '../providers/capabilities/kling';
 import { qwenModelSpecs } from '../providers/capabilities/qwen';
 import { siliconflowModelSpecs } from '../providers/capabilities/siliconflow';
 import { zenmuxModelSpecs } from '../providers/capabilities/zenmux';
@@ -20,11 +19,10 @@ function modelSpec(provider: ProviderId, model: string): ProviderModelSpec<unkno
   const specs: ReadonlyMap<string, ProviderModelSpec<unknown>> =
     provider === 'doubao' ? doubaoModelSpecs
       : provider === 'fal' ? falModelSpecs
-        : provider === 'kling' ? klingModelSpecs
-          : provider === 'qwen' ? qwenModelSpecs
-            : provider === 'siliconflow' ? siliconflowModelSpecs
-              : provider === 'zenmux' ? zenmuxModelSpecs
-                : zhipuModelSpecs;
+        : provider === 'qwen' ? qwenModelSpecs
+          : provider === 'siliconflow' ? siliconflowModelSpecs
+            : provider === 'zenmux' ? zenmuxModelSpecs
+              : zhipuModelSpecs;
   return specs.get(model);
 }
 
