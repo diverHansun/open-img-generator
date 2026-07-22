@@ -293,4 +293,5 @@ export type ProviderConfiguration = {
   availableModelCount: number;
   editable: boolean;
   keyApplyUrl: string;
+  credentialStorageMode: 'encrypted-file' | 'session-memory';
 };

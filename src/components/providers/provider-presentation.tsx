@@ -13,18 +13,33 @@ import type {
 import styles from './providers.module.css';
 import { getProviderMarkText, getProviderModelCount } from './provider-view';
 
-function sourceTranslationKey(source: CredentialSource) {
+function sourceTranslationKey(
+  source: CredentialSource,
+  credentialStorageMode: ProviderConfiguration['credentialStorageMode'],
+) {
   if (source === 'env') return 'provider.source.env' as const;
+  if (
+    source === 'user-config' &&
+    credentialStorageMode === 'session-memory'
+  ) {
+    return 'provider.source.sessionMemory' as const;
+  }
   if (source === 'user-config') return 'provider.source.userConfig' as const;
   return 'provider.source.none' as const;
 }
 
-export function CredentialSourceLabel({ source }: { source: CredentialSource }) {
+export function CredentialSourceLabel({
+  source,
+  credentialStorageMode,
+}: {
+  source: CredentialSource;
+  credentialStorageMode: ProviderConfiguration['credentialStorageMode'];
+}) {
   const { t } = useLocale();
   return (
     <span className={styles.sourceLabel} data-source={source}>
       <span aria-hidden="true" />
-      {t(sourceTranslationKey(source))}
+      {t(sourceTranslationKey(source, credentialStorageMode))}
     </span>
   );
 }
@@ -110,7 +125,10 @@ export function ProviderDirectory({
               <strong>{configuration.displayName}</strong>
             </div>
             <code className={styles.credentialName}>{configuration.credentialName}</code>
-            <CredentialSourceLabel source={configuration.source} />
+            <CredentialSourceLabel
+              source={configuration.source}
+              credentialStorageMode={configuration.credentialStorageMode}
+            />
             <ProviderModelSummary configuration={configuration} />
             <div className={styles.rowActions}>
               <ProviderApplicationLink configuration={configuration} compact />

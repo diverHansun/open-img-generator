@@ -19,6 +19,7 @@ const configuration: ProviderConfiguration = {
   availableModelCount: 2,
   editable: true,
   keyApplyUrl: 'https://fal.ai/dashboard/keys',
+  credentialStorageMode: 'encrypted-file',
 };
 
 describe('provider view helpers', () => {

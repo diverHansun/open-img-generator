@@ -37,6 +37,7 @@ function configuration(
     availableModelCount: 1,
     editable: !configured,
     keyApplyUrl: 'https://fal.ai/dashboard/keys',
+    credentialStorageMode: 'encrypted-file',
     ...overrides,
   };
 }

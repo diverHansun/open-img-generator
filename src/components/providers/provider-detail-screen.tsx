@@ -41,8 +41,17 @@ type SubmissionState =
   | { status: 'success'; kind: 'saved' | 'cleared' }
   | { status: 'error'; message: TranslationKey };
 
-function sourceTranslationKey(source: CredentialSource): TranslationKey {
+function sourceTranslationKey(
+  source: CredentialSource,
+  credentialStorageMode: ProviderConfiguration['credentialStorageMode'],
+): TranslationKey {
   if (source === 'env') return 'provider.source.env';
+  if (
+    source === 'user-config' &&
+    credentialStorageMode === 'session-memory'
+  ) {
+    return 'provider.source.sessionMemory';
+  }
   if (source === 'user-config') return 'provider.source.userConfig';
   return 'provider.source.none';
 }
@@ -252,9 +261,19 @@ export function ProviderDetailScreen({
               title={configuration.displayName}
               description={t('providerDetail.configurationSummary', {
                 credential: configuration.credentialName,
-                source: t(sourceTranslationKey(configuration.source)),
+                source: t(
+                  sourceTranslationKey(
+                    configuration.source,
+                    configuration.credentialStorageMode,
+                  ),
+                ),
               })}
-              actions={<CredentialSourceLabel source={configuration.source} />}
+              actions={
+                <CredentialSourceLabel
+                  source={configuration.source}
+                  credentialStorageMode={configuration.credentialStorageMode}
+                />
+              }
             />
           </div>
 
@@ -265,6 +284,8 @@ export function ProviderDetailScreen({
                 <h2>
                   {configuration.source === 'env'
                     ? t('providerDetail.environmentManagedTitle')
+                    : configuration.credentialStorageMode === 'session-memory'
+                      ? t('providerDetail.sessionCredentialTitle')
                     : configuration.source === 'user-config'
                       ? t('providerDetail.localCredentialTitle')
                       : t('providerDetail.notConfiguredTitle')}
@@ -291,8 +312,18 @@ export function ProviderDetailScreen({
                   void submitCredential(event, configuration)
                 }
               >
+                {configuration.credentialStorageMode === 'session-memory' ? (
+                  <InlineNotice
+                    variant="warning"
+                    title={t('providerDetail.sessionCredentialWarningTitle')}
+                  >
+                    <p>{t('providerDetail.sessionCredentialWarning')}</p>
+                  </InlineNotice>
+                ) : null}
                 <p className={styles.formIntroduction}>
-                  {configuration.source === 'user-config'
+                  {configuration.credentialStorageMode === 'session-memory'
+                    ? t('providerDetail.sessionCredentialDescription')
+                    : configuration.source === 'user-config'
                     ? t('providerDetail.localConfiguredDescription')
                     : t('providerDetail.notConfiguredDescription')}
                 </p>
@@ -355,7 +386,9 @@ export function ProviderDetailScreen({
                       title={
                         submission.kind === 'cleared'
                           ? t('providerDetail.cleared')
-                          : t('providerDetail.saved')
+                          : configuration.credentialStorageMode === 'session-memory'
+                            ? t('providerDetail.savedForSession')
+                            : t('providerDetail.saved')
                       }
                     />
                   </div>

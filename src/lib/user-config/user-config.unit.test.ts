@@ -7,6 +7,8 @@ import {
   getCredentialsFilePath,
   hasCredential,
   readEncryptedCredentials,
+  readCredentials,
+  resetSessionCredentials,
   resolveCredential,
   writeCredentials,
 } from './index';
@@ -21,6 +23,8 @@ describe('encrypted user credentials', () => {
     process.env.USER_CONFIG_ENCRYPTION_KEY = 'test-master-secret';
     delete process.env.ARK_API_KEY;
     delete process.env.FAL_KEY;
+    delete process.env.USER_CONFIG_STORAGE_MODE;
+    resetSessionCredentials();
     clearCredentialCache();
   });
 
@@ -83,6 +87,20 @@ describe('encrypted user credentials', () => {
     delete process.env.USER_CONFIG_ENCRYPTION_KEY;
     clearCredentialCache();
     expect(() => readEncryptedCredentials()).toThrow('USER_CONFIG_ENCRYPTION_KEY');
+  });
+
+  it('keeps session-memory credentials usable without writing a file', () => {
+    process.env.USER_CONFIG_STORAGE_MODE = 'session-memory';
+    delete process.env.USER_CONFIG_ENCRYPTION_KEY;
+
+    writeCredentials({ FAL_KEY: 'temporary-key' });
+
+    expect(readCredentials()).toEqual({ FAL_KEY: 'temporary-key' });
+    expect(resolveCredential('FAL_KEY')).toBe('temporary-key');
+    expect(fs.existsSync(getCredentialsFilePath())).toBe(false);
+
+    resetSessionCredentials();
+    expect(resolveCredential('FAL_KEY')).toBeUndefined();
   });
 
   it('rejects unknown credential names', () => {

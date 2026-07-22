@@ -6,6 +6,7 @@ import { siliconflowCapabilities } from '../providers/capabilities/siliconflow';
 import { zhipuCapabilities } from '../providers/capabilities/zhipu';
 import { doubaoCapabilities } from '../providers/capabilities/doubao';
 import { qwenCapabilities } from '../providers/capabilities/qwen';
+import { providerMetadata } from './provider-metadata';
 
 export type ProviderCatalogEntry = {
   providerId: ProviderId;
@@ -19,50 +20,20 @@ export type ProviderCatalogEntry = {
  * Static product metadata only. It intentionally has no remote health,
  * credential, account, or billing state, so it is safe to return to clients.
  */
-export const providerCatalog: readonly ProviderCatalogEntry[] = [
-  {
-    providerId: 'fal',
-    displayName: 'fal.ai',
-    credentialName: 'FAL_KEY',
-    keyApplyUrl: 'https://fal.ai/dashboard/keys',
-    models: falCapabilities,
-  },
-  {
-    providerId: 'zenmux',
-    displayName: 'ZenMux',
-    credentialName: 'ZENMUX_API_KEY',
-    keyApplyUrl: 'https://zenmux.ai/console/api-keys',
-    models: zenmuxCapabilities,
-  },
-  {
-    providerId: 'siliconflow',
-    displayName: 'SiliconFlow',
-    credentialName: 'SILICONFLOW_API_KEY',
-    keyApplyUrl: 'https://cloud.siliconflow.cn/account/ak',
-    models: siliconflowCapabilities,
-  },
-  {
-    providerId: 'zhipu',
-    displayName: 'Zhipu AI',
-    credentialName: 'ZHIPU_API_KEY',
-    keyApplyUrl: 'https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys',
-    models: zhipuCapabilities,
-  },
-  {
-    providerId: 'doubao',
-    displayName: 'Doubao Ark',
-    credentialName: 'ARK_API_KEY',
-    keyApplyUrl: 'https://console.volcengine.com/ark',
-    models: doubaoCapabilities,
-  },
-  {
-    providerId: 'qwen',
-    displayName: 'Qwen',
-    credentialName: 'DASHSCOPE_API_KEY',
-    keyApplyUrl: 'https://bailian.console.aliyun.com/?tab=model#/api-key',
-    models: qwenCapabilities,
-  },
-];
+const capabilitiesByProvider: Record<ProviderId, ProviderCapabilities[]> = {
+  fal: falCapabilities,
+  zenmux: zenmuxCapabilities,
+  siliconflow: siliconflowCapabilities,
+  zhipu: zhipuCapabilities,
+  doubao: doubaoCapabilities,
+  qwen: qwenCapabilities,
+};
+
+export const providerCatalog: readonly ProviderCatalogEntry[] =
+  providerMetadata.map((metadata) => ({
+    ...metadata,
+    models: capabilitiesByProvider[metadata.providerId],
+  }));
 
 export function isKnownProviderId(value: string): value is ProviderId {
   return providerCatalog.some((entry) => entry.providerId === value);

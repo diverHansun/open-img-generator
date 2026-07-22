@@ -27,6 +27,7 @@ describe('provider configuration service', () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-config-test-'));
     process.env.USER_CONFIG_DIR = tempDir;
     process.env.USER_CONFIG_ENCRYPTION_KEY = 'provider-config-test-master-key';
+    delete process.env.USER_CONFIG_STORAGE_MODE;
     for (const key of providerCatalog.map((entry) => entry.credentialName)) {
       delete process.env[key];
     }
@@ -53,6 +54,7 @@ describe('provider configuration service', () => {
         'availableModelCount',
         'configured',
         'credentialName',
+        'credentialStorageMode',
         'displayName',
         'editable',
         'enabledModelCount',
@@ -62,6 +64,20 @@ describe('provider configuration service', () => {
         'source',
       ]);
     }
+  });
+
+  it('reports session-memory mode without persisting the submitted key', async () => {
+    process.env.USER_CONFIG_STORAGE_MODE = 'session-memory';
+    delete process.env.USER_CONFIG_ENCRYPTION_KEY;
+
+    const saved = await setProviderCredential('fal', 'temporary-key', testDb.db);
+
+    expect(saved).toMatchObject({
+      source: 'user-config',
+      configured: true,
+      credentialStorageMode: 'session-memory',
+    });
+    expect(fs.existsSync(getCredentialsFilePath())).toBe(false);
   });
 
   it('writes and removes only the target encrypted key without exposing a canary', async () => {

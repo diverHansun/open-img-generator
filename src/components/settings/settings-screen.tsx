@@ -9,6 +9,10 @@ import { InlineNotice } from '@/components/ui/inline-notice';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
+  getDesktopBridge,
+  type DesktopRuntimeInfo,
+} from '@/lib/desktop-bridge';
+import {
   getBrowserWebClientRuntime,
   type AppSettingsView,
 } from '@/lib/web-client';
@@ -25,6 +29,7 @@ function toError(cause: unknown): Error {
 export function SettingsScreen({ projectId }: { projectId: string }) {
   const { locale, t } = useLocale();
   const client = React.useMemo(() => getBrowserWebClientRuntime().client, []);
+  const desktopBridge = React.useMemo(() => getDesktopBridge(), []);
   const [view, setView] = React.useState<AppSettingsView | null>(null);
   const [autoCleanup, setAutoCleanup] = React.useState(false);
   const [days, setDays] = React.useState('7');
@@ -32,6 +37,9 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState<Error | null>(null);
   const [saved, setSaved] = React.useState(false);
+  const [desktopInfo, setDesktopInfo] = React.useState<DesktopRuntimeInfo | null>(null);
+  const [desktopBusy, setDesktopBusy] = React.useState(false);
+  const [desktopError, setDesktopError] = React.useState<Error | null>(null);
 
   const applyView = React.useCallback((nextView: AppSettingsView) => {
     setView(nextView);
@@ -56,6 +64,37 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  React.useEffect(() => {
+    if (!desktopBridge) return;
+    let active = true;
+    void desktopBridge
+      .getRuntimeInfo()
+      .then((info) => {
+        if (active) setDesktopInfo(info);
+      })
+      .catch((cause) => {
+        if (active) setDesktopError(toError(cause));
+      });
+    return () => {
+      active = false;
+    };
+  }, [desktopBridge]);
+
+  async function runDesktopAction(
+    action: () => Promise<DesktopRuntimeInfo | void>,
+  ) {
+    setDesktopBusy(true);
+    setDesktopError(null);
+    try {
+      const result = await action();
+      if (result) setDesktopInfo(result);
+    } catch (cause) {
+      setDesktopError(toError(cause));
+    } finally {
+      setDesktopBusy(false);
+    }
+  }
 
   const saveRetention = async () => {
     const parsedDays = Number(days);
@@ -102,6 +141,15 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
           action={!saving ? <Button type="button" variant="secondary" onClick={() => void load()}>{t('common.retry')}</Button> : undefined}
         >
           <p>{error.message}</p>
+        </InlineNotice>
+      ) : null}
+
+      {desktopError ? (
+        <InlineNotice
+          variant="error"
+          title={t('settings.desktop.actionError')}
+        >
+          <p>{desktopError.message}</p>
         </InlineNotice>
       ) : null}
 
@@ -173,14 +221,70 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
 
           <section className={styles.section} aria-labelledby="download-title">
             <h2 id="download-title">{t('settings.download.title')}</h2>
-            <p>{t('settings.download.browserManaged')}</p>
-            <p className={styles.muted}>{t('settings.download.desktopOnly')}</p>
+            {desktopInfo && desktopBridge ? (
+              <>
+                <p>{t('settings.download.desktopManaged')}</p>
+                <code className={styles.pathValue}>{desktopInfo.downloadDirectory}</code>
+                <div className={styles.sectionActions}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={desktopBusy}
+                    onClick={() =>
+                      void runDesktopAction(() =>
+                        desktopBridge.chooseDownloadDirectory(),
+                      )
+                    }
+                  >
+                    {t('settings.download.choose')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={
+                      desktopBusy ||
+                      desktopInfo.downloadDirectory ===
+                        desktopInfo.defaultDownloadDirectory
+                    }
+                    onClick={() =>
+                      void runDesktopAction(() =>
+                        desktopBridge.resetDownloadDirectory(),
+                      )
+                    }
+                  >
+                    {t('settings.download.reset')}
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p>{t('settings.download.browserManaged')}</p>
+                <p className={styles.muted}>{t('settings.download.desktopOnly')}</p>
+              </>
+            )}
           </section>
 
           <section className={styles.section} aria-labelledby="directory-title">
             <h2 id="directory-title">{t('settings.dataDirectory.title')}</h2>
-            <p>{t('settings.dataDirectory.description')}</p>
-            <Button type="button" variant="secondary" disabled title={t('settings.dataDirectory.desktopOnly')}>
+            <p>
+              {desktopInfo
+                ? t('settings.dataDirectory.desktopDescription')
+                : t('settings.dataDirectory.description')}
+            </p>
+            {desktopInfo ? (
+              <code className={styles.pathValue}>{desktopInfo.dataDirectory}</code>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!desktopBridge || !desktopInfo || desktopBusy}
+              title={!desktopBridge ? t('settings.dataDirectory.desktopOnly') : undefined}
+              onClick={() =>
+                desktopBridge
+                  ? void runDesktopAction(() => desktopBridge.openDataDirectory())
+                  : undefined
+              }
+            >
               {t('settings.dataDirectory.open')}
             </Button>
           </section>

@@ -9,7 +9,9 @@ import { db } from '../db';
 import { listModelPreferences } from '../library/model-prefs';
 import {
   clearCredentialCache,
-  readEncryptedCredentials,
+  getCredentialStorageMode,
+  readCredentials,
+  resetSessionCredentials,
   writeCredentials,
   type ProviderCredentialName,
   type StoredCredentials,
@@ -30,13 +32,14 @@ export type ProviderConfiguration = {
   availableModelCount: number;
   editable: boolean;
   keyApplyUrl: string;
+  credentialStorageMode: 'encrypted-file' | 'session-memory';
 };
 
 let credentialWriteTail: Promise<void> = Promise.resolve();
 
 function readStoredCredentials(): StoredCredentials {
   try {
-    return readEncryptedCredentials();
+    return readCredentials();
   } catch {
     throw new ConfigurationUnavailableError(
       'Encrypted credential storage is unavailable. Check USER_CONFIG_ENCRYPTION_KEY.',
@@ -73,6 +76,7 @@ function toConfiguration(
     availableModelCount: entry.models.length,
     editable: source !== 'env',
     keyApplyUrl: entry.keyApplyUrl,
+    credentialStorageMode: getCredentialStorageMode(),
   };
 }
 
@@ -188,4 +192,5 @@ export function removeProviderCredential(
 export function resetProviderConfigurationState(): void {
   credentialWriteTail = Promise.resolve();
   clearCredentialCache();
+  resetSessionCredentials();
 }

@@ -48,6 +48,7 @@ const configuration: ProviderConfiguration = {
   availableModelCount: 0,
   editable: true,
   keyApplyUrl: 'https://fal.ai/dashboard/keys',
+  credentialStorageMode: 'encrypted-file',
 };
 
 describe('frontend-overhaul API contracts', () => {

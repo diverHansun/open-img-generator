@@ -39,7 +39,7 @@ function deriveKey(secret: string, salt: Buffer): Buffer {
   return crypto.scryptSync(secret, salt, 32);
 }
 
-function normalizeCredentials(value: unknown): StoredCredentials {
+export function normalizeCredentials(value: unknown): StoredCredentials {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Encrypted credentials payload must be an object');
   }

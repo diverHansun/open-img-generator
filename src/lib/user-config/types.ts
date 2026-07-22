@@ -7,3 +7,5 @@ export type ProviderCredentialName =
   | 'DASHSCOPE_API_KEY';
 
 export type StoredCredentials = Partial<Record<ProviderCredentialName, string>>;
+
+export type CredentialStorageMode = 'encrypted-file' | 'session-memory';
