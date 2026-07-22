@@ -11,6 +11,7 @@ import {
   ImagePlus,
   Menu,
   PlugZap,
+  Settings,
 } from 'lucide-react';
 
 import { LocaleSwitcher } from '@/components/i18n/locale-switcher';
@@ -43,6 +44,7 @@ const navigation: Array<{
   { segment: 'gallery', label: 'nav.gallery', icon: GalleryVerticalEnd },
   { segment: 'models', label: 'nav.models', icon: Boxes },
   { segment: 'providers', label: 'nav.providers', icon: PlugZap },
+  { segment: 'settings', label: 'nav.settings', icon: Settings },
 ];
 
 export type WorkspaceContextValue = Readonly<{

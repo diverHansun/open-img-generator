@@ -96,4 +96,4 @@ worker 定期调用 `cleanupStoredImages()`；该调用先校验 DB/root ownersh
 | ALLOW_INSECURE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许 `http:`；生产保持关闭 |
 | ALLOW_PRIVATE_IMAGE_URLS | `false` | 仅本地 fake-provider 允许私网/loopback 地址；生产保持关闭 |
 | TRUSTED_PROXY_IMAGE_HOSTS | 空 | 透明代理把已验证外部 HTTPS CDN 映射为 `198.18.0.0/15` 时的逗号分隔精确 host 列表；不是通配符或私网 bypass |
-| IMAGE_RETENTION_DAYS | `7` | 未收藏图片自动保留天数；`0` 关闭自动过期，合法上限 36500 |
+| IMAGE_RETENTION_DAYS | `0` | 未保存 Web 设置时的未收藏图片保留天数回退值；`0` 关闭自动过期，合法上限 36500 |

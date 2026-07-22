@@ -212,6 +212,26 @@ export type Page<T> = {
   nextCursor: string | null;
 };
 
+export type AppSettingsView = {
+  settings: {
+    imageRetentionDays: number | null;
+  };
+  localData: {
+    mediaBytes: number;
+    databaseBytes: number;
+    logBytes: number;
+    totalBytes: number;
+  };
+  webCapabilities: {
+    managesDownloadLocation: boolean;
+    canOpenDataDirectory: boolean;
+  };
+  app: {
+    version: string;
+    license: string;
+  };
+};
+
 export type HistoryGroup = {
   session: Session;
   generationCount: number;

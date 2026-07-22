@@ -11,7 +11,7 @@
 5. 扫描 `LOCAL_STORAGE_DIR`，未被 image、video 或 durable staging 引用且超过 `orphanGraceMs` 的文件才视为孤儿；marker 与活锁永不作为孤儿删除。
 6. 收藏关系参与查询和删除 CAS；外部文件缺失只写 `storage_missing`，不再删除 favorite。
 
-默认 `IMAGE_RETENTION_DAYS=7`，设为 `0` 禁用自动过期清理；非法值回退 7 天并记录不含路径/密钥的 warning。默认孤儿宽限期为 1 小时。所有路径继续经过 storage root canonicalize，阻止路径穿越。
+默认永不自动过期清理。Web 设置写入 `settings.json` 后，指定天数会覆盖部署环境的回退变量 `IMAGE_RETENTION_DAYS`；其值为 `0` 时同样禁用自动过期清理。非法环境变量回退为永不清理并记录不含路径/密钥的 warning。默认孤儿宽限期为 1 小时。所有路径继续经过 storage root canonicalize，阻止路径穿越。
 
 ## 下载安全边界
 

@@ -10,7 +10,7 @@ export type LocalLogSinkOptions = {
   rotations?: number;
 };
 
-function logDirectory(options: LocalLogSinkOptions): string {
+export function getLocalLogDirectory(options: LocalLogSinkOptions = {}): string {
   return path.resolve(options.directory ?? process.env.APP_LOG_DIR ?? './data/logs');
 }
 
@@ -41,7 +41,7 @@ export function appendLocalLogLine(
   ) return false;
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const rotations = options.rotations ?? DEFAULT_ROTATIONS;
-  const directory = logDirectory(options);
+  const directory = getLocalLogDirectory(options);
   const file = path.join(directory, 'app.jsonl');
   const bytes = Buffer.byteLength(line + '\n');
   try {

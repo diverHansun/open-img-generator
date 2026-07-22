@@ -13,7 +13,7 @@ import {
 } from '../db';
 import { db } from '../db';
 import { getStorageRoot, removeStoredFile } from './index';
-import { parseImageRetentionDays } from './retention-policy';
+import { getImageRetentionPolicy } from '../app-settings';
 import {
   acquireCleanupLock,
   isStorageInternalPath,
@@ -75,7 +75,7 @@ function stagedIdsFromSnapshots(snapshots: string[]): Set<string> {
 
 export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult {
   const client = options.db ?? db;
-  const retentionDays = options.retentionDays ?? parseImageRetentionDays().days;
+  const retentionDays = options.retentionDays ?? getImageRetentionPolicy().days;
   const orphanGraceMs = options.orphanGraceMs ?? Number(process.env.IMAGE_ORPHAN_GRACE_MS ?? 3_600_000);
   const now = Date.now();
   const runId = crypto.randomUUID();

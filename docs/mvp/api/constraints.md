@@ -441,7 +441,7 @@ pool = registry.enabledModels
 - `POST /api/generations/:id/cancel` 是幂等的本地取消入口。一个短 transaction 批量写取消标记、phase 与 Generation 聚合，并清除此前 poll retry/error；worker 之后才对已有 handle 尽力调用 provider cancel。retryable remote cancel 最多 3 次、总窗口 30 秒，穷尽后仍保持本地 `cancelled` 并写 `RETRY_EXHAUSTED`；Kling 标准图片 API 没有远程取消端点，因此保留 `CANCEL_UNSUPPORTED` 诊断而不伪造成功。
 - job-engine 不设置进程内 Provider semaphore、等待队列或 Generation admission ceiling。合法、去重且 capability 匹配的 targets 全部先持久化；`WORKER_BATCH_SIZE` 只限制单页 Promise fan-out。只有 Provider 明确返回 `RATE_LIMITED + retryable + not_started/rejected` 时才进入可取消、跨重启恢复且不消耗普通 retry budget 的持久等待；提交超时、断线、5xx 或其他不确定结果仍进入 `outcome_unknown`，禁止盲目重投。
 - Node worker 默认启动；只有 `JOB_WORKER_ENABLED=false` 才关闭。它在 generation **POST** durable admission 后首次进入 Node 进程时 bootstrap（不依赖 Next instrumentation 的 Edge bundle），generation/session/history 列表 GET 不因读取而启动 worker。`WORKER_INTERVAL_MS`、`WORKER_BATCH_SIZE` 控制扫描，`IMAGE_CLEANUP_INTERVAL_MS` 触发清理。关闭 worker 时仍可由详情 GET 按 due/lease 规则辅助推进。
-- `IMAGE_RETENTION_DAYS=7`（设为 `0` 禁用自动过期）把过期未收藏图片改为 `retention_expired` 墓碑后删除字节；Generation/Job/Prompt/Provider error 继续保留。单图 DELETE 写 `user_deleted`，外部文件缺失写 `storage_missing`；三类不可用读取均返回 typed 410，unknown id 才返回 404。孤儿文件需超过 `IMAGE_ORPHAN_GRACE_MS` 才删除，收藏永不因保留期被删除。
+- 默认永不自动清理未收藏图片；Web 设置写入非敏感的 `settings.json` 后，指定天数以上的既有和未来未收藏图片会在下一轮清理时改为 `retention_expired` 墓碑并删除字节。无 Web 设置时，`IMAGE_RETENTION_DAYS` 是部署环境的回退值（`0` 同样禁用自动过期）。Generation/Job/Prompt/Provider error 继续保留。单图 DELETE 写 `user_deleted`，外部文件缺失写 `storage_missing`；三类不可用读取均返回 typed 410，unknown id 才返回 404。孤儿文件需超过 `IMAGE_ORPHAN_GRACE_MS` 才删除，收藏永不因保留期被删除。
 - `APP_AUTH_TOKEN` 未配置时保持本地开发兼容；配置后 API middleware 要求 Bearer 或 `/api/auth/session` 建立的 HttpOnly cookie，health 与 session bootstrap 路由公开。
 
 ---

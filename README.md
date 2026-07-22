@@ -43,7 +43,7 @@ TRUSTED_PROXY_IMAGE_HOSTS=v3b.fal.media
 
 ### 图片保留与导出
 
-图片字节保存在 `LOCAL_STORAGE_DIR`（默认 `./data/images`），SQLite 只保存 Generation/Job、图片元数据和清理墓碑。未收藏图片默认保留 7 天；`IMAGE_RETENTION_DAYS=0` 可关闭自动过期。收藏图片持续保留，直到用户主动删除；文件若在应用外丢失，收藏意图仍保留并显示“图片已过期清理”。下载只导出一份副本，不延长应用内部副本的保留期；自动过期或单图删除后，历史仍保留并显示对应原因。
+图片字节保存在 `LOCAL_STORAGE_DIR`（默认 `./data/images`），SQLite 只保存 Generation/Job、图片元数据和清理墓碑。未收藏图片默认永不自动清理；在 Web 的“设置”中启用后，超过指定天数的既有和未来未收藏图片会在下一轮清理时删除。收藏图片持续保留，直到用户主动删除；文件若在应用外丢失，收藏意图仍保留并显示“图片已过期清理”。下载只导出一份副本，不延长应用内部副本的保留期；自动过期或单图删除后，历史仍保留并显示对应原因。
 
 存储根目录通过 `.open-image-storage.json` 与当前 `DATABASE_URL` 配对；不匹配时写入、删除和自动清理会安全拒绝，避免测试数据库或第二实例误删真实媒体。安全审计日志默认写入 `APP_LOG_DIR=./data/logs`，采用 5 MiB 当前文件加 3 份轮转；设置 `APP_FILE_LOG_ENABLED=0` 可只保留 stderr。日志不记录 API Key、Prompt、签名 URL、原始异常或绝对路径。
 
@@ -66,3 +66,11 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+## 许可证
+
+本项目使用 [Apache License 2.0](./LICENSE)。第三方 Provider 的服务条款、商标和生成内容权利不由本项目许可证授予。
+
+## 发布与版本
+
+当前 MVP 版本为 `0.1.0`。版本号以 `package.json` 为唯一来源，设置页和未来桌面包都会读取它；发布流程与校验见 [docs/releasing.md](./docs/releasing.md)。

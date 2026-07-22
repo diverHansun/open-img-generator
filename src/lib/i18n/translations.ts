@@ -6,6 +6,7 @@ import { historyEn, historyZhCN } from './messages/history';
 import { homeEn, homeZhCN } from './messages/home';
 import { modelsEn, modelsZhCN } from './messages/models';
 import { providersEn, providersZhCN } from './messages/providers';
+import { settingsEn, settingsZhCN } from './messages/settings';
 
 export const zhCN = {
   ...commonZhCN,
@@ -15,6 +16,7 @@ export const zhCN = {
   ...galleryZhCN,
   ...modelsZhCN,
   ...providersZhCN,
+  ...settingsZhCN,
   ...dialogsZhCN,
 } as const;
 
@@ -28,5 +30,6 @@ export const en: Record<TranslationKey, string> = {
   ...galleryEn,
   ...modelsEn,
   ...providersEn,
+  ...settingsEn,
   ...dialogsEn,
 };

@@ -6,6 +6,7 @@ export const WORKSPACE_SECTIONS = [
   'gallery',
   'models',
   'providers',
+  'settings',
 ] as const;
 
 export type WorkspaceSection = (typeof WORKSPACE_SECTIONS)[number];

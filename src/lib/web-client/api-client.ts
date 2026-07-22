@@ -15,6 +15,7 @@ import type {
   GenerationSummary,
   SubmitGenerationRequest,
   SubmitGenerationResponse,
+  AppSettingsView,
 } from './types';
 
 export class ApiClientError extends Error {
@@ -188,6 +189,18 @@ export function createApiClient(fetcher: FetchLike = fetch) {
         fetcher,
         '/api/health',
         requestInitWithSignal(options),
+      ),
+    getAppSettings: (options?: ApiRequestOptions) =>
+      requestJson<AppSettingsView>(
+        fetcher,
+        '/api/settings',
+        requestInitWithSignal(options),
+      ),
+    updateAppSettings: (input: { imageRetentionDays: number | null }) =>
+      requestJson<AppSettingsView>(
+        fetcher,
+        '/api/settings',
+        jsonInit('PUT', input),
       ),
     listProviders: (options?: ApiRequestOptions) =>
       requestJson<ProviderInfo[]>(
