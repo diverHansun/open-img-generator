@@ -193,6 +193,7 @@ function parseImages(payload: unknown, requestedSize: string): ProviderImageRef[
             : 'image/jpeg';
     if (!url && !base64) return [];
     return [{
+      source: url ? 'remote' as const : 'inline' as const,
       url: url || `data:${contentType};base64,${base64}`,
       width: dimensions.width ?? fallbackDimensions.width,
       height: dimensions.height ?? fallbackDimensions.height,

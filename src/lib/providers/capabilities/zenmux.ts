@@ -72,6 +72,7 @@ function geminiSpec(
       defaultImageSize: options.defaultImageSize,
       supportedImageSizes: options.imageSizes,
     },
+    imageOutput: { delivery: 'inline', allowedRemoteHosts: [] },
   };
 }
 
@@ -91,6 +92,10 @@ const specs = [
       defaultSize: '1024x1024',
     } satisfies ProviderCapabilities,
     profile: OPENAI_IMAGE_PROFILE,
+    imageOutput: {
+      delivery: 'mixed',
+      allowedRemoteHosts: ['.zenmux.ai', '.openai.com'],
+    },
   },
   {
     capabilities: {
@@ -107,6 +112,10 @@ const specs = [
       defaultSize: '1024x1024',
     } satisfies ProviderCapabilities,
     profile: OPENAI_IMAGE_PROFILE,
+    imageOutput: {
+      delivery: 'mixed',
+      allowedRemoteHosts: ['.zenmux.ai', '.openai.com'],
+    },
   },
   geminiSpec('google/gemini-2.5-flash-image', 'Nano Banana', {
     imageSizes: ['1K'],

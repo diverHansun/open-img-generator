@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   aggregateGenerationStatus,
   createImageIfAbsent,
+  createRemoteImageIfAbsent,
   createVideoIfAbsent,
   getGenerationJob,
   getGenerationWithJobsAndImages,
@@ -25,10 +26,13 @@ import {
   type UpdateGenerationJobPatch,
 } from '../db';
 import { StorageError, type StorageDiagnostic } from '../errors';
+import { acceptProviderRemoteImage, RemoteImageUrlError } from '../media-output/remote-url';
+import { logSafeEvent } from '../observability/safe-logger';
 import { getById } from '../providers';
 import type {
   JobHandle,
   ProviderImageRef,
+  ProviderId,
   ProviderVideoRef,
   ProviderRequestDisposition,
   SubmitResult,
@@ -178,6 +182,7 @@ function normalizeProviderImageRefs(value: unknown): unknown[] | null {
         return image;
       }
       return {
+        source: safeRecordValue(image, 'source'),
         url: safeRecordValue(image, 'url'),
         width: safeRecordValue(image, 'width'),
         height: safeRecordValue(image, 'height'),
@@ -390,10 +395,39 @@ export async function storeImages(
   client: DbClient,
 ): Promise<StoreImagesResult> {
   const storedIndexes: number[] = [];
+  const job = getGenerationJob(jobId, client);
   for (const ref of images) {
     if (imageExists(jobId, ref.index, client)) {
       storedIndexes.push(ref.index);
       continue;
+    }
+    if (ref.source === 'remote') {
+      try {
+        if (!job) throw new Error('Generation job not found');
+        const accepted = acceptProviderRemoteImage(
+          job.provider as ProviderId,
+          job.model,
+          ref.url,
+        );
+        createRemoteImageIfAbsent({
+          id: randomUUID(),
+          jobId,
+          index: ref.index,
+          remoteUrl: accepted.url,
+          remoteExpiresAt: accepted.expiresAt,
+          contentType: ref.contentType,
+          width: ref.width,
+          height: ref.height,
+          createdAt: nowIso(),
+        }, client);
+        storedIndexes.push(ref.index);
+        continue;
+      } catch (err) {
+        return {
+          kind: 'failed',
+          error: new StorageError('Generated remote image reference was rejected', { cause: err }),
+        };
+      }
     }
     let result: Awaited<ReturnType<typeof storage.downloadAndStore>>;
     try {
@@ -485,6 +519,7 @@ export async function completeSync(
 function imageRefSnapshot(refs: ProviderImageRef[]): string {
   const snapshot = JSON.stringify(
     refs.map((ref) => ({
+      source: ref.source,
       url: ref.url,
       width: ref.width,
       height: ref.height,
@@ -566,6 +601,7 @@ function stageInlineResultRefs(refs: ProviderImageRef[]): ProviderImageRef[] {
       stagedReferences.push(staged.reference);
       return {
         ...ref,
+        source: 'inline',
         url: staged.reference,
         contentType: staged.contentType,
       };
@@ -594,6 +630,7 @@ function parseImageRefSnapshot(serialized: string | null): ProviderImageRef[] {
     const record = value as Record<string, unknown>;
     if (
       !isPersistableImageRefUrl(record.url) ||
+      (record.source !== undefined && record.source !== 'inline' && record.source !== 'remote') ||
       !Number.isInteger(record.index) ||
       (record.width !== null && !Number.isInteger(record.width)) ||
       (record.height !== null && !Number.isInteger(record.height)) ||
@@ -603,6 +640,9 @@ function parseImageRefSnapshot(serialized: string | null): ProviderImageRef[] {
       throw new Error('Invalid result snapshot');
     }
     return {
+      // v3-v5 snapshots predate source tagging and represent the legacy
+      // managed-transfer path, even when their reference is an HTTPS URL.
+      source: (record.source ?? 'inline') as 'inline' | 'remote',
       url: record.url,
       width: record.width as number | null,
       height: record.height as number | null,
@@ -637,6 +677,7 @@ function boundedImageRefs(
         (typeof height === 'number' && Number.isInteger(height)))
     ) {
       unique.set(index, {
+        source: isInlineImageDataUrl(url) ? 'inline' : 'remote',
         url,
         width,
         height,
@@ -1080,7 +1121,16 @@ async function persistProviderImages(
   }
   let refs: ProviderImageRef[];
   try {
-    refs = stageInlineResultRefs(candidates);
+    const validated = candidates.map((candidate) => {
+      if (candidate.source !== 'remote') return candidate;
+      const accepted = acceptProviderRemoteImage(
+        job.provider as ProviderId,
+        job.model,
+        candidate.url,
+      );
+      return { ...candidate, url: accepted.url };
+    });
+    refs = stageInlineResultRefs(validated);
   } catch {
     return applyTerminalFailure(
       job,
@@ -1150,6 +1200,44 @@ async function persistProviderImages(
     );
   }
   return applied ? 'advanced' : 'skipped';
+}
+
+function commitRemoteImageAttempt(
+  job: GenerationJob,
+  refs: ProviderImageRef[],
+  next: ProviderImageRef,
+  remoteUrl: string,
+  remoteExpiresAt: string | null,
+  imageId: string,
+  expectedPollLeaseUntil: string,
+  client: DbClient,
+): StoredImageCommit {
+  let result: StoredImageCommit = { accepted: false, inserted: false, completed: false };
+  client.transaction((tx) => {
+    const checkpointAt = nowIso();
+    if (!updateGenerationJobIfLease(job.id, expectedPollLeaseUntil, { updatedAt: checkpointAt }, tx, { expectedPhase: 'storing' })) return;
+    const inserted = createRemoteImageIfAbsent({
+      id: imageId,
+      jobId: job.id,
+      index: next.index,
+      remoteUrl,
+      remoteExpiresAt,
+      contentType: next.contentType,
+      width: next.width,
+      height: next.height,
+      createdAt: checkpointAt,
+    }, tx);
+    const hasMore = refs.some((ref) => !imageExists(job.id, ref.index, tx));
+    const nextPatch: UpdateGenerationJobPatch = hasMore
+      ? { status: 'running', phase: 'storing', error: null, pollLeaseUntil: null, nextPollAt: checkpointAt, ...resetRetryState(), updatedAt: checkpointAt }
+      : { status: 'completed', phase: 'terminal', error: null, pollLeaseUntil: null, nextPollAt: null, resultSnapshot: null, requestSnapshot: null, requestSnapshotVersion: null, ...resetRetryState(), updatedAt: checkpointAt };
+    if (!updateGenerationJobIfLease(job.id, expectedPollLeaseUntil, nextPatch, tx, { expectedPhase: 'storing' })) {
+      throw new Error('Remote image checkpoint lost its lease unexpectedly');
+    }
+    updateGeneration(job.generationId, { status: deriveGenerationStatus(job.generationId, tx), updatedAt: checkpointAt }, tx);
+    result = { accepted: true, inserted, completed: !hasMore };
+  });
+  return result;
 }
 
 function videoRefSnapshot(refs: ProviderVideoRef[]): string {
@@ -1703,6 +1791,62 @@ async function storeNextImage(
     );
     if (completed) cleanupStagedResultSnapshot(claimed.resultSnapshot);
     return completed ? 'completed' : 'skipped';
+  }
+  if (next.source === 'remote') {
+    let accepted: ReturnType<typeof acceptProviderRemoteImage>;
+    try {
+      accepted = acceptProviderRemoteImage(
+        claimed.provider as ProviderId,
+        claimed.model,
+        next.url,
+      );
+    } catch (error) {
+      return applyTerminalFailure(
+        claimed,
+        jobDiagnostic(
+          error instanceof RemoteImageUrlError
+            ? error.code
+            : 'STORAGE_RESPONSE_INVALID',
+          'Provider returned an unapproved remote image reference',
+        ),
+        client,
+        claimedUntil,
+        'storing',
+      ) ? 'failed' : 'skipped';
+    }
+    let committed: StoredImageCommit;
+    const remoteImageId = randomUUID();
+    try {
+      committed = commitRemoteImageAttempt(
+        claimed,
+        refs,
+        next,
+        accepted.url,
+        accepted.expiresAt,
+        remoteImageId,
+        claimedUntil,
+        client,
+      );
+    } catch {
+      return applyTerminalFailure(
+        claimed,
+        jobDiagnostic('STORAGE_ERROR', 'Remote image reference could not be stored'),
+        client,
+        claimedUntil,
+        'storing',
+      ) ? 'failed' : 'skipped';
+    }
+    if (!committed.accepted) return 'skipped';
+    if (committed.inserted) {
+      logSafeEvent({
+        event: 'media.remote_reference_accepted',
+        imageId: remoteImageId,
+        provider: claimed.provider,
+        hostname: accepted.hostname,
+      });
+    }
+    if (committed.completed) cleanupStagedResultSnapshot(claimed.resultSnapshot);
+    return committed.completed ? 'completed' : 'advanced';
   }
   let stored: Awaited<ReturnType<typeof storage.downloadAndStore>>;
   try {

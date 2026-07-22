@@ -169,6 +169,7 @@ function parseLegacyResults(payload: unknown): ProviderImageRef[] {
         ? parseDimensions(result.size)
         : { width: null, height: null };
     return [{
+      source: 'remote' as const,
       url: result.url,
       width: dimensions.width,
       height: dimensions.height,
@@ -197,6 +198,7 @@ function parseMultimodalResults(payload: unknown): ProviderImageRef[] {
       const image = item as Record<string, unknown>;
       if (typeof image.image !== 'string' || image.image.length === 0) continue;
       images.push({
+        source: 'remote',
         url: image.image,
         width: typeof image.width === 'number' ? image.width : null,
         height: typeof image.height === 'number' ? image.height : null,

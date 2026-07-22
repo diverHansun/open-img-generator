@@ -3,10 +3,12 @@ import path from 'node:path';
 import {
   countRetainedFavorites,
   listGenerationJobResultSnapshots,
+  listKnownRemoteExpiryCandidates,
   listRetentionCandidates,
   listStoragePaths,
   listVideoStoragePaths,
   markImageExpiredIfUnfavorited,
+  markRemoteImageExpired,
   type DbClient,
 } from '../db';
 import { db } from '../db';
@@ -116,6 +118,15 @@ export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult
     referencedFiles: referenced.size,
   });
   try {
+    for (const image of listKnownRemoteExpiryCandidates(new Date(now).toISOString(), client)) {
+      if (options.dryRun) {
+        result.expiredImages += 1;
+        continue;
+      }
+      if (markRemoteImageExpired(image.id, new Date(now).toISOString(), client)) {
+        result.expiredImages += 1;
+      }
+    }
     if (retentionDays > 0) {
       for (const image of listRetentionCandidates(
         new Date(now - retentionDays * 86_400_000).toISOString(),
@@ -130,8 +141,9 @@ export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult
           new Date(now).toISOString(),
           client,
         );
-        if (!removed?.storagePath) continue;
+        if (!removed) continue;
         result.expiredImages += 1;
+        if (!removed.storagePath) continue;
         try {
           removeStoredFile(removed.storagePath);
           result.deletedFiles += 1;

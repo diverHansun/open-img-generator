@@ -47,6 +47,8 @@ export type SafeEventInput =
   | { event: 'storage.missing_detected'; imageId: string; wasFavorite: boolean; requestId?: string }
   | { event: 'storage.recovery_attempted'; entityId: string; provider: string; method: 'provider_poll' | 'metadata_restore' }
   | { event: 'storage.recovery_completed'; entityId: string; provider: string; outcome: 'restored' | 'unavailable' | 'conflict' | 'failed' }
+  | { event: 'media.remote_reference_accepted'; imageId: string; provider: string; hostname: string }
+  | { event: 'media.remote_redirect_served'; imageId: string; provider: string; hostname: string; route: 'preview' | 'download' }
   | { event: 'worker.tick_failed'; code: string };
 
 const EVENT_LEVELS: Record<SafeEventInput['event'], SafeLevel> = {
@@ -60,6 +62,8 @@ const EVENT_LEVELS: Record<SafeEventInput['event'], SafeLevel> = {
   'storage.missing_detected': 'warn',
   'storage.recovery_attempted': 'info',
   'storage.recovery_completed': 'info',
+  'media.remote_reference_accepted': 'info',
+  'media.remote_redirect_served': 'info',
   'worker.tick_failed': 'error',
 };
 
@@ -68,6 +72,7 @@ const SAFE_EVENT_ENUM = new Set([
   'mismatch', 'invalid_marker', 'unsafe_adoption', 'ownership', 'locked',
   'image', 'video', 'staging', 'orphan', 'retention', 'provider_poll',
   'metadata_restore', 'restored', 'unavailable', 'conflict', 'failed',
+  'preview', 'download',
 ]);
 const SAFE_PROVIDER = new Set([
   'fal', 'zenmux', 'siliconflow', 'zhipu', 'doubao', 'qwen', 'kling', 'local',
@@ -78,7 +83,10 @@ function safeEventString(key: string, value: string): string | undefined {
     return /^[a-f0-9]{1,64}$/.test(value) ? value : undefined;
   }
   if (key === 'provider') return SAFE_PROVIDER.has(value) ? value : undefined;
-  if (key === 'reason' || key === 'mediaKind' || key === 'method' || key === 'outcome') {
+  if (key === 'hostname') {
+    return /^(?=.{1,253}$)[A-Za-z0-9.-]+$/.test(value) ? value.toLowerCase() : undefined;
+  }
+  if (key === 'reason' || key === 'mediaKind' || key === 'method' || key === 'outcome' || key === 'route') {
     return SAFE_EVENT_ENUM.has(value) ? value : undefined;
   }
   if (key === 'code') return /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : undefined;

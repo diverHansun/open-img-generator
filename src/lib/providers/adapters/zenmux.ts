@@ -113,6 +113,7 @@ function parseImages(payload: unknown): ProviderImageRef[] {
         ? img.content_type
         : formatContentType[outputFormat] ?? 'image/png';
     return {
+      source: url ? 'remote' as const : 'inline' as const,
       // ZenMux GPT image models return b64_json by default. Keeping it as a
       // data URL lets the shared storage layer persist both URL and Base64
       // provider responses without leaking provider-specific logic into it.
@@ -152,6 +153,7 @@ function parseGeminiImages(payload: unknown): ProviderImageRef[] {
           ? mimeType
           : 'image/png';
       images.push({
+        source: 'inline',
         url: `data:${contentType};base64,${data}`,
         width: null,
         height: null,

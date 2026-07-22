@@ -45,6 +45,10 @@ function imageSpec(
       aspectRatioSizes: ASPECT_RATIO_SIZES,
       supportsBatchSize: options.supportsBatchSize,
     },
+    imageOutput: {
+      delivery: 'remote',
+      allowedRemoteHosts: ['.siliconflow.cn', '.aliyuncs.com'],
+    },
   };
 }
 

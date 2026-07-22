@@ -30,6 +30,7 @@ export type NormalizedRequest = {
 };
 
 export type ProviderImageRef = {
+  source?: 'inline' | 'remote';
   url: string;
   width: number | null;
   height: number | null;

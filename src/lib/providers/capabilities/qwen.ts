@@ -53,6 +53,7 @@ const specs = [
         '9:16': '928*1664',
       },
     },
+    imageOutput: { delivery: 'remote', allowedRemoteHosts: ['.aliyuncs.com'] },
   },
   {
     capabilities: {
@@ -74,6 +75,7 @@ const specs = [
       defaultSize: '1024*1024',
       aspectRatioSizes: SQUARE_1K_RATIO_SIZES,
     },
+    imageOutput: { delivery: 'remote', allowedRemoteHosts: ['.aliyuncs.com'] },
   },
   {
     capabilities: {
@@ -95,6 +97,7 @@ const specs = [
       defaultSize: '1024*1024',
       aspectRatioSizes: SQUARE_1K_RATIO_SIZES,
     },
+    imageOutput: { delivery: 'remote', allowedRemoteHosts: ['.aliyuncs.com'] },
   },
 ] satisfies readonly ProviderModelSpec<QwenImageProfile>[];
 

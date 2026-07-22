@@ -304,6 +304,7 @@ function toGenerationView(
         width: image.width,
         height: image.height,
         favorited: favoriteImageIds.has(image.id),
+        delivery: image.sourceKind as 'managed' | 'remote',
         availability,
         removedAt: image.removedAt,
       };

@@ -54,6 +54,7 @@ export type GenerationSummary = {
     url: string | null;
     width: number | null;
     height: number | null;
+    delivery: 'managed' | 'remote';
     availability: ImageAvailability;
     removedAt: string | null;
   }>;
@@ -63,6 +64,7 @@ export type GalleryItem = {
   favoriteId: string;
   imageId: string;
   url: string | null;
+  delivery: 'managed' | 'remote';
   availability: ImageAvailability;
   removedAt: string | null;
   width: number | null;

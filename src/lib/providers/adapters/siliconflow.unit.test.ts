@@ -49,6 +49,7 @@ describe('SiliconFlowProvider', () => {
     if (result.kind === 'sync') {
       expect(result.images).toEqual([
         {
+          source: 'remote',
           url: 'https://cdn.siliconflow.cn/result.png',
           width: 720,
           height: 1280,

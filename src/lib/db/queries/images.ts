@@ -6,6 +6,7 @@ import {
   isNull,
   lt,
   notExists,
+  or,
 } from 'drizzle-orm';
 import { db, type DbClient } from '../client';
 import { favorites, images } from '../schema';
@@ -24,8 +25,23 @@ export type CreateImageParams = {
   createdAt: string;
 };
 
+export type CreateRemoteImageParams = {
+  id: string;
+  jobId: string;
+  index: number;
+  remoteUrl: string;
+  remoteExpiresAt: string | null;
+  contentType: string;
+  width: number | null;
+  height: number | null;
+  createdAt: string;
+};
+
+export type ImageSourceKind = 'managed' | 'remote';
+
 export const IMAGE_REMOVAL_REASONS = [
   'retention_expired',
+  'remote_expired',
   'user_deleted',
   'storage_missing',
 ] as const;
@@ -48,11 +64,12 @@ export type RestoreMissingImageParams = {
 };
 
 export function getImageAvailability(
-  image: Pick<Image, 'storagePath' | 'removedAt' | 'removalReason'>,
+  image: Pick<Image, 'storagePath' | 'remoteUrl' | 'removedAt' | 'removalReason'>,
 ): ImageAvailability {
-  if (image.storagePath !== null) return 'available';
+  if (image.storagePath !== null || image.remoteUrl !== null) return 'available';
   if (
     image.removalReason === 'retention_expired' ||
+    image.removalReason === 'remote_expired' ||
     image.removalReason === 'user_deleted' ||
     image.removalReason === 'storage_missing'
   ) {
@@ -71,7 +88,10 @@ export function createImage(
       id: params.id,
       generationJobId: params.jobId,
       index: params.index,
+      sourceKind: 'managed',
       storagePath: params.storagePath,
+      remoteUrl: null,
+      remoteExpiresAt: null,
       contentType: params.contentType,
       width: params.width,
       height: params.height,
@@ -92,7 +112,10 @@ export function createImageIfAbsent(
       id: params.id,
       generationJobId: params.jobId,
       index: params.index,
+      sourceKind: 'managed',
       storagePath: params.storagePath,
+      remoteUrl: null,
+      remoteExpiresAt: null,
       contentType: params.contentType,
       width: params.width,
       height: params.height,
@@ -102,6 +125,26 @@ export function createImageIfAbsent(
     .onConflictDoNothing()
     .run();
   return result.changes > 0;
+}
+
+export function createRemoteImageIfAbsent(
+  params: CreateRemoteImageParams,
+  client: DbClient = db,
+): boolean {
+  return client.insert(images).values({
+    id: params.id,
+    generationJobId: params.jobId,
+    index: params.index,
+    sourceKind: 'remote',
+    storagePath: null,
+    remoteUrl: params.remoteUrl,
+    remoteExpiresAt: params.remoteExpiresAt,
+    contentType: params.contentType,
+    width: params.width,
+    height: params.height,
+    sizeBytes: null,
+    createdAt: params.createdAt,
+  }).onConflictDoNothing().run().changes > 0;
 }
 
 /**
@@ -177,7 +220,7 @@ export function listRetentionCandidates(
     .where(
       and(
         lt(images.createdAt, cutoff),
-        isNotNull(images.storagePath),
+        or(isNotNull(images.storagePath), isNotNull(images.remoteUrl)),
         isNull(images.removedAt),
         isNull(favorites.id),
       ),
@@ -198,6 +241,19 @@ export function countRetainedFavorites(
     .all().length;
 }
 
+export function listKnownRemoteExpiryCandidates(
+  now: string,
+  client: DbClient = db,
+): Image[] {
+  return client.select().from(images).where(and(
+    eq(images.sourceKind, 'remote'),
+    isNotNull(images.remoteUrl),
+    isNotNull(images.remoteExpiresAt),
+    lt(images.remoteExpiresAt, now),
+    isNull(images.removedAt),
+  )).all();
+}
+
 /**
  * Atomically replaces a live file reference with a retention tombstone. A
  * concurrently-created favorite wins through the NOT EXISTS guard.
@@ -214,18 +270,20 @@ export function markImageExpiredIfUnfavorited(
         .from(images)
         .where(eq(images.id, id))
         .get();
-      if (!current || current.storagePath === null) return null;
+      if (!current || (current.storagePath === null && current.remoteUrl === null)) return null;
       const result = tx
         .update(images)
         .set({
           storagePath: null,
+          remoteUrl: null,
+          remoteExpiresAt: null,
           removedAt,
           removalReason: 'retention_expired',
         })
         .where(
           and(
             eq(images.id, id),
-            isNotNull(images.storagePath),
+            or(isNotNull(images.storagePath), isNotNull(images.remoteUrl)),
             notExists(
               tx
                 .select({ id: favorites.id })
@@ -259,9 +317,17 @@ export function markImageUserDeleted(
       if (!current) return undefined;
       tx.delete(favorites).where(eq(favorites.imageId, id)).run();
       if (current.storagePath === null) {
-        if (current.removalReason !== 'user_deleted') {
+        if (current.remoteUrl !== null) {
+          tx.update(images).set({
+            remoteUrl: null,
+            remoteExpiresAt: null,
+            removedAt,
+            removalReason: 'user_deleted',
+          }).where(and(eq(images.id, id), isNotNull(images.remoteUrl)))
+            .run();
+        } else if (current.removalReason !== 'user_deleted') {
           tx.update(images).set({ removedAt, removalReason: 'user_deleted' })
-            .where(and(eq(images.id, id), isNull(images.storagePath)))
+            .where(and(eq(images.id, id), isNull(images.storagePath), isNull(images.remoteUrl)))
             .run();
         }
         return {
@@ -311,6 +377,13 @@ export function markImageStorageMissing(
     (tx) => {
       const current = tx.select().from(images).where(eq(images.id, id)).get();
       if (!current) return undefined;
+      if (current.sourceKind !== 'managed') {
+        return {
+          storagePath: null,
+          availability: getImageAvailability(current),
+          removedAt: current.removedAt,
+        };
+      }
       if (current.storagePath === null) {
         return {
           storagePath: null,
@@ -336,6 +409,24 @@ export function markImageStorageMissing(
   );
 }
 
+/** Clears a known-expired Provider URL while preserving history and favorites. */
+export function markRemoteImageExpired(
+  id: string,
+  removedAt: string,
+  client: DbClient = db,
+): boolean {
+  return client.update(images).set({
+    remoteUrl: null,
+    remoteExpiresAt: null,
+    removedAt,
+    removalReason: 'remote_expired',
+  }).where(and(
+    eq(images.id, id),
+    eq(images.sourceKind, 'remote'),
+    isNotNull(images.remoteUrl),
+  )).run().changes > 0;
+}
+
 /** Restores bytes only while the exact storage-missing tombstone still wins. */
 export function restoreImageStorageIfMissing(
   id: string,
@@ -343,7 +434,10 @@ export function restoreImageStorageIfMissing(
   client: DbClient = db,
 ): boolean {
   return client.update(images).set({
+    sourceKind: 'managed',
     storagePath: params.storagePath,
+    remoteUrl: null,
+    remoteExpiresAt: null,
     contentType: params.contentType,
     width: params.width,
     height: params.height,

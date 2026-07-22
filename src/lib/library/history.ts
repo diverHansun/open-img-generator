@@ -126,6 +126,7 @@ function toSummaries(
         url: availability === 'available' ? `/api/images/${image.id}` : null,
         width: image.width,
         height: image.height,
+        delivery: image.sourceKind as 'managed' | 'remote',
         availability,
         removedAt: image.removedAt,
       };

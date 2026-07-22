@@ -71,6 +71,10 @@ function fluxSpec(
       supportsCount: options.maxCount > 1,
       supportsNegativePrompt: options.supportsNegativePrompt ?? false,
     },
+    imageOutput: {
+      delivery: 'remote',
+      allowedRemoteHosts: ['.fal.media', '.fal.ai'],
+    },
   };
 }
 
@@ -108,6 +112,10 @@ function bananaSpec(
         : {}),
       supportedResolutions: options.supportedResolutions,
       safetyToleranceValues: options.safetyToleranceValues ?? ['1', '2', '3', '4', '5', '6'],
+    },
+    imageOutput: {
+      delivery: 'remote',
+      allowedRemoteHosts: ['.fal.media', '.fal.ai'],
     },
   };
 }

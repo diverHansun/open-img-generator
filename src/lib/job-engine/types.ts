@@ -60,9 +60,11 @@ export type ImageView = {
   width: number | null;
   height: number | null;
   favorited: boolean;
+  delivery: 'managed' | 'remote';
   availability:
     | 'available'
     | 'retention_expired'
+    | 'remote_expired'
     | 'user_deleted'
     | 'storage_missing';
   removedAt: string | null;

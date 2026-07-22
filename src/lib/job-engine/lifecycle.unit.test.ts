@@ -608,14 +608,14 @@ describe('durable lifecycle', () => {
           status: 'completed',
           images: [
             {
-              url: 'https://cdn.example.test/0.png',
+              url: 'https://v3.fal.media/0.png',
               width: 1,
               height: 1,
               contentType: 'image/png',
               index: 0,
             },
             {
-              url: 'https://cdn.example.test/1.png',
+              url: 'https://v3.fal.media/1.png',
               width: 1,
               height: 1,
               contentType: 'image/png',
@@ -650,7 +650,12 @@ describe('durable lifecycle', () => {
       'advanced',
     );
     expect(getGenerationWithJobsAndImages('gen-1', db)!.images).toHaveLength(1);
-    expect(storage.downloadAndStore).toHaveBeenCalledTimes(1);
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
+    expect(getGenerationWithJobsAndImages('gen-1', db)!.images[0]).toMatchObject({
+      sourceKind: 'remote',
+      storagePath: null,
+      remoteUrl: 'https://v3.fal.media/0.png',
+    });
 
     await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe(
       'completed',
@@ -659,7 +664,7 @@ describe('durable lifecycle', () => {
       status: 'completed',
       images: expect.arrayContaining([expect.anything(), expect.anything()]),
     });
-    expect(storage.downloadAndStore).toHaveBeenCalledTimes(2);
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
   });
 
   it('persists a completed video result through the dedicated MP4 storage path', async () => {
@@ -791,7 +796,7 @@ describe('durable lifecycle', () => {
           status: 'completed',
           images: [
             {
-              url: 'https://cdn.example.test/legacy.png',
+              url: 'https://v3.fal.media/legacy.png',
               width: 1,
               height: 1,
               contentType: 'image/png',

@@ -80,6 +80,7 @@ function classifyApiError(err: unknown): StructuredApiError {
   if (err instanceof ImageUnavailableError) {
     const code = {
       retention_expired: 'IMAGE_EXPIRED',
+      remote_expired: 'REMOTE_IMAGE_EXPIRED',
       user_deleted: 'IMAGE_DELETED',
       storage_missing: 'IMAGE_MISSING',
     }[err.reason];

@@ -41,6 +41,7 @@ const galleryItem = {
   favoriteId: 'favorite-1',
   imageId: 'image-1',
   url: '/api/images/image-1',
+  delivery: 'managed' as const,
   availability: 'available' as const,
   removedAt: null,
   width: 1024,

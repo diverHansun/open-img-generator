@@ -77,6 +77,7 @@ function parseImages(payload: unknown, size: string): ProviderImageRef[] {
     const image = item as Record<string, unknown>;
     if (typeof image.url !== 'string' || image.url.length === 0) return [];
     return [{
+      source: 'remote' as const,
       url: image.url,
       width: dimensions.width,
       height: dimensions.height,

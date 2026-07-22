@@ -111,7 +111,8 @@ describe('sync generation end-to-end (zenmux)', () => {
       new Request(`http://localhost:3000/api/images/${imageId}`),
       { params: Promise.resolve({ id: imageId }) },
     );
-    expect(imageResponse.status).toBe(200);
+    expect(imageResponse.status).toBe(302);
+    expect(imageResponse.headers.get('location')).toBe('https://cdn.zenmux.ai/img1.png');
   });
 
   it('stages ZenMux b64_json without persisting the data URL in SQLite', async () => {
@@ -186,7 +187,7 @@ describe('sync generation end-to-end (zenmux)', () => {
                 message: {
                   content: [{
                     type: 'image',
-                    image: 'https://dashscope.example.test/qwen2.png',
+                    image: 'https://dashscope-test.oss-accelerate.aliyuncs.com/qwen2.png',
                   }],
                 },
               }],
@@ -195,7 +196,7 @@ describe('sync generation end-to-end (zenmux)', () => {
         },
       ),
       http.get(
-        'https://dashscope.example.test/qwen2.png',
+        'https://dashscope-test.oss-accelerate.aliyuncs.com/qwen2.png',
         () => new HttpResponse(new Uint8Array(imageBuffer), {
           headers: { 'content-type': 'image/png' },
         }),

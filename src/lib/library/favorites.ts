@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, isNotNull, lt, or, type SQL } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, lt, or, type SQL } from 'drizzle-orm';
 import {
   db,
   favorites,
@@ -41,6 +41,8 @@ function favoriteQuery(client: DbClient) {
       favoriteId: favorites.id,
       imageId: images.id,
       storagePath: images.storagePath,
+      remoteUrl: images.remoteUrl,
+      sourceKind: images.sourceKind,
       removedAt: images.removedAt,
       removalReason: images.removalReason,
       width: images.width,
@@ -66,9 +68,16 @@ function favoriteQuery(client: DbClient) {
 function toGalleryItem(row: ReturnType<ReturnType<typeof favoriteQuery>['get']>): GalleryItem {
   if (!row) throw new NotFoundError('Favorite not found');
   const availability = getImageAvailability(row);
-  const { storagePath: _storagePath, removalReason: _removalReason, ...item } = row;
+  const {
+    storagePath: _storagePath,
+    remoteUrl: _remoteUrl,
+    sourceKind,
+    removalReason: _removalReason,
+    ...item
+  } = row;
   return {
     ...item,
+    delivery: sourceKind as 'managed' | 'remote',
     url: availability === 'available' ? `/api/images/${row.imageId}` : null,
     availability,
   };
@@ -80,7 +89,11 @@ export function addFavorite(imageId: string, client: DbClient = db): GalleryItem
       const image = tx
         .select({ id: images.id })
         .from(images)
-        .where(and(eq(images.id, imageId), isNotNull(images.storagePath)))
+        .where(and(
+          eq(images.id, imageId),
+          isNull(images.removedAt),
+          or(isNotNull(images.storagePath), isNotNull(images.remoteUrl)),
+        ))
         .get();
       if (!image) throw new NotFoundError(`Image not found: ${imageId}`);
       tx.insert(favorites)

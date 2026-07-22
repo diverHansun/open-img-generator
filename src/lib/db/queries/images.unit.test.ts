@@ -4,6 +4,7 @@ import { favorites } from '../schema';
 import { createGenerationAndJob } from './generations';
 import {
   createImage,
+  createRemoteImageIfAbsent,
   getImage,
   imageExists,
   listFavoriteImageIds,
@@ -11,6 +12,7 @@ import {
   markImageExpiredIfUnfavorited,
   markImageStorageMissing,
   markImageUserDeleted,
+  markRemoteImageExpired,
   restoreImageStorageIfMissing,
 } from './images';
 import { NotFoundError } from '../../errors';
@@ -83,6 +85,32 @@ describe('images queries', () => {
     expect(imageExists('job-1', 0, db)).toBe(true);
     expect(imageExists('job-1', 1, db)).toBe(false);
     expect(imageExists('job-2', 0, db)).toBe(false);
+  });
+
+  it('stores a remote image without a local path and preserves favorite expiry tombstones', () => {
+    const { db } = createTestDb();
+    seedJob(db);
+    expect(createRemoteImageIfAbsent({
+      id: 'remote-1',
+      jobId: 'job-1',
+      index: 0,
+      remoteUrl: 'https://v3.fal.media/result.png?token=secret',
+      remoteExpiresAt: '2026-07-13T10:00:00.000Z',
+      contentType: 'image/png',
+      width: 1024,
+      height: 1024,
+      createdAt: now,
+    }, db)).toBe(true);
+    const image = getImage('remote-1', db);
+    expect(image).toMatchObject({
+      sourceKind: 'remote',
+      storagePath: null,
+      sizeBytes: null,
+    });
+    db.insert(favorites).values({ id: 'favorite-1', imageId: image.id, createdAt: now }).run();
+    expect(markRemoteImageExpired(image.id, now, db)).toBe(true);
+    expect(getImageAvailability(getImage(image.id, db))).toBe('remote_expired');
+    expect(listFavoriteImageIds([image.id], db)).toEqual(new Set([image.id]));
   });
 
   it('throws NotFoundError when image not found', () => {

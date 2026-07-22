@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "tables": {
     "projects": ["id", "title", "created_at", "updated_at"],
     "sessions": ["id", "project_id", "title", "created_at", "updated_at"],
@@ -38,7 +38,10 @@
       "id",
       "generation_job_id",
       "index",
+      "source_kind",
       "storage_path",
+      "remote_url",
+      "remote_expires_at",
       "content_type",
       "width",
       "height",

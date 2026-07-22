@@ -1,9 +1,11 @@
 import {
   db,
   getImage,
+  getGenerationJob,
   getImageAvailability,
   listFavoriteImageIds,
   markImageStorageMissing,
+  markRemoteImageExpired,
   markImageUserDeleted,
   type DbClient,
   type Image,
@@ -11,11 +13,17 @@ import {
 import { ImageUnavailableError, NotFoundError } from '../errors';
 import { assertStorageWritable, getReadStream, removeStoredFile } from '../storage';
 import { logSafeEvent } from '../observability/safe-logger';
+import { acceptProviderRemoteImage } from '../media-output/remote-url';
+import type { ProviderId } from '../providers';
 
 export type ReadableImage = {
   image: Image & { storagePath: string };
   stream: ReturnType<typeof getReadStream>;
 };
+
+export type DeliverableImage =
+  | { kind: 'managed'; image: Image & { storagePath: string }; stream: ReturnType<typeof getReadStream> }
+  | { kind: 'remote'; image: Image & { remoteUrl: string }; url: string; provider: ProviderId; hostname: string };
 
 function unavailable(image: Image): ImageUnavailableError {
   const availability = getImageAvailability(image);
@@ -43,6 +51,39 @@ export function openReadableImage(
     logSafeEvent({ event: 'storage.missing_detected', imageId: id, wasFavorite });
     throw new ImageUnavailableError('storage_missing');
   }
+}
+
+export function openDeliverableImage(
+  id: string,
+  client: DbClient = db,
+): DeliverableImage {
+  const image = getImage(id, client);
+  if (image.sourceKind === 'managed') {
+    const readable = openReadableImage(id, client);
+    return { kind: 'managed', ...readable };
+  }
+  if (image.remoteUrl === null) throw unavailable(image);
+  if (
+    image.remoteExpiresAt !== null &&
+    Date.parse(image.remoteExpiresAt) <= Date.now()
+  ) {
+    markRemoteImageExpired(id, new Date().toISOString(), client);
+    throw new ImageUnavailableError('remote_expired');
+  }
+  const job = getGenerationJob(image.generationJobId, client);
+  if (!job) throw new NotFoundError(`Generation job not found: ${image.generationJobId}`);
+  const accepted = acceptProviderRemoteImage(
+    job.provider as ProviderId,
+    job.model,
+    image.remoteUrl,
+  );
+  return {
+    kind: 'remote',
+    image: image as Image & { remoteUrl: string },
+    url: accepted.url,
+    provider: job.provider as ProviderId,
+    hostname: accepted.hostname,
+  };
 }
 
 export function deleteImageBytes(

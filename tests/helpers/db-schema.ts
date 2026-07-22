@@ -66,7 +66,10 @@ export function initializeTestSchema(sqlite: Database.Database): void {
       id TEXT PRIMARY KEY,
       generation_job_id TEXT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
       "index" INTEGER NOT NULL,
+      source_kind TEXT NOT NULL DEFAULT 'managed',
       storage_path TEXT,
+      remote_url TEXT,
+      remote_expires_at TEXT,
       content_type TEXT NOT NULL,
       width INTEGER,
       height INTEGER,
@@ -75,10 +78,15 @@ export function initializeTestSchema(sqlite: Database.Database): void {
       removed_at TEXT,
       removal_reason TEXT,
       CHECK (
-        (storage_path IS NOT NULL AND removed_at IS NULL AND removal_reason IS NULL)
+        (source_kind = 'managed' AND storage_path IS NOT NULL AND remote_url IS NULL AND
+          remote_expires_at IS NULL AND removed_at IS NULL AND removal_reason IS NULL)
         OR
-        (storage_path IS NULL AND removed_at IS NOT NULL AND
-          removal_reason IN ('retention_expired', 'user_deleted', 'storage_missing'))
+        (source_kind = 'remote' AND storage_path IS NULL AND remote_url IS NOT NULL AND
+          removed_at IS NULL AND removal_reason IS NULL)
+        OR
+        (storage_path IS NULL AND remote_url IS NULL AND remote_expires_at IS NULL AND
+          removed_at IS NOT NULL AND
+          removal_reason IN ('retention_expired', 'remote_expired', 'user_deleted', 'storage_missing'))
       )
     );
     CREATE UNIQUE INDEX unique_job_index ON images(generation_job_id, "index");

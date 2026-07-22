@@ -430,6 +430,7 @@ describe('GET /api/generations/:id', () => {
           width: 1024,
           height: 1024,
           favorited: true,
+          delivery: 'managed',
           availability: 'available',
           removedAt: null,
         },
@@ -535,6 +536,7 @@ describe('POST /api/generations/:id/cancel', () => {
           width: 1024,
           height: 1024,
           favorited: true,
+          delivery: 'managed',
           availability: 'available',
           removedAt: null,
         },
@@ -560,6 +562,7 @@ describe('POST /api/generations/:id/cancel', () => {
       width: 1024,
       height: 1024,
       favorited: true,
+      delivery: 'managed',
       availability: 'available',
       removedAt: null,
     });

@@ -188,7 +188,7 @@ describe('generation orchestrator durable admission', () => {
       kind: 'sync',
       images: [
         {
-          url: 'https://cdn.example.test/reading-room.png',
+          url: 'https://v3.fal.media/reading-room.png',
           width: 1024,
           height: 1024,
           contentType: 'image/png',
@@ -227,9 +227,11 @@ describe('generation orchestrator durable admission', () => {
     const missingFavorite = await getGeneration(admitted.generationId, { db });
     expect(missingFavorite.images[0]).toMatchObject({
       id: imageId,
-      url: null,
+      url: `/api/images/${imageId}`,
       favorited: true,
-      availability: 'storage_missing',
+      delivery: 'remote',
+      availability: 'available',
     });
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
   });
 });

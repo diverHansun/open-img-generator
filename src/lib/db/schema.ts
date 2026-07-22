@@ -119,7 +119,10 @@ export const images = sqliteTable(
       .notNull()
       .references(() => generationJobs.id, { onDelete: 'cascade' }),
     index: integer('index').notNull(),
+    sourceKind: text('source_kind').notNull().default('managed'),
     storagePath: text('storage_path'),
+    remoteUrl: text('remote_url'),
+    remoteExpiresAt: text('remote_expires_at'),
     contentType: text('content_type').notNull(),
     width: integer('width'),
     height: integer('height'),
@@ -136,9 +139,11 @@ export const images = sqliteTable(
     availabilityInvariant: check(
       'images_availability_check',
       sql`(
-        (${table.storagePath} IS NOT NULL AND ${table.removedAt} IS NULL AND ${table.removalReason} IS NULL)
+        (${table.sourceKind} = 'managed' AND ${table.storagePath} IS NOT NULL AND ${table.remoteUrl} IS NULL AND ${table.remoteExpiresAt} IS NULL AND ${table.removedAt} IS NULL AND ${table.removalReason} IS NULL)
         OR
-        (${table.storagePath} IS NULL AND ${table.removedAt} IS NOT NULL AND ${table.removalReason} IN ('retention_expired', 'user_deleted', 'storage_missing'))
+        (${table.sourceKind} = 'remote' AND ${table.storagePath} IS NULL AND ${table.remoteUrl} IS NOT NULL AND ${table.removedAt} IS NULL AND ${table.removalReason} IS NULL)
+        OR
+        (${table.storagePath} IS NULL AND ${table.remoteUrl} IS NULL AND ${table.remoteExpiresAt} IS NULL AND ${table.removedAt} IS NOT NULL AND ${table.removalReason} IN ('retention_expired', 'remote_expired', 'user_deleted', 'storage_missing'))
       )`,
     ),
   }),

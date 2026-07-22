@@ -207,7 +207,10 @@ try {
         id TEXT PRIMARY KEY,
         generation_job_id TEXT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
         "index" INTEGER NOT NULL,
+        source_kind TEXT NOT NULL DEFAULT 'managed',
         storage_path TEXT,
+        remote_url TEXT,
+        remote_expires_at TEXT,
         content_type TEXT NOT NULL,
         width INTEGER,
         height INTEGER,
@@ -216,10 +219,15 @@ try {
         removed_at TEXT,
         removal_reason TEXT,
         CHECK (
-          (storage_path IS NOT NULL AND removed_at IS NULL AND removal_reason IS NULL)
+          (source_kind = 'managed' AND storage_path IS NOT NULL AND remote_url IS NULL AND
+            remote_expires_at IS NULL AND removed_at IS NULL AND removal_reason IS NULL)
           OR
-          (storage_path IS NULL AND removed_at IS NOT NULL AND
-            removal_reason IN ('retention_expired', 'user_deleted', 'storage_missing'))
+          (source_kind = 'remote' AND storage_path IS NULL AND remote_url IS NOT NULL AND
+            removed_at IS NULL AND removal_reason IS NULL)
+          OR
+          (storage_path IS NULL AND remote_url IS NULL AND remote_expires_at IS NULL AND
+            removed_at IS NOT NULL AND
+            removal_reason IN ('retention_expired', 'remote_expired', 'user_deleted', 'storage_missing'))
         )
       );
       CREATE TABLE IF NOT EXISTS videos (
@@ -667,6 +675,55 @@ try {
             );
             CREATE UNIQUE INDEX IF NOT EXISTS unique_video_job_index
               ON videos(generation_job_id, "index");
+          `);
+        },
+      },
+    ],
+    [
+      5,
+      {
+        to: 6,
+        up() {
+          sqlite.exec(`
+            CREATE TABLE images_v6 (
+              id TEXT PRIMARY KEY,
+              generation_job_id TEXT NOT NULL REFERENCES generation_jobs(id) ON DELETE CASCADE,
+              "index" INTEGER NOT NULL,
+              source_kind TEXT NOT NULL DEFAULT 'managed',
+              storage_path TEXT,
+              remote_url TEXT,
+              remote_expires_at TEXT,
+              content_type TEXT NOT NULL,
+              width INTEGER,
+              height INTEGER,
+              size_bytes INTEGER,
+              created_at TEXT NOT NULL,
+              removed_at TEXT,
+              removal_reason TEXT,
+              CHECK (
+                (source_kind = 'managed' AND storage_path IS NOT NULL AND remote_url IS NULL AND
+                  remote_expires_at IS NULL AND removed_at IS NULL AND removal_reason IS NULL)
+                OR
+                (source_kind = 'remote' AND storage_path IS NULL AND remote_url IS NOT NULL AND
+                  removed_at IS NULL AND removal_reason IS NULL)
+                OR
+                (storage_path IS NULL AND remote_url IS NULL AND remote_expires_at IS NULL AND
+                  removed_at IS NOT NULL AND
+                  removal_reason IN ('retention_expired', 'remote_expired', 'user_deleted', 'storage_missing'))
+              )
+            );
+            INSERT INTO images_v6
+              (id, generation_job_id, "index", source_kind, storage_path,
+               remote_url, remote_expires_at, content_type, width, height,
+               size_bytes, created_at, removed_at, removal_reason)
+            SELECT id, generation_job_id, "index", 'managed', storage_path,
+                   NULL, NULL, content_type, width, height, size_bytes,
+                   created_at, removed_at, removal_reason
+            FROM images;
+            DROP TABLE images;
+            ALTER TABLE images_v6 RENAME TO images;
+            CREATE UNIQUE INDEX unique_job_index
+              ON images(generation_job_id, "index");
           `);
         },
       },

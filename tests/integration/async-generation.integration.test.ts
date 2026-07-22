@@ -168,7 +168,7 @@ describe('async generation end-to-end (fal)', () => {
                 message: {
                   content: [{
                     type: 'image',
-                    image: 'https://dashscope.example.test/wan.png',
+                    image: 'https://dashscope-test.oss-accelerate.aliyuncs.com/wan.png',
                   }],
                 },
               }],
@@ -176,7 +176,7 @@ describe('async generation end-to-end (fal)', () => {
           }),
         } as Response);
       }
-      if (requestUrl === 'https://dashscope.example.test/wan.png') {
+      if (requestUrl === 'https://dashscope-test.oss-accelerate.aliyuncs.com/wan.png') {
         return Promise.resolve(new Response(imageBuffer, {
           status: 200,
           headers: { 'content-type': 'image/png' },

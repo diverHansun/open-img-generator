@@ -168,6 +168,7 @@ function parseImages(payload: unknown): ProviderImageRef[] {
           ? img.contentType
           : 'image/png';
     return {
+      source: 'remote' as const,
       url: String(img.url ?? ''),
       width,
       height,

@@ -10,6 +10,7 @@ export class PayloadTooLargeError extends AppError {}
 export class NotFoundError extends AppError {}
 export type ImageUnavailableReason =
   | 'retention_expired'
+  | 'remote_expired'
   | 'user_deleted'
   | 'storage_missing';
 

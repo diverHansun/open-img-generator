@@ -47,6 +47,10 @@ const specs = [
         '9:16': '960x1728',
       },
     },
+    imageOutput: {
+      delivery: 'remote',
+      allowedRemoteHosts: ['.bigmodel.cn', '.chatglm.cn'],
+    },
   },
 ] satisfies readonly ProviderModelSpec<ZhipuImageProfile>[];
 

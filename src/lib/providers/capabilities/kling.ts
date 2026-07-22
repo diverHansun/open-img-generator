@@ -29,6 +29,10 @@ const specs = [
       kind: 'image-generation-v1',
       defaultResolution: '1k',
     },
+    imageOutput: {
+      delivery: 'remote',
+      allowedRemoteHosts: ['.klingai.com', '.klingai.com.cn'],
+    },
   },
 ] satisfies readonly ProviderModelSpec<KlingImageProfile>[];
 

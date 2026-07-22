@@ -12,6 +12,14 @@ import type {
 export type ProviderModelSpec<Profile> = Readonly<{
   capabilities: ProviderCapabilities;
   profile: Profile;
+  imageOutput?: ProviderImageOutputSpec;
+}>;
+
+export type ProviderImageOutputSpec = Readonly<{
+  delivery: 'inline' | 'remote' | 'mixed';
+  /** Exact hosts or reviewed dot-prefixed suffixes such as `.fal.media`. */
+  allowedRemoteHosts: readonly string[];
+  remoteTtlMs?: number;
 }>;
 
 export function defineProviderModelSpecs<Profile>(

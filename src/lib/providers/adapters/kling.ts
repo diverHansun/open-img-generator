@@ -161,6 +161,7 @@ function parseImages(payload: unknown): ProviderImageRef[] {
     const url = typeof image.url === 'string' ? image.url : '';
     if (!url) return [];
     return [{
+      source: 'remote' as const,
       url,
       width: null,
       height: null,

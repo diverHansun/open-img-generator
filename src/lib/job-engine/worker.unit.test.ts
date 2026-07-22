@@ -75,7 +75,7 @@ describe('job worker', () => {
     seedQueuedJob(db);
     const submit = vi.fn().mockResolvedValue({
       kind: 'sync',
-      images: [{ url: 'https://cdn.example.test/worker.png', width: 1, height: 1, contentType: 'image/png', index: 0 }],
+      images: [{ url: 'https://v3.fal.media/worker.png', width: 1, height: 1, contentType: 'image/png', index: 0 }],
     });
     const provider: ImageProvider = {
       id: 'fal',
@@ -118,7 +118,7 @@ describe('job worker', () => {
       activeSubmits -= 1;
       return {
         kind: 'sync' as const,
-        images: [{ url: 'https://cdn.example.test/page.png', width: 1, height: 1, contentType: 'image/png', index: 0 }],
+        images: [{ url: 'https://v3.fal.media/page.png', width: 1, height: 1, contentType: 'image/png', index: 0 }],
       };
     });
     vi.mocked(providers.getById).mockReturnValue({

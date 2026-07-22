@@ -52,6 +52,7 @@ function seedreamSpec(
       defaultSize: '2K',
     },
     profile: SEEDREAM_PROFILE,
+    imageOutput: { delivery: 'inline', allowedRemoteHosts: [] },
   };
 }
 
