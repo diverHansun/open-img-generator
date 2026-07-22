@@ -52,7 +52,7 @@ export function ThumbnailStrip({
       )}
       {remaining > 0 ? (
         <span className={styles.more} aria-label={moreLabel(remaining)}>
-          +{remaining}
+          …
         </span>
       ) : null}
     </span>

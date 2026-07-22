@@ -1,12 +1,13 @@
 .strip {
   display: flex;
+  width: 100%;
   min-width: 0;
   align-items: center;
   gap: 3px;
+  overflow: hidden;
 }
 
 .strip img,
-.more,
 .empty {
   width: clamp(2rem, 3.2vw, 2.625rem);
   height: clamp(2rem, 3.2vw, 2.625rem);
@@ -21,7 +22,6 @@
   object-fit: cover;
 }
 
-.more,
 .empty {
   display: grid;
   place-items: center;
@@ -30,6 +30,14 @@
   color: var(--color-ink-muted);
   font-size: 0.6875rem;
   font-weight: 650;
+}
+
+.more {
+  flex: 0 0 auto;
+  color: var(--color-ink-muted);
+  font-size: 1.25rem;
+  font-weight: 650;
+  line-height: 1;
 }
 
 .empty svg {

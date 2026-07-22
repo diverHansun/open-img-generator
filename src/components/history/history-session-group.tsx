@@ -139,7 +139,7 @@ export function HistorySessionGroup({
                   <ThumbnailStrip
                     images={item.images}
                     alt={accessiblePrompt}
-                    max={6}
+                    max={4}
                     moreLabel={(count) => t('history.moreImages', { count })}
                     emptyLabel={t('history.noImages')}
                   />

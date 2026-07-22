@@ -92,7 +92,7 @@
 .columnHeader,
 .generationRow {
   display: grid;
-  grid-template-columns: minmax(9rem, 0.8fr) minmax(13rem, 1.35fr) minmax(9rem, 0.8fr) minmax(7.5rem, 0.6fr) 6.5rem;
+  grid-template-columns: minmax(11rem, 0.8fr) minmax(13rem, 1.35fr) minmax(9rem, 0.8fr) minmax(7.5rem, 0.6fr) 6.5rem;
   gap: var(--space-4);
   align-items: center;
 }
@@ -237,7 +237,7 @@
 @media (max-width: 1180px) {
   .columnHeader,
   .generationRow {
-    grid-template-columns: minmax(8rem, 0.7fr) minmax(12rem, 1.3fr) minmax(8rem, 0.75fr) minmax(7rem, 0.6fr);
+    grid-template-columns: minmax(10rem, 0.7fr) minmax(12rem, 1.3fr) minmax(8rem, 0.75fr) minmax(7rem, 0.6fr);
   }
 
   .columnHeader > span:last-child,
