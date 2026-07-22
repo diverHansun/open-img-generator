@@ -2,6 +2,7 @@
   "name": "ai-image-generator",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "engines": {
     "node": "^20.0.0 || ^22.0.0 || ^24.0.0"
@@ -23,10 +24,12 @@
     "test:contract": "vitest run .contract.test.ts",
     "test:integration": "vitest run .integration.test.ts",
     "test:smoke": "vitest run .smoke.test.ts",
+    "version:check": "node scripts/check-version.mjs",
     "test:fast": "npm run test:unit && npm run test:contract",
     "preflight": "npm run typecheck && npm run test:fast",
     "test:verify": "npm run typecheck && npm run test:fast && npm run test:integration",
-    "test:release": "npm run test:verify && npm run test:smoke"
+    "test:release": "npm run version:check && npm run test:verify && npm run test:smoke",
+    "release:check": "npm run test:release"
   },
   "dependencies": {
     "@fontsource-variable/noto-sans-sc": "5.3.0",
@@ -43,7 +46,8 @@
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.6.0",
+    "yazl": "^3.3.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
@@ -51,6 +55,7 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/yazl": "^3.3.1",
     "client-only": "0.0.1",
     "drizzle-kit": "^0.28.0",
     "msw": "^2.6.0",
