@@ -88,7 +88,7 @@ function buildLegacyRequestBody(
 ): Record<string, unknown> {
   const parameters: Record<string, unknown> = {
     size: resolveSize(req, profile),
-    n: 1,
+    n: req.count ?? 1,
     prompt_extend: true,
     watermark: false,
   };
@@ -113,7 +113,7 @@ function buildMultimodalRequestBody(
 ): Record<string, unknown> {
   const parameters: Record<string, unknown> = {
     size: resolveSize(req, profile),
-    n: 1,
+    n: req.count ?? 1,
     watermark: false,
   };
   if (req.seed !== undefined) parameters.seed = req.seed;

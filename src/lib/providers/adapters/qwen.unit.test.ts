@@ -45,6 +45,12 @@ describe('QwenProvider', () => {
     cancelUrl: null,
   };
 
+  it('advertises Qwen batch limits supported by the API', () => {
+    expect(provider.capabilities.get('qwen-image-plus')?.maxCount).toBe(1);
+    expect(provider.capabilities.get('qwen-image-2.0-pro')?.maxCount).toBe(6);
+    expect(provider.capabilities.get('wan2.7-image-pro')?.maxCount).toBe(4);
+  });
+
   it('submits an async Qwen task with DashScope headers and nested body', async () => {
     const timeout = vi.spyOn(AbortSignal, 'timeout')
       .mockReturnValue(new AbortController().signal);
@@ -141,7 +147,7 @@ describe('QwenProvider', () => {
     mockFetch({ output: { task_id: 'wan-task-1', task_status: 'PENDING' } });
 
     const result = await provider.submit(
-      makeNormalizedRequest({ aspectRatio: '16:9', seed: 23 }),
+      makeNormalizedRequest({ aspectRatio: '16:9', count: 4, seed: 23 }),
       'wan2.7-image-pro',
     );
 
@@ -164,7 +170,7 @@ describe('QwenProvider', () => {
       },
       parameters: {
         size: '1280*720',
-        n: 1,
+        n: 4,
         watermark: false,
         seed: 23,
         enable_sequential: false,
