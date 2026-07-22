@@ -36,6 +36,73 @@ export function buildAvailableModelTargets(
   );
 }
 
+export type GenerateConfiguration = {
+  selectedKeys: string[];
+  aspectRatio: string;
+  count: number;
+  seed: string;
+  negativePrompt: string;
+};
+
+function defaultGenerateConfiguration(
+  models: AvailableModelTarget[],
+): GenerateConfiguration {
+  return {
+    selectedKeys: models
+      .slice(0, 1)
+      .map((model) => model.target.provider + ':' + model.target.model),
+    aspectRatio: '',
+    count: 1,
+    seed: '',
+    negativePrompt: '',
+  };
+}
+
+/**
+ * Restores only durable composition settings. Prompt text stays transient so a
+ * prior prompt is never unexpectedly submitted again after returning to Generate.
+ */
+export function restoreGenerateConfiguration(
+  serialized: string | null,
+  models: AvailableModelTarget[],
+): GenerateConfiguration {
+  const fallback = defaultGenerateConfiguration(models);
+  if (!serialized) return fallback;
+
+  try {
+    const candidate: unknown = JSON.parse(serialized);
+    if (!candidate || typeof candidate !== 'object') return fallback;
+    const configuration = candidate as Partial<GenerateConfiguration>;
+    if (
+      !Array.isArray(configuration.selectedKeys) ||
+      !configuration.selectedKeys.every((key) => typeof key === 'string') ||
+      typeof configuration.aspectRatio !== 'string' ||
+      typeof configuration.count !== 'number' ||
+      !Number.isInteger(configuration.count) ||
+      configuration.count < 1 ||
+      typeof configuration.seed !== 'string' ||
+      typeof configuration.negativePrompt !== 'string'
+    ) {
+      return fallback;
+    }
+
+    const availableKeys = new Set(
+      models.map((model) => model.target.provider + ':' + model.target.model),
+    );
+    return {
+      selectedKeys: [
+        ...new Set(configuration.selectedKeys.filter((key) => availableKeys.has(key))),
+      ],
+      aspectRatio: configuration.aspectRatio,
+      count: configuration.count,
+      seed: configuration.seed,
+      negativePrompt: configuration.negativePrompt,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 export type GenerateTaskState = {
   view: 'compose' | 'stage';
   currentGenerationId: string | null;

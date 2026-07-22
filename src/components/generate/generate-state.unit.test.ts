@@ -6,6 +6,7 @@ import {
   buildAvailableModelTargets,
   createInitialGenerateTaskState,
   generateTaskReducer,
+  restoreGenerateConfiguration,
   summarizeGeneration,
 } from './generate-state';
 
@@ -39,6 +40,42 @@ describe('generate state', () => {
         { provider: 'fal', model: 'flux', enabled: false, updatedAt: 'now' },
       ]),
     ).toEqual([]);
+  });
+
+  it('restores composition settings and discards no-longer-available models', () => {
+    const models = buildAvailableModelTargets(providers, []);
+
+    expect(
+      restoreGenerateConfiguration(
+        JSON.stringify({
+          selectedKeys: ['fal:flux', 'retired:model', 'fal:flux'],
+          aspectRatio: '3:2',
+          count: 3,
+          seed: '42',
+          negativePrompt: 'blurry',
+        }),
+        models,
+      ),
+    ).toEqual({
+      selectedKeys: ['fal:flux'],
+      aspectRatio: '3:2',
+      count: 3,
+      seed: '42',
+      negativePrompt: 'blurry',
+    });
+  });
+
+  it('falls back to the first available model for missing or invalid settings', () => {
+    const models = buildAvailableModelTargets(providers, []);
+
+    expect(restoreGenerateConfiguration(null, models)).toMatchObject({
+      selectedKeys: ['fal:flux'],
+      count: 1,
+    });
+    expect(restoreGenerateConfiguration('{bad json', models)).toMatchObject({
+      selectedKeys: ['fal:flux'],
+      count: 1,
+    });
   });
 
   it('ignores stale submit responses and preserves the current task on back', () => {

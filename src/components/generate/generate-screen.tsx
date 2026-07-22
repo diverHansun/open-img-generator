@@ -34,6 +34,8 @@ import {
   buildAvailableModelTargets,
   createInitialGenerateTaskState,
   generateTaskReducer,
+  restoreGenerateConfiguration,
+  type GenerateConfiguration,
 } from './generate-state';
 import styles from './generate-screen.module.css';
 
@@ -56,6 +58,10 @@ function lastSessionStorageKey(projectId: string): string {
   return 'lastSession:' + projectId;
 }
 
+function generateConfigurationStorageKey(projectId: string): string {
+  return 'generateConfiguration:' + projectId;
+}
+
 function readLastSession(projectId: string, sessions: Session[]): string {
   try {
     const stored = window.localStorage.getItem(lastSessionStorageKey(projectId));
@@ -72,6 +78,34 @@ function rememberLastSession(projectId: string, sessionId: string): void {
     window.localStorage.setItem(lastSessionStorageKey(projectId), sessionId);
   } catch {
     // The URL still owns the workspace; this value is only a convenience hint.
+  }
+}
+
+function readGenerateConfiguration(
+  projectId: string,
+  models: ReturnType<typeof buildAvailableModelTargets>,
+): GenerateConfiguration {
+  try {
+    return restoreGenerateConfiguration(
+      window.localStorage.getItem(generateConfigurationStorageKey(projectId)),
+      models,
+    );
+  } catch {
+    return restoreGenerateConfiguration(null, models);
+  }
+}
+
+function rememberGenerateConfiguration(
+  projectId: string,
+  configuration: GenerateConfiguration,
+): void {
+  try {
+    window.localStorage.setItem(
+      generateConfigurationStorageKey(projectId),
+      JSON.stringify(configuration),
+    );
+  } catch {
+    // Saving preferences is optional when browser storage is unavailable.
   }
 }
 
@@ -145,14 +179,13 @@ export function GenerateScreen({
           providers,
           preferenceResult.items,
         );
+        const configuration = readGenerateConfiguration(projectId, models);
         setActiveSessionId(active);
-        setSelectedKeys(
-          new Set(
-            models
-              .slice(0, 1)
-              .map((model) => modelKey(model.target)),
-          ),
-        );
+        setSelectedKeys(new Set(configuration.selectedKeys));
+        setAspectRatio(configuration.aspectRatio);
+        setCount(configuration.count);
+        setSeed(configuration.seed);
+        setNegativePrompt(configuration.negativePrompt);
         setLoadState({
           status: 'ready',
           data: {
@@ -235,6 +268,17 @@ export function GenerateScreen({
         : 1,
     );
   }, [controls.aspectRatios, controls.maxCount]);
+
+  React.useEffect(() => {
+    if (!readyData) return;
+    rememberGenerateConfiguration(projectId, {
+      selectedKeys: [...selectedKeys],
+      aspectRatio,
+      count,
+      seed,
+      negativePrompt,
+    });
+  }, [aspectRatio, count, negativePrompt, projectId, readyData, seed, selectedKeys]);
 
   const changeSession = React.useCallback(
     (id: string) => {
