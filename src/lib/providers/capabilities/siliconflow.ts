@@ -19,10 +19,16 @@ const ASPECT_RATIO_SIZES = {
   '9:16': '720x1280',
 } as const;
 
+const DEFAULT_REMOTE_IMAGE_HOSTS = ['.siliconflow.cn', '.aliyuncs.com'] as const;
+
 function imageSpec(
   model: string,
   displayName: string,
-  options: { supportsBatchSize: boolean; supportsNegativePrompt: boolean },
+  options: {
+    supportsBatchSize: boolean;
+    supportsNegativePrompt: boolean;
+    allowedRemoteHosts?: readonly string[];
+  },
 ): ProviderModelSpec<SiliconFlowImageProfile> {
   return {
     capabilities: {
@@ -47,7 +53,7 @@ function imageSpec(
     },
     imageOutput: {
       delivery: 'remote',
-      allowedRemoteHosts: ['.siliconflow.cn', '.aliyuncs.com'],
+      allowedRemoteHosts: options.allowedRemoteHosts ?? DEFAULT_REMOTE_IMAGE_HOSTS,
     },
   };
 }
@@ -64,6 +70,9 @@ const specs = [
   imageSpec('baidu/ERNIE-Image-Turbo', 'ERNIE-Image-Turbo', {
     supportsBatchSize: false,
     supportsNegativePrompt: false,
+    // Verified from a live ERNIE response. Keep this model-specific instead of
+    // broadening the shared SiliconFlow allowlist.
+    allowedRemoteHosts: ['s3.6scloud.com'],
   }),
 ] satisfies readonly ProviderModelSpec<SiliconFlowImageProfile>[];
 

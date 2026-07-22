@@ -14,6 +14,25 @@ describe('remote image URL policy', () => {
     });
   });
 
+  it('accepts ERNIE Image Turbo output from its verified CDN host', () => {
+    expect(acceptProviderRemoteImage(
+      'siliconflow',
+      'baidu/ERNIE-Image-Turbo',
+      'https://s3.6scloud.com/ernie/result.png?signature=redacted',
+    )).toMatchObject({
+      hostname: 's3.6scloud.com',
+      expiresAt: null,
+    });
+  });
+
+  it('does not broaden ERNIE Image Turbo to lookalike CDN hosts', () => {
+    expect(() => acceptProviderRemoteImage(
+      'siliconflow',
+      'baidu/ERNIE-Image-Turbo',
+      'https://s3.6scloud.com.attacker.example/ernie/result.png',
+    )).toThrow('not declared');
+  });
+
   it.each([
     'http://v3.fal.media/result.png',
     'https://127.0.0.1/result.png',
