@@ -32,8 +32,10 @@ import {
 import { GenerateStage } from './generate-stage';
 import {
   buildAvailableModelTargets,
+  clampGenerateCount,
   createInitialGenerateTaskState,
   generateTaskReducer,
+  parseGenerateCountInput,
   restoreGenerateConfiguration,
   type GenerateConfiguration,
 } from './generate-state';
@@ -127,6 +129,7 @@ export function GenerateScreen({
   const [prompt, setPrompt] = React.useState('');
   const [aspectRatio, setAspectRatio] = React.useState('');
   const [count, setCount] = React.useState(1);
+  const [countInput, setCountInput] = React.useState('1');
   const [seed, setSeed] = React.useState('');
   const [negativePrompt, setNegativePrompt] = React.useState('');
   const [formError, setFormError] = React.useState<TranslationKey | null>(null);
@@ -184,6 +187,7 @@ export function GenerateScreen({
         setSelectedKeys(new Set(configuration.selectedKeys));
         setAspectRatio(configuration.aspectRatio);
         setCount(configuration.count);
+        setCountInput(String(configuration.count));
         setSeed(configuration.seed);
         setNegativePrompt(configuration.negativePrompt);
         setLoadState({
@@ -262,12 +266,12 @@ export function GenerateScreen({
         ? '1:1'
         : controls.aspectRatios[0] ?? '';
     });
-    setCount((current) =>
-      controls.maxCount > 0
-        ? Math.max(1, Math.min(current, controls.maxCount))
-        : 1,
-    );
-  }, [controls.aspectRatios, controls.maxCount]);
+    const normalizedCount = clampGenerateCount(count, controls.maxCount);
+    if (normalizedCount !== count) {
+      setCount(normalizedCount);
+      setCountInput(String(normalizedCount));
+    }
+  }, [controls.aspectRatios, controls.maxCount, count]);
 
   React.useEffect(() => {
     if (!readyData) return;
@@ -366,6 +370,11 @@ export function GenerateScreen({
       setFormError('generate.validationTargets');
       return;
     }
+    const parsedCount = parseGenerateCountInput(countInput, controls.maxCount);
+    if (parsedCount === null) {
+      setFormError('generate.validationCount');
+      return;
+    }
     const parsedSeed = seed.trim() === '' ? null : Number(seed);
     if (parsedSeed !== null && !Number.isInteger(parsedSeed)) {
       setFormError('generate.validationParameters');
@@ -380,7 +389,7 @@ export function GenerateScreen({
           targets,
           sessionId: activeSessionId,
           aspectRatio: aspectRatio || null,
-          count,
+          count: parsedCount,
           seed: controls.canSetSeed ? parsedSeed : null,
           negativePrompt:
             controls.canSetNegativePrompt && negativePrompt.trim()
@@ -437,7 +446,7 @@ export function GenerateScreen({
     aspectRatio,
     controls.canSetNegativePrompt,
     controls.canSetSeed,
-    count,
+    countInput,
     negativePrompt,
     projectId,
     prompt,
@@ -447,6 +456,7 @@ export function GenerateScreen({
     seed,
     submitting,
     targets,
+    controls.maxCount,
   ]);
 
   const backToCompose = React.useCallback(() => {
@@ -568,6 +578,7 @@ export function GenerateScreen({
       prompt={prompt}
       aspectRatio={aspectRatio}
       count={count}
+      countInput={countInput}
       seed={seed}
       negativePrompt={negativePrompt}
       formError={formError ? t(formError) : null}
@@ -598,7 +609,10 @@ export function GenerateScreen({
         setSubmissionError(null);
       }}
       onCountChange={(value) => {
-        setCount(value);
+        setCountInput(value);
+        const parsed = parseGenerateCountInput(value, controls.maxCount);
+        if (parsed !== null) setCount(parsed);
+        setFormError(null);
         setSubmissionError(null);
       }}
       onSeedChange={(value) => {

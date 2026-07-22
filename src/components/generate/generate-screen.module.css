@@ -331,6 +331,17 @@
   font-size: 0.72rem;
 }
 
+.countHint {
+  min-height: 1rem;
+  color: var(--color-ink-faint);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.countHint[data-invalid='true'] {
+  color: var(--color-danger);
+}
+
 .advanced {
   border-top: 1px solid var(--color-line);
 }

@@ -7,7 +7,10 @@ import { Input } from '@/components/ui/input';
 import { workspaceRoute } from '@/lib/routes';
 import type { GenerationControls, GenerationTarget } from '@/lib/web-client';
 
-import type { AvailableModelTarget } from './generate-state';
+import {
+  parseGenerateCountInput,
+  type AvailableModelTarget,
+} from './generate-state';
 import styles from './generate-screen.module.css';
 
 function targetKey(target: GenerationTarget): string {
@@ -22,11 +25,12 @@ export type GenerateInspectorProps = {
   controls: GenerationControls;
   aspectRatio: string;
   count: number;
+  countInput: string;
   seed: string;
   negativePrompt: string;
   onToggleModel: (key: string) => void;
   onAspectRatioChange: (value: string) => void;
-  onCountChange: (value: number) => void;
+  onCountChange: (value: string) => void;
   onSeedChange: (value: string) => void;
   onNegativePromptChange: (value: string) => void;
 };
@@ -39,6 +43,7 @@ export function GenerateInspector({
   controls,
   aspectRatio,
   count,
+  countInput,
   seed,
   negativePrompt,
   onToggleModel,
@@ -48,6 +53,10 @@ export function GenerateInspector({
   onNegativePromptChange,
 }: GenerateInspectorProps) {
   const { t } = useLocale();
+  const countInputId = 'generation-count';
+  const countHintId = countInputId + '-hint';
+  const validCount = parseGenerateCountInput(countInput, controls.maxCount);
+  const hasCountError = controls.maxCount > 0 && validCount === null;
 
   return (
     <details className={styles.inspector} open>
@@ -136,13 +145,30 @@ export function GenerateInspector({
           <label>
             <span>{t('generate.count')}</span>
             <Input
+              id={countInputId}
               type="number"
               min={1}
               max={Math.max(1, controls.maxCount)}
-              value={count}
+              step={1}
+              inputMode="numeric"
+              value={countInput}
               disabled={controls.maxCount === 0}
-              onChange={(event) => onCountChange(Number(event.target.value))}
+              aria-invalid={hasCountError || undefined}
+              aria-describedby={controls.maxCount > 0 ? countHintId : undefined}
+              onChange={(event) => onCountChange(event.target.value)}
             />
+            {controls.maxCount > 0 ? (
+              <small
+                id={countHintId}
+                className={styles.countHint}
+                data-invalid={hasCountError || undefined}
+                role={hasCountError ? 'alert' : undefined}
+              >
+                {hasCountError
+                  ? t('generate.countRangeError', { max: controls.maxCount })
+                  : t('generate.countHint', { max: controls.maxCount })}
+              </small>
+            ) : null}
           </label>
         </div>
 

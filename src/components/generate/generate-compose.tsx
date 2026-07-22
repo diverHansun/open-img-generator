@@ -34,6 +34,7 @@ export type GenerateComposeProps = {
   prompt: string;
   aspectRatio: string;
   count: number;
+  countInput: string;
   seed: string;
   negativePrompt: string;
   formError: string | null;
@@ -47,7 +48,7 @@ export type GenerateComposeProps = {
   onPromptChange: (value: string) => void;
   onToggleModel: (key: string) => void;
   onAspectRatioChange: (value: string) => void;
-  onCountChange: (value: number) => void;
+  onCountChange: (value: string) => void;
   onSeedChange: (value: string) => void;
   onNegativePromptChange: (value: string) => void;
   onClear: () => void;
@@ -73,6 +74,7 @@ export function GenerateCompose({
   prompt,
   aspectRatio,
   count,
+  countInput,
   seed,
   negativePrompt,
   formError,
@@ -305,6 +307,7 @@ export function GenerateCompose({
         controls={controls}
         aspectRatio={aspectRatio}
         count={count}
+        countInput={countInput}
         seed={seed}
         negativePrompt={negativePrompt}
         onToggleModel={onToggleModel}

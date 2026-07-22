@@ -4,8 +4,10 @@ import type { GenerationView, ProviderInfo } from '@/lib/web-client';
 
 import {
   buildAvailableModelTargets,
+  clampGenerateCount,
   createInitialGenerateTaskState,
   generateTaskReducer,
+  parseGenerateCountInput,
   restoreGenerateConfiguration,
   summarizeGeneration,
 } from './generate-state';
@@ -76,6 +78,16 @@ describe('generate state', () => {
       selectedKeys: ['fal:flux'],
       count: 1,
     });
+  });
+
+  it('accepts only whole count values inside the current model range', () => {
+    expect(parseGenerateCountInput('4', 4)).toBe(4);
+    expect(parseGenerateCountInput('5', 4)).toBeNull();
+    expect(parseGenerateCountInput('0', 4)).toBeNull();
+    expect(parseGenerateCountInput('', 4)).toBeNull();
+    expect(parseGenerateCountInput('1.5', 4)).toBeNull();
+    expect(clampGenerateCount(5, 4)).toBe(4);
+    expect(clampGenerateCount(0, 4)).toBe(1);
   });
 
   it('ignores stale submit responses and preserves the current task on back', () => {

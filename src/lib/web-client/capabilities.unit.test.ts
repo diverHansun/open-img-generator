@@ -41,7 +41,7 @@ describe('web-client capabilities', () => {
   it('derives only the controls shared by selected models', () => {
     expect(deriveGenerationControls(providers, targets)).toEqual({
       aspectRatios: ['1:1'],
-      maxCount: 1,
+      maxCount: 4,
       canSetSeed: false,
       canSetNegativePrompt: false,
     });
@@ -69,9 +69,16 @@ describe('web-client capabilities', () => {
       ),
     ).toThrow('not shared');
 
+    expect(
+      buildSubmitGenerationRequest(
+        { prompt: 'A cat', targets, sessionId: 'session-1', aspectRatio: '1:1', count: 4 },
+        providers,
+      ),
+    ).toMatchObject({ count: 4 });
+
     expect(() =>
       buildSubmitGenerationRequest(
-        { prompt: 'A cat', targets, sessionId: 'session-1', aspectRatio: '1:1', count: 2 },
+        { prompt: 'A cat', targets, sessionId: 'session-1', aspectRatio: '1:1', count: 5 },
         providers,
       ),
     ).toThrow('Count exceeds');

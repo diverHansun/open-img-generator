@@ -53,11 +53,10 @@ export function deriveGenerationControls(
 
   return {
     aspectRatios: intersection(capabilities.map((item) => item.supportedAspectRatios)),
-    maxCount: Math.min(
-      ...capabilities.map((item) =>
-        item.protocol === 'sync' ? Math.min(item.maxCount, 1) : item.maxCount,
-      ),
-    ),
+    // The API validates each target against its declared maxCount. Use the
+    // same shared ceiling here so the UI neither hides valid sync batches nor
+    // offers a count that one selected model will reject.
+    maxCount: Math.min(...capabilities.map((item) => item.maxCount)),
     canSetSeed: capabilities.every((item) => item.supportsSeed),
     canSetNegativePrompt: capabilities.every((item) => item.supportsNegativePrompt),
   };

@@ -71,16 +71,16 @@ describe('validator', () => {
     expect(() => validate(makeParams({ count: 10 }), { db })).toThrow('Count 10 exceeds max 4');
   });
 
-  it('throws when a sync target uses count greater than one', () => {
+  it('accepts a sync target count within its declared maximum', () => {
     expect(() =>
       validate(
         makeParams({
           targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
-          count: 2,
+          count: 4,
         }),
         { db },
       ),
-    ).toThrow('Sync provider supports count=1 only in MVP');
+    ).not.toThrow();
   });
 
   it('rejects a seed when any selected target does not support it', () => {

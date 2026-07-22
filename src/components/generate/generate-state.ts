@@ -44,6 +44,24 @@ export type GenerateConfiguration = {
   negativePrompt: string;
 };
 
+/** Returns a submitted count only when the editable input is in the active range. */
+export function parseGenerateCountInput(
+  value: string,
+  maxCount: number,
+): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const count = Number(value);
+  return Number.isSafeInteger(count) && count >= 1 && count <= maxCount
+    ? count
+    : null;
+}
+
+/** Keeps a persisted count valid when the selected models change. */
+export function clampGenerateCount(count: number, maxCount: number): number {
+  if (maxCount < 1) return 1;
+  return Math.min(Math.max(count, 1), maxCount);
+}
+
 function defaultGenerateConfiguration(
   models: AvailableModelTarget[],
 ): GenerateConfiguration {

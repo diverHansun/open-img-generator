@@ -87,9 +87,6 @@ export function validate(
     if (count > capabilities.maxCount) {
       throw new ValidationError(`Count ${count} exceeds max ${capabilities.maxCount}`);
     }
-    if (capabilities.protocol === 'sync' && count > 1) {
-      throw new ValidationError('Sync provider supports count=1 only in MVP');
-    }
     if (
       params.aspectRatio &&
       !capabilities.supportedAspectRatios.includes(params.aspectRatio)
