@@ -300,6 +300,16 @@
   right: 3.5rem;
 }
 
+.singleDownload {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  width: 2.5rem;
+  padding-inline: 0;
+  background: color-mix(in oklch, var(--color-surface) 90%, transparent);
+  backdrop-filter: blur(12px);
+}
+
 .imageFavoriteError {
   position: absolute;
   right: var(--space-4);

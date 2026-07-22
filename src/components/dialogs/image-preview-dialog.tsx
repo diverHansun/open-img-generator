@@ -106,6 +106,20 @@ export function ImagePreviewDialog({
               onError={() => setImageFailed(true)}
             />
           )}
+          {downloadUrl ? (
+            <Button asChild type="button" variant="secondary" className={styles.downloadOverlay}>
+              <a
+                href={downloadUrl}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t('dialogs.downloadImage')}
+                title={t('dialogs.downloadImage')}
+              >
+                <Download aria-hidden="true" />
+              </a>
+            </Button>
+          ) : null}
         </figure>
 
         <aside className={styles.details}>
@@ -161,16 +175,8 @@ export function ImagePreviewDialog({
             </p>
           ) : null}
 
-          {downloadUrl || onDelete ? (
+          {onDelete ? (
             <div className={styles.imageActions}>
-              {downloadUrl ? (
-                <Button asChild type="button" variant="secondary">
-                  <a href={downloadUrl} download>
-                    <Download aria-hidden="true" />
-                    {t('dialogs.downloadImage')}
-                  </a>
-                </Button>
-              ) : null}
               {onDelete ? (
                 <Button
                   type="button"

@@ -16,6 +16,7 @@ import { reconcileGenerationSnapshot } from '@/components/generation/generation-
 import { useLocale } from '@/components/i18n/locale-provider';
 import { Button } from '@/components/ui/button';
 import { accessibleExcerpt } from '@/lib/a11y';
+import { triggerImageDownload } from '@/lib/web-client/image-download';
 import { workspaceRoute } from '@/lib/routes';
 import {
   areAllJobsTerminal,
@@ -226,6 +227,7 @@ export function GenerateStage({
       const hadPreviousOverride = favoriteOverrides.current.has(imageId);
       const previousOverride = favoriteOverrides.current.get(imageId);
       const optimistic = patchFavorite(current, imageId, nextFavorited);
+      if (nextFavorited) triggerImageDownload(imageId);
       favoriteOverrides.current.set(imageId, nextFavorited);
       favoritePendingRef.current.add(imageId);
       setFavoriteError(false);

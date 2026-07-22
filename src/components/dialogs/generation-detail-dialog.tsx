@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ArrowLeft, ImageOff } from 'lucide-react';
+import { ArrowLeft, Download, ImageOff } from 'lucide-react';
 
 import { FavoriteButton } from '@/components/generation/favorite-button';
 import {
@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { accessibleExcerpt } from '@/lib/a11y';
 import { formatDateTime } from '@/lib/i18n/format';
+import { imageDownloadUrl, triggerImageDownload } from '@/lib/web-client/image-download';
 import {
   ApiClientError,
   getBrowserWebClientRuntime,
@@ -166,6 +167,7 @@ export function GenerationDetailDialog({
 
   const updateFavorite = React.useCallback(
     async (imageId: string, next: boolean) => {
+      if (next) triggerImageDownload(imageId);
       setFavoriteMutations((current) => ({
         ...current,
         [imageId]: { value: next, pending: true, error: null },
@@ -254,6 +256,18 @@ export function GenerationDetailDialog({
               {t('dialogs.backToDetail')}
             </Button>
             <ResultImage image={selectedImage} prompt={view.prompt} />
+            <Button asChild type="button" variant="secondary" className={styles.singleDownload}>
+              <a
+                href={imageDownloadUrl(selectedImage.id)}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t('dialogs.downloadImage')}
+                title={t('dialogs.downloadImage')}
+              >
+                <Download aria-hidden="true" />
+              </a>
+            </Button>
             <FavoriteButton
               favorited={
                 favoriteMutations[selectedImage.id]?.value ?? selectedImage.favorited
