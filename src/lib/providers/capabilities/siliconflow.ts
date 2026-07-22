@@ -53,11 +53,15 @@ function imageSpec(
 }
 
 const specs = [
-  imageSpec('Kwai-Kolors/Kolors', 'Kolors', {
-    supportsBatchSize: true,
+  imageSpec('Tongyi-MAI/Z-Image-Turbo', 'Z-Image Turbo', {
+    supportsBatchSize: false,
+    supportsNegativePrompt: false,
+  }),
+  imageSpec('Tongyi-MAI/Z-Image', 'Z-Image', {
+    supportsBatchSize: false,
     supportsNegativePrompt: true,
   }),
-  imageSpec('Tongyi-MAI/Z-Image-Turbo', 'Z-Image Turbo', {
+  imageSpec('baidu/ERNIE-Image-Turbo', 'ERNIE-Image-Turbo', {
     supportsBatchSize: false,
     supportsNegativePrompt: false,
   }),

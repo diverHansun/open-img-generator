@@ -29,7 +29,7 @@ describe('SiliconFlowProvider', () => {
     } as Response);
   }
 
-  it('submits a sync Kolors request and parses image metadata', async () => {
+  it('submits a sync Z-Image request and parses image metadata', async () => {
     const timeout = vi.spyOn(AbortSignal, 'timeout')
       .mockReturnValue(new AbortController().signal);
     mockFetch({ images: [{ url: 'https://cdn.siliconflow.cn/result.png' }], seed: 123 });
@@ -42,7 +42,7 @@ describe('SiliconFlowProvider', () => {
         negativePrompt: 'blurry',
         seed: 123,
       }),
-      'Kwai-Kolors/Kolors',
+      'Tongyi-MAI/Z-Image',
     );
 
     expect(result.kind).toBe('sync');
@@ -65,10 +65,9 @@ describe('SiliconFlowProvider', () => {
       'Bearer siliconflow-test-key',
     );
     expect(JSON.parse(init?.body as string)).toMatchObject({
-      model: 'Kwai-Kolors/Kolors',
+      model: 'Tongyi-MAI/Z-Image',
       prompt: 'A cat wearing a space helmet',
       image_size: '720x1280',
-      batch_size: 1,
       negative_prompt: 'blurry',
       seed: 123,
     });
@@ -80,17 +79,17 @@ describe('SiliconFlowProvider', () => {
 
     await provider.submit(
       makeNormalizedRequest({ providerOptions: { guidance_scale: 7, model: 'ignored' } }),
-      'Kwai-Kolors/Kolors',
+      'Tongyi-MAI/Z-Image',
     );
 
     const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
     expect(JSON.parse(init?.body as string)).toMatchObject({ guidance_scale: 7 });
-    expect(JSON.parse(init?.body as string).model).toBe('Kwai-Kolors/Kolors');
+    expect(JSON.parse(init?.body as string).model).toBe('Tongyi-MAI/Z-Image');
   });
 
   it('maps provider HTTP errors and missing images', async () => {
     mockFetch({ message: 'invalid image size' }, 422);
-    const invalid = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    const invalid = await provider.submit(makeNormalizedRequest(), 'Tongyi-MAI/Z-Image');
     expect(invalid.kind).toBe('failed');
     if (invalid.kind === 'failed') {
       expect(invalid.error.code).toBe('INVALID_REQUEST');
@@ -102,11 +101,11 @@ describe('SiliconFlowProvider', () => {
     }
 
     mockFetch({ images: [] });
-    const empty = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    const empty = await provider.submit(makeNormalizedRequest(), 'Tongyi-MAI/Z-Image');
     expect(empty.kind).toBe('failed');
 
     mockFetch({ message: 'bad request' }, 400);
-    const badRequest = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    const badRequest = await provider.submit(makeNormalizedRequest(), 'Tongyi-MAI/Z-Image');
     expect(badRequest.kind).toBe('failed');
     if (badRequest.kind === 'failed') {
       expect(badRequest.error.code).toBe('INVALID_REQUEST');
@@ -117,7 +116,7 @@ describe('SiliconFlowProvider', () => {
     const timeout = Object.assign(new Error('request timed out'), { name: 'TimeoutError' });
     global.fetch = vi.fn().mockRejectedValue(timeout);
 
-    const result = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    const result = await provider.submit(makeNormalizedRequest(), 'Tongyi-MAI/Z-Image');
     expect(result.kind).toBe('failed');
     if (result.kind === 'failed') {
       expect(result.error.code).toBe('TIMEOUT');
@@ -132,7 +131,7 @@ describe('SiliconFlowProvider', () => {
   ])('maps HTTP %s with the correct retry policy', async (status, payload, code, retryable) => {
     mockFetch(payload, status);
 
-    const result = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    const result = await provider.submit(makeNormalizedRequest(), 'Tongyi-MAI/Z-Image');
     expect(result.kind).toBe('failed');
     if (result.kind === 'failed') {
       expect(result.error.code).toBe(code);
@@ -143,7 +142,7 @@ describe('SiliconFlowProvider', () => {
   it('treats ambiguous transport failures as retryable TIMEOUT outcomes', async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('socket closed'));
 
-    const result = await provider.submit(makeNormalizedRequest(), 'Kwai-Kolors/Kolors');
+    const result = await provider.submit(makeNormalizedRequest(), 'Tongyi-MAI/Z-Image');
     expect(result.kind).toBe('failed');
     if (result.kind === 'failed') {
       expect(result.error.code).toBe('TIMEOUT');
@@ -152,18 +151,20 @@ describe('SiliconFlowProvider', () => {
     }
   });
 
-  it('does not send Kolors-only batch_size to Z-Image Turbo', async () => {
-    const model = 'Tongyi-MAI/Z-Image-Turbo';
-    mockFetch({ images: [{ url: 'https://cdn.siliconflow.cn/result.png' }] });
+  it.each(['Tongyi-MAI/Z-Image-Turbo', 'baidu/ERNIE-Image-Turbo'])(
+    'does not send batch_size to %s',
+    async (model) => {
+      mockFetch({ images: [{ url: 'https://cdn.siliconflow.cn/result.png' }] });
 
-    const result = await provider.submit(makeNormalizedRequest(), model);
+      const result = await provider.submit(makeNormalizedRequest(), model);
 
-    expect(result.kind).toBe('sync');
-    const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
-    const body = JSON.parse(String(init?.body));
-    expect(body).toMatchObject({ model, image_size: '1024x1024' });
-    expect(body).not.toHaveProperty('batch_size');
-  });
+      expect(result.kind).toBe('sync');
+      const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+      const body = JSON.parse(String(init?.body));
+      expect(body).toMatchObject({ model, image_size: '1024x1024' });
+      expect(body).not.toHaveProperty('batch_size');
+    },
+  );
 
   it('rejects unknown models before sending a request', async () => {
     global.fetch = vi.fn();

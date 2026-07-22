@@ -49,9 +49,13 @@ describe('registry', () => {
     const provider = getById('siliconflow');
     expect(provider).toBeDefined();
     expect(provider?.id).toBe('siliconflow');
-    expect(provider?.capabilities.has('Kwai-Kolors/Kolors')).toBe(true);
+    expect(provider?.capabilities.has('Kwai-Kolors/Kolors')).toBe(false);
     expect(provider?.capabilities.has('Tongyi-MAI/Z-Image-Turbo')).toBe(true);
-    expect(provider?.capabilities.has('Tongyi-MAI/Z-Image')).toBe(false);
+    expect(provider?.capabilities.has('Tongyi-MAI/Z-Image')).toBe(true);
+    expect(provider?.capabilities.has('baidu/ERNIE-Image-Turbo')).toBe(true);
+    expect(
+      provider?.capabilities.get('Tongyi-MAI/Z-Image')?.supportsNegativePrompt,
+    ).toBe(true);
   });
 
   it('returns zhipu provider when ZHIPU_API_KEY is set', () => {
