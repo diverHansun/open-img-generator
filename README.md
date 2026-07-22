@@ -59,12 +59,33 @@ npm start
 
 生产环境应为 `DATABASE_URL`、`LOCAL_STORAGE_DIR` 和 `APP_LOG_DIR` 使用持久化目录，并确保运行用户具有读写权限。移动数据库或存储目录前应一起备份，不要手工复制 marker 到另一套数据库。
 
+## macOS 桌面版
+
+桌面版显示名称为 `open image generator`，Bundle ID 为 `com.diverhansun.openimagegenerator`。它在 Electron 窗口内运行随包携带的本机 Next 服务，不会打开普通浏览器；新安装的数据位于当前用户的标准 Application Support 目录，不读取 Web 开发目录或项目 `.env` 中的 Provider Key。
+
+```bash
+# 开发模式（使用独立的 Development 用户数据目录）
+npm run desktop:dev
+
+# 当前机器架构的真实生产运行时 smoke
+npm run build
+node scripts/prepare-desktop-runtime.mjs arm64
+npm run desktop:smoke -- arm64
+
+# 分别生成 Apple Silicon / Intel DMG
+npm run desktop:package:mac:arm64
+npm run desktop:package:mac:x64
+```
+
+未签名测试产物输出到 `dist/desktop/`，不会进入 Git。API Key 正常情况下由 macOS Keychain 保护本地凭据主密钥；系统安全存储失败时只在当前 App 会话内使用，退出后需重新输入。签名、公证和试装步骤见 [macOS 分发指南](./docs/mvp/desktop-shell/macos-distribution.md)。
+
 ## 验证
 
 ```bash
 npm run typecheck
 npm test
 npm run build
+npm run desktop:compile
 ```
 
 ## 许可证

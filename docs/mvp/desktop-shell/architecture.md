@@ -32,18 +32,22 @@ electron/
   runtime/
     local-server.ts           # Next 运行时的启动、健康检查、终止（内部）
     environment.ts            # userData 到既有环境变量的映射（内部）
+    desktop-preferences.ts    # 桌面下载目录偏好（内部）
   security/
-    credentials.ts            # Keychain 主密钥与临时会话模式（内部）
+    credential-secret.ts      # Keychain 主密钥与临时会话模式（内部）
     external-links.ts         # Provider 官方 HTTPS 链接白名单（内部）
   preload.ts                  # 受限、稳定的渲染页面桥接面
-  shared/
-    desktop-api.ts            # preload 与页面共用的类型契约
+src/lib/desktop-bridge/
+  index.ts                    # preload 与页面共用的类型契约
 scripts/
-  desktop-build.mjs           # 将 Next 生产运行时置入桌面产物的构建编排
-electron-builder.yml          # macOS 产物、Bundle ID、原生依赖打包规则
+  build-electron.mjs          # 编译 main/preload 并创建最小打包入口
+  prepare-desktop-runtime.mjs # 组装 Next standalone 并重编译 SQLite
+  package-desktop.mjs         # 按目标架构编排生产构建与 DMG
+  smoke-desktop-runtime.mjs   # 在 Electron Node ABI 下验证真实运行时
+electron-builder.config.cjs   # macOS 产物、Bundle ID、资源打包规则
 ```
 
-`electron/` 是桌面专属实现，不能被 `src/` 中的业务模块反向依赖。`shared/desktop-api.ts` 是唯一可以被渲染代码引用的桌面边界；它只描述经批准的原生能力，不包含 API Key、文件路径或 Electron 实例。
+`electron/` 是桌面专属实现，不能被 `src/` 中的业务模块反向依赖。`src/lib/desktop-bridge/index.ts` 是唯一可以被渲染代码引用的桌面边界；它只描述经批准的原生能力，不包含 API Key 或 Electron 实例。数据目录和下载目录仅作为设置页所需的只读运行信息返回，页面不能传入任意路径让主进程操作。
 
 ## 4. Architectural Constraints & Trade-offs
 
