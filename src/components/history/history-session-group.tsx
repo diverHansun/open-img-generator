@@ -6,7 +6,6 @@ import { ChevronDown, Trash2 } from 'lucide-react';
 import { GenerationStatus } from '@/components/generation/generation-status';
 import { ThumbnailStrip } from '@/components/generation/thumbnail-strip';
 import { useLocale } from '@/components/i18n/locale-provider';
-import { LoadMoreButton } from '@/components/ui/load-more-button';
 import { formatDateTime, formatRelativeTime } from '@/lib/i18n/format';
 import { accessibleExcerpt } from '@/lib/a11y';
 import type { GenerationSummary, HistoryGroup } from '@/lib/web-client';
@@ -46,9 +45,34 @@ export function HistorySessionGroup({
   onDelete: (generationId: string) => void;
 }) {
   const { locale, t } = useLocale();
+  const loadMoreSentinel = React.useRef<HTMLDivElement>(null);
   const sessionName = group.session.title?.trim() || t('history.untitledSession');
   const contentId = 'history-session-' + group.session.id;
   const triggerId = contentId + '-trigger';
+
+  React.useEffect(() => {
+    const sentinel = loadMoreSentinel.current;
+    if (
+      !sentinel ||
+      !expanded ||
+      !group.nextCursor ||
+      loadState.loading ||
+      loadState.error ||
+      typeof IntersectionObserver === 'undefined'
+    ) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.unobserve(sentinel);
+        onLoadMore();
+      },
+      { rootMargin: '0px 0px 320px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [expanded, group.nextCursor, loadState.error, loadState.loading, onLoadMore]);
 
   return (
     <section className={styles.group}>
@@ -166,13 +190,13 @@ export function HistorySessionGroup({
           ) : null}
 
           {group.nextCursor ? (
-            <div className={styles.groupFooter}>
-              <LoadMoreButton
-                label={t('history.loadMore')}
-                loadingLabel={t('history.loadingMore')}
-                loading={loadState.loading}
-                onClick={onLoadMore}
-              />
+            <div
+              ref={loadMoreSentinel}
+              className={styles.loadMoreSentinel}
+              role={loadState.loading ? 'status' : undefined}
+              aria-live="polite"
+            >
+              {loadState.loading ? t('history.loadingMore') : null}
             </div>
           ) : null}
         </div>

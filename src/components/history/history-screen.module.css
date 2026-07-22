@@ -201,10 +201,13 @@
   font-size: 0.75rem;
 }
 
-.groupFooter {
-  display: flex;
-  justify-content: center;
-  padding: var(--space-4) var(--space-2) var(--space-1);
+.loadMoreSentinel {
+  display: grid;
+  min-height: 1.5rem;
+  place-items: center;
+  margin: var(--space-3) var(--space-2) 0;
+  color: var(--color-ink-muted);
+  font-size: 0.75rem;
 }
 
 .pagination {
