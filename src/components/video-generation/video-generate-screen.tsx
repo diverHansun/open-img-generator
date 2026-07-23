@@ -98,7 +98,7 @@ export function VideoGenerateScreen({ projectId }: { projectId: string }) {
         </select>
       </label>
       <label>提示词
-        <textarea rows={7} maxLength={4000} value={prompt} onChange={(event) => setPrompt(event.target.value)} style={{ width: '100%' }} />
+        <textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} style={{ width: '100%' }} />
       </label>
       <Button disabled={busy || !modelKey || !sessionId || !prompt.trim()} onClick={() => void submit()}>
         {busy ? '正在提交…' : '生成视频'}

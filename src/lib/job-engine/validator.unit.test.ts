@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../../tests/helpers/db';
 import { createSession } from '../db/queries/sessions';
-import { validate } from './validator';
+import { MAX_PROMPT_LENGTH, validate } from './validator';
 import type { SubmitGenerationParams } from './types';
 
 describe('validator', () => {
@@ -30,6 +30,18 @@ describe('validator', () => {
 
   it('passes for a valid Fal request', () => {
     expect(() => validate(makeParams(), { db })).not.toThrow();
+  });
+
+  it('allows prompts up to the service safety limit', () => {
+    expect(() =>
+      validate(makeParams({ prompt: 'x'.repeat(MAX_PROMPT_LENGTH) }), { db }),
+    ).not.toThrow();
+  });
+
+  it('rejects prompts above the service safety limit', () => {
+    expect(() =>
+      validate(makeParams({ prompt: 'x'.repeat(MAX_PROMPT_LENGTH + 1) }), { db }),
+    ).toThrow('Prompt exceeds the maximum allowed length');
   });
 
   it('requires a valid client request id for durable admission', () => {

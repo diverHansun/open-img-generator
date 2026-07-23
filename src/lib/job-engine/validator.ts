@@ -8,6 +8,11 @@ export type ValidationContext = {
   db: DbClient;
 };
 
+// This bounds our own request handling and durable snapshots. Exact prompt
+// limits remain a provider concern because they differ by model and change
+// independently from this service.
+export const MAX_PROMPT_LENGTH = 16_000;
+
 export function validate(
   params: SubmitGenerationParams,
   ctx: ValidationContext,
@@ -18,6 +23,9 @@ export function validate(
   normalizeClientRequestId(params.clientRequestId);
   if (typeof params.prompt !== 'string' || params.prompt.trim().length === 0) {
     throw new ValidationError('Prompt is required');
+  }
+  if (params.prompt.length > MAX_PROMPT_LENGTH) {
+    throw new ValidationError('Prompt exceeds the maximum allowed length');
   }
   if (!Array.isArray(params.targets) || params.targets.length === 0) {
     throw new ValidationError('At least one target is required');

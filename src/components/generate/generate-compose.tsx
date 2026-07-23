@@ -213,7 +213,6 @@ export function GenerateCompose({
           <label htmlFor="generation-prompt">{t('generate.composeTitle')}</label>
           <textarea
             id="generation-prompt"
-            maxLength={4000}
             rows={7}
             value={prompt}
             placeholder={t('generate.promptPlaceholder')}
