@@ -10,5 +10,5 @@
 | C4 | API 响应 | 无 key 字段 |
 | C5 | 损坏库文件 | 回退 env + warning |
 | C6 | round-trip | 解密结果与写入一致，文件不含明文 key |
-| C7 | 文件权限 | 用户目录 0700、凭据文件 0600 |
+| C7 | 文件权限 | POSIX：用户目录 0700、凭据文件 0600；Windows：行为与内容可读回，不伪装 ACL 的 mode 断言 |
 | C8 | 缺 master key | 读取已有 store 明确失败；registry 仍可回退 env |

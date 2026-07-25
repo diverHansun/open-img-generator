@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { providerMetadata } from '../../src/lib/provider-config/provider-metadata';
 
 import {
   createDesktopDataPaths,
@@ -23,7 +24,10 @@ describe('desktop runtime environment', () => {
   it('protects the loopback server and removes provider environment keys', () => {
     const paths = createDesktopDataPaths('/tmp/open-image-generator-user');
     const environment = createDesktopRuntimeEnvironment({
-      baseEnvironment: { FAL_KEY: 'must-not-leak', PATH: '/usr/bin' },
+      baseEnvironment: Object.fromEntries([
+        ...providerMetadata.map((provider) => [provider.credentialName, 'must-not-leak']),
+        ['PATH', '/usr/bin'],
+      ]),
       paths,
       port: 43123,
       authToken: 'launch-token',
@@ -45,6 +49,9 @@ describe('desktop runtime environment', () => {
       FAL_KEY: '',
       PATH: '/usr/bin',
     });
+    for (const provider of providerMetadata) {
+      expect(environment[provider.credentialName]).toBe('');
+    }
   });
 
   it('does not pass a master secret in session-memory mode', () => {

@@ -20,6 +20,7 @@ import {
   storagePathHash,
   verifyStorageOwnership,
 } from './ownership';
+import { toPortableStoragePath } from './relative-path';
 import { logSafeEvent } from '../observability/safe-logger';
 
 export type CleanupOptions = {
@@ -111,7 +112,7 @@ export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult
   const referenced = new Set([
     ...listStoragePaths(client),
     ...listVideoStoragePaths(client),
-  ]);
+  ].map(toPortableStoragePath));
   logSafeEvent({
     event: 'storage.cleanup_started',
     runId,
@@ -175,9 +176,9 @@ export function cleanupStoredImages(options: CleanupOptions = {}): CleanupResult
       listGenerationJobResultSnapshots(client),
     );
     for (const absolute of walkFiles(root)) {
-      const relative = path.relative(root, absolute);
+      const relative = toPortableStoragePath(path.relative(root, absolute));
       if (isStorageInternalPath(relative)) continue;
-      const stagingPrefix = `.staging${path.sep}`;
+      const stagingPrefix = '.staging/';
       if (relative.startsWith(stagingPrefix)) {
         const match = /^([0-9a-f-]{36})\.[a-z0-9]+$/i.exec(path.basename(relative));
         if (match && referencedStagingIds.has(match[1]!)) continue;

@@ -425,6 +425,16 @@ describe('storage', () => {
     expect(() => getReadStream('../../../etc/passwd')).toThrow(StorageError);
   });
 
+  it.each([
+    '/absolute/image.png',
+    'C:\\outside\\image.png',
+    'C:outside\\image.png',
+    '\\\\server\\share\\image.png',
+    '//server/share/image.png',
+  ])('rejects non-relative storage path %s', (storagePath) => {
+    expect(() => getReadStream(storagePath)).toThrow(StorageError);
+  });
+
   it('removes a stored file within the storage root', () => {
     assertStorageWritable();
     const storagePath = '2026/07/loser.png';

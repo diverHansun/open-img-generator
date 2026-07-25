@@ -4,17 +4,15 @@
 
 ## 本地开发
 
-项目使用偶数版本 Node.js LTS；推荐 Node.js 24。
+项目使用偶数版本 Node.js LTS；Windows 推荐安装 Node.js 24 LTS x64。Windows PowerShell 的唯一受支持启动路径是：
 
-```bash
-nvm use
-cp .env.example .env
-npm install
-npm run db:migrate
+```powershell
+Copy-Item .env.example .env.local
+npm ci
 npm run dev
 ```
 
-浏览器访问 [http://localhost:3000](http://localhost:3000)。Provider API Key 只配置在根目录 `.env`，不要写进前端代码。
+macOS/Linux 可使用等价命令复制 `.env.example` 后执行 `npm ci && npm run dev`。`npm run dev` 会先自动迁移数据库，并固定监听 [http://localhost:3000](http://localhost:3000)；不要改用 `127.0.0.1`，两者属于不同浏览器 origin，会分裂 localStorage。Provider API Key 只配置在根目录 `.env.local`，不要写进前端代码。
 
 至少配置一家 Provider：
 
@@ -23,7 +21,11 @@ FAL_KEY=
 ZENMUX_API_KEY=
 ```
 
-修改 `.env` 后需要重新启动开发服务。若未配置任何 Provider，页面会保持可访问并展示真实空状态，但不会允许提交生成任务。
+修改 `.env.local` 后需要重新启动开发服务。若未配置任何 Provider，页面会保持可访问并展示真实空状态，但不会允许提交生成任务。
+
+未配置路径覆盖时，development 数据全部保留在仓库的 `./data/`：SQLite 为 `data/app.db`，图片为 `data/images/`，设置与加密凭据为 `data/config/`，日志为 `data/logs/`。Edge 与 Chrome 各自保存浏览器 localStorage，所以界面偏好不会互通；它们访问同一个本机服务时仍共享上述服务端数据。清理浏览器站点数据不会删除 `./data/`。
+
+Web 端下载继续由浏览器管理，下载位置和提示行为以 Edge/Chrome 设置为准；普通浏览器页面不会获得 Electron 的原生目录选择能力。
 
 ### 网络可靠性与透明代理
 
@@ -43,21 +45,22 @@ TRUSTED_PROXY_IMAGE_HOSTS=v3b.fal.media
 
 ### 图片保留与导出
 
-图片字节保存在 `LOCAL_STORAGE_DIR`（默认 `./data/images`），SQLite 只保存 Generation/Job、图片元数据和清理墓碑。未收藏图片默认永不自动清理；在 Web 的“设置”中启用后，超过指定天数的既有和未来未收藏图片会在下一轮清理时删除。收藏图片持续保留，直到用户主动删除；文件若在应用外丢失，收藏意图仍保留并显示“图片已过期清理”。下载只导出一份副本，不延长应用内部副本的保留期；自动过期或单图删除后，历史仍保留并显示对应原因。
+图片字节默认保存在 development 的 `./data/images`，也可用 `LOCAL_STORAGE_DIR` 覆盖。SQLite 只保存 Generation/Job、图片元数据和清理墓碑。未收藏图片默认永不自动清理；在 Web 的“设置”中启用后，超过指定天数的既有和未来未收藏图片会在下一轮清理时删除。收藏图片持续保留，直到用户主动删除；文件若在应用外丢失，收藏意图仍保留并显示“图片已过期清理”。下载只导出一份副本，不延长应用内部副本的保留期；自动过期或单图删除后，历史仍保留并显示对应原因。
 
-存储根目录通过 `.open-image-storage.json` 与当前 `DATABASE_URL` 配对；不匹配时写入、删除和自动清理会安全拒绝，避免测试数据库或第二实例误删真实媒体。安全审计日志默认写入 `APP_LOG_DIR=./data/logs`，采用 5 MiB 当前文件加 3 份轮转；设置 `APP_FILE_LOG_ENABLED=0` 可只保留 stderr。日志不记录 API Key、Prompt、签名 URL、原始异常或绝对路径。
+存储根目录通过 `.open-image-storage.json` 与当前数据库配对；不匹配时写入、删除和自动清理会安全拒绝，避免测试数据库或第二实例误删真实媒体。安全审计日志在 development 默认写入 `./data/logs`，采用 5 MiB 当前文件加 3 份轮转；设置 `APP_FILE_LOG_ENABLED=0` 可只保留 stderr。日志不记录 API Key、Prompt、签名 URL、原始异常或绝对路径。
 
 ## 生产运行
 
 ```bash
-npm run db:migrate
 npm run build
 npm start
 ```
 
+`npm start` 的 `prestart` 会以 production 模式自动迁移生产数据库，无需提前手工执行默认 development 模式的 `npm run db:migrate`。
+
 开发服务使用 `.next/`，生产构建与 `npm start` 使用 `.next-build/`。两者可同时存在，执行 `npm run build` 不会再覆盖正在运行的开发服务 chunk。
 
-生产环境应为 `DATABASE_URL`、`LOCAL_STORAGE_DIR` 和 `APP_LOG_DIR` 使用持久化目录，并确保运行用户具有读写权限。移动数据库或存储目录前应一起备份，不要手工复制 marker 到另一套数据库。
+Windows Web production 未设置覆盖变量时，数据库、图片、配置和日志默认位于 `%LOCALAPPDATA%\Open Image Generator\`；若 `LOCALAPPDATA` 缺失，则回退当前用户的 `AppData\Local`。macOS/Linux Web production 保持既有数据库/图片/日志默认，用户配置仍在 `~/.config/open-image-generator`。四类路径都可通过 `DATABASE_URL`、`LOCAL_STORAGE_DIR`、`USER_CONFIG_DIR`、`APP_LOG_DIR` 显式覆盖，并应确保运行用户具有读写权限。移动数据库或存储目录前应一起备份，不要手工复制 marker 到另一套数据库；当前实现拒绝 UNC/网络共享路径。
 
 ## macOS 桌面版
 

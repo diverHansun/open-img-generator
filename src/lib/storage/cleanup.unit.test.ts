@@ -121,6 +121,17 @@ describe('stored image cleanup', () => {
     expect(fs.existsSync(favoritePath)).toBe(true);
   });
 
+  it('keeps media referenced by a legacy Windows backslash path', () => {
+    const { db } = createTestDb();
+    const legacyPath = writeFile('2020/legacy.png');
+    seedImage(db, 'img-legacy-windows', '2020\\legacy.png');
+
+    const result = cleanupStoredImages({ db, retentionDays: 0, orphanGraceMs: 0 });
+
+    expect(result.deletedOrphans).toBe(0);
+    expect(fs.existsSync(legacyPath)).toBe(true);
+  });
+
   it('supports dry-run and removes only aged orphan files', () => {
     const { db } = createTestDb();
     const dryRunPath = writeFile('orphan/dry-run.png');

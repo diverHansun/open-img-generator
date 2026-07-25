@@ -3,11 +3,59 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import Database from 'better-sqlite3';
+import * as nextEnv from '@next/env';
+
+import {
+  resolveRuntimeMode,
+  resolveRuntimePaths,
+} from '../src/lib/runtime-paths/core.js';
+import { preflightRuntimePaths } from '../src/lib/runtime-paths/preflight.js';
 
 const scriptDirectory =
   typeof __dirname === 'string'
     ? __dirname
     : path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(scriptDirectory, '..');
+
+function readCliMode(arguments_) {
+  const values = [];
+  for (let index = 0; index < arguments_.length; index += 1) {
+    const argument = arguments_[index];
+    if (argument === '--mode') {
+      const value = arguments_[index + 1];
+      if (!value || value.startsWith('--')) {
+        throw new Error('--mode requires exactly one non-empty value');
+      }
+      values.push(value);
+      index += 1;
+    } else if (argument.startsWith('--mode=')) {
+      const value = argument.slice('--mode='.length);
+      if (!value) throw new Error('--mode requires exactly one non-empty value');
+      values.push(value);
+    }
+  }
+  if (values.length > 1) {
+    throw new Error('--mode may only be specified once');
+  }
+  return values[0];
+}
+
+const mode = resolveRuntimeMode({
+  cliMode: readCliMode(process.argv.slice(2)),
+  nodeEnv: process.env.NODE_ENV,
+});
+process.env.NODE_ENV = mode;
+const loadEnvConfig = nextEnv.loadEnvConfig ?? nextEnv.default?.loadEnvConfig;
+loadEnvConfig(projectRoot, mode === 'development');
+const runtimePaths = resolveRuntimePaths({
+  projectRoot,
+  mode,
+  env: process.env,
+  platform: process.platform,
+});
+const preflight = preflightRuntimePaths(runtimePaths);
+for (const warning of preflight.warnings) console.warn(warning.message);
+
 const schemaManifest = JSON.parse(
   fs.readFileSync(
     path.join(scriptDirectory, '..', 'src', 'lib', 'db', 'schema-manifest.json'),
@@ -15,14 +63,7 @@ const schemaManifest = JSON.parse(
   ),
 );
 const requiredVersion = schemaManifest.version;
-const databasePath = (process.env.DATABASE_URL ?? './data/app.db').replace(
-  /^file:/,
-  '',
-);
-
-if (databasePath !== ':memory:') {
-  fs.mkdirSync(path.dirname(path.resolve(databasePath)), { recursive: true });
-}
+const databasePath = runtimePaths.databasePath;
 
 function acquireMigrationLock() {
   if (databasePath === ':memory:') return null;

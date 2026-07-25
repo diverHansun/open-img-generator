@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { createDbClient, type DbClient } from '../../src/lib/db';
+import { closeDbClient, createDbClient, type DbClient } from '../../src/lib/db';
 import {
   ConfigurationUnavailableError,
 } from '../../src/lib/errors';
@@ -55,6 +55,7 @@ describe('frontend-overhaul backend data integration', () => {
     process.env = originalEnv;
     resetProviderConfigurationState();
     fs.rmSync(credentialsDir, { recursive: true, force: true });
+    closeDbClient(db);
     sqlite.close();
     cleanupDb();
   });

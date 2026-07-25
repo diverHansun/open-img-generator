@@ -39,7 +39,9 @@ describe('app settings', () => {
     expect(updateAppSettings({ imageRetentionDays: 7 })).toEqual({ imageRetentionDays: 7 });
     expect(readStoredAppSettings()).toEqual({ version: 1, imageRetentionDays: 7 });
     expect(getImageRetentionPolicy()).toEqual({ days: 7, enabled: true });
-    expect(fs.statSync(getAppSettingsFilePath()).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(getAppSettingsFilePath()).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('uses the deployment fallback only until a web setting has been saved', () => {

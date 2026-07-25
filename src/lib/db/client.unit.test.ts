@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { DbClient } from './client';
-import { createLazyDbClient } from './client';
+import { closeDbClient, createLazyDbClient } from './client';
 
 describe('lazy database client', () => {
   it('does not open the database until a query surface is accessed', () => {
@@ -14,5 +14,16 @@ describe('lazy database client', () => {
     expect(factory).not.toHaveBeenCalled();
     expect(() => client.all('SELECT 1')).toThrow('unable to open');
     expect(factory).toHaveBeenCalledOnce();
+  });
+
+  it('closes an initialized lazy database without opening an unused one', () => {
+    const close = vi.fn();
+    const first = createLazyDbClient(() => ({ $client: { close } }) as unknown as DbClient);
+    closeDbClient(first);
+    expect(close).not.toHaveBeenCalled();
+
+    void (first as unknown as { $client: unknown }).$client;
+    closeDbClient(first);
+    expect(close).toHaveBeenCalledOnce();
   });
 });

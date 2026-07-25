@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { closeDbClient } from '../../src/lib/db';
 import { initializeTestSchema } from './db-schema';
 
 export function createIntegrationDb() {
@@ -19,6 +20,7 @@ export function createIntegrationDb() {
     tempFile,
     tempDir,
     cleanup: () => {
+      closeDbClient();
       fs.rmSync(tempDir, { recursive: true, force: true });
       if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
       else process.env.DATABASE_URL = originalDatabaseUrl;

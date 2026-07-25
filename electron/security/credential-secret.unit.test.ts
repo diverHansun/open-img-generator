@@ -55,8 +55,10 @@ describe('desktop credential master secret', () => {
     expect(fs.readFileSync(filePath, 'utf8')).not.toContain(
       first.masterSecret!,
     );
-    expect(fs.statSync(directory).mode & 0o777).toBe(0o700);
-    expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(directory).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('uses session-memory mode when OS encryption is unavailable', async () => {
