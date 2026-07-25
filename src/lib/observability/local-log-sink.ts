@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { getRuntimePaths } from '../runtime-paths';
 
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_ROTATIONS = 3;
@@ -11,7 +12,9 @@ export type LocalLogSinkOptions = {
 };
 
 export function getLocalLogDirectory(options: LocalLogSinkOptions = {}): string {
-  return path.resolve(options.directory ?? process.env.APP_LOG_DIR ?? './data/logs');
+  return options.directory === undefined
+    ? getRuntimePaths().logDirectory
+    : path.resolve(options.directory);
 }
 
 function rotate(file: string, rotations: number): void {

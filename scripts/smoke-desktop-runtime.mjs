@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import electronPath from 'electron';
+import { providerMetadataData } from '../src/lib/provider-config/provider-metadata-data.js';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
 const arch = process.argv[2] ?? process.arch;
@@ -13,6 +14,7 @@ const electronExecutable =
   process.env.DESKTOP_ELECTRON_EXECUTABLE || electronPath;
 const runtimeRoot = path.join(projectRoot, '.desktop-runtime', arch);
 const runtimeNodeModules = path.join(runtimeRoot, 'node_modules');
+const runtimeEnvironmentFile = path.join(runtimeRoot, '.env.production.local');
 const temporaryRoot = fs.mkdtempSync(
   path.join(os.tmpdir(), 'open-image-generator-desktop-smoke-'),
 );
@@ -53,6 +55,7 @@ function run(command, args, environment) {
 
 let server;
 let createdRuntimeModuleAlias = false;
+let createdRuntimeEnvironmentFile = false;
 try {
   if (!fs.existsSync(path.join(runtimeRoot, 'server.js'))) {
     throw new Error(`Prepared desktop runtime not found for ${arch}`);
@@ -67,10 +70,24 @@ try {
   }
   fs.symlinkSync('runtime-modules', runtimeNodeModules, 'dir');
   createdRuntimeModuleAlias = true;
+  if (fs.existsSync(runtimeEnvironmentFile)) {
+    throw new Error(`Unexpected desktop runtime dotenv exists: ${runtimeEnvironmentFile}`);
+  }
+  fs.writeFileSync(
+    runtimeEnvironmentFile,
+    `${providerMetadataData.map(
+      (provider) => `${provider.credentialName}=desktop-dotenv-must-not-leak`,
+    ).join('\n')}\n`,
+  );
+  createdRuntimeEnvironmentFile = true;
   const port = await availablePort();
   const authToken = crypto.randomBytes(32).toString('base64url');
+  const baseEnvironment = { ...process.env };
+  for (const provider of providerMetadataData) {
+    baseEnvironment[provider.credentialName] = 'desktop-smoke-must-not-leak';
+  }
   const environment = {
-    ...process.env,
+    ...baseEnvironment,
     ELECTRON_RUN_AS_NODE: '1',
     NODE_PATH: path.join(runtimeRoot, 'runtime-modules'),
     NODE_ENV: 'production',
@@ -85,6 +102,9 @@ try {
     USER_CONFIG_ENCRYPTION_KEY: 'desktop-smoke-master-secret',
     NEXT_TELEMETRY_DISABLED: '1',
   };
+  for (const provider of providerMetadataData) {
+    environment[provider.credentialName] = '';
+  }
 
   await run(
     electronExecutable,
@@ -125,6 +145,17 @@ try {
   }
   if (!healthy) throw new Error(`Desktop runtime did not become healthy: ${serverOutput}`);
 
+  const health = await fetch(`${origin}/api/health`, {
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  if (!health.ok) {
+    throw new Error(`Authenticated health failed with ${health.status}`);
+  }
+  const healthBody = await health.json();
+  if (!Array.isArray(healthBody.enabledProviders) || healthBody.enabledProviders.length !== 0) {
+    throw new Error(`Desktop runtime leaked Provider credentials: ${JSON.stringify(healthBody)}`);
+  }
+
   const unauthorized = await fetch(`${origin}/api/settings`);
   if (unauthorized.status !== 401) {
     throw new Error(`Expected unauthenticated settings to return 401, got ${unauthorized.status}`);
@@ -147,6 +178,9 @@ try {
   }
   if (createdRuntimeModuleAlias) {
     fs.rmSync(runtimeNodeModules, { force: true });
+  }
+  if (createdRuntimeEnvironmentFile) {
+    fs.rmSync(runtimeEnvironmentFile, { force: true });
   }
   fs.rmSync(temporaryRoot, { recursive: true, force: true });
 }

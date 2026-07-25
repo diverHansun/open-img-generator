@@ -188,14 +188,14 @@ makeProviderCapabilities(overrides)
 }
 ```
 
-CI 平台尚未配置；先将以下命令作为团队规则：
+Windows x64 CI 已由 `.github/workflows/windows-x64.yml` 配置，固定 Node.js 24 和 npm lockfile；以下命令同时作为团队本地规则：
 
 | 时机 | 命令 | 预期 |
 | --- | --- | --- |
 | 本地改动 | 相关测试文件或 `test:unit` | 修改前后快速反馈 |
 | 提交前 | `npm run preflight` | typecheck + unit + contract 必须通过 |
-| PR | `npm run test:verify` | 加上 integration，阻断合入 |
-| 合并到主线 | `npm run test:verify && npm run build` | 验证可构建 |
+| PR | `npm run test:verify` | 加上 integration；Windows x64 workflow 失败时阻断合入 |
+| 合并到主线 | `npm run test:verify && npm run build && npm run test:smoke:windows` | 验证 Windows 构建与真实开发启动 |
 | 发布前 | `npm run test:release` | 加 smoke；当前 `build.smoke.test.ts` 会执行 production build |
 
 目标时长：unit < 30s、contract < 60s、integration < 3min、backend E2E（启用后）< 5min、smoke < 5min。发现 flaky 测试后先隔离，再在一周内修复或删除；不得长期容忍随机失败。

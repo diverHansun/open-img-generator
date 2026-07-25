@@ -13,6 +13,8 @@ import {
   type RemoteImageUrlPolicyOptions,
 } from './image-url-policy';
 import { verifyStorageOwnership } from './ownership';
+import { resolveStorageRelativePath } from './relative-path';
+import { getRuntimePaths } from '../runtime-paths';
 
 const STAGING_PREFIX = 'staging:';
 const STAGING_DIRECTORY = '.staging';
@@ -67,8 +69,7 @@ function storageDiagnosticForUrlError(
 }
 
 export function getStorageRoot(): string {
-  const root = process.env.LOCAL_STORAGE_DIR ?? './data/images';
-  return path.resolve(root);
+  return getRuntimePaths().storageRoot;
 }
 
 function ensureRootExists(): void {
@@ -116,16 +117,13 @@ function generateStoragePath(contentType: string): string {
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, '0');
   const id = randomUUID();
-  return path.join(String(year), month, `${id}${extensionFromContentType(contentType)}`);
+  return path.posix.join(String(year), month, `${id}${extensionFromContentType(contentType)}`);
 }
 
 function resolveStoragePath(storagePath: string): string {
   const root = getStorageRoot();
-  const absolutePath = path.resolve(path.join(root, storagePath));
-  const relativeToRoot = path.relative(root, absolutePath);
-  if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) {
-    throw new StorageError(`Invalid storage path: ${storagePath}`);
-  }
+  const absolutePath = resolveStorageRelativePath(root, storagePath);
+  if (!absolutePath) throw new StorageError(`Invalid storage path: ${storagePath}`);
   return absolutePath;
 }
 

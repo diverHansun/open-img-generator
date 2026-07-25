@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  applyPrivateDirectoryPermissions,
+  applyPrivateFilePermissions,
+} from '../runtime-paths/preflight.js';
 import { getCredentialsFilePath, getUserConfigDirectory } from './paths';
 import type { ProviderCredentialName, StoredCredentials } from './types';
 
@@ -115,7 +119,7 @@ export function writeEncryptedCredentials(credentials: StoredCredentials): void 
 
   const directory = getUserConfigDirectory();
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  fs.chmodSync(directory, 0o700);
+  applyPrivateDirectoryPermissions(directory);
   const filePath = getCredentialsFilePath();
   const tempPath = path.join(
     directory,
@@ -126,9 +130,9 @@ export function writeEncryptedCredentials(credentials: StoredCredentials): void 
       encoding: 'utf8',
       mode: 0o600,
     });
-    fs.chmodSync(tempPath, 0o600);
+    applyPrivateFilePermissions(tempPath);
     fs.renameSync(tempPath, filePath);
-    fs.chmodSync(filePath, 0o600);
+    applyPrivateFilePermissions(filePath);
   } finally {
     try {
       fs.rmSync(tempPath, { force: true });

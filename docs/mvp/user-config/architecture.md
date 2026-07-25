@@ -28,7 +28,7 @@ providers.registry 启动时调用 `resolveCredentials()`，不直接读多处�
 
 ## 3. File Layout
 
-`src/lib/user-config/` 已实现：`USER_CONFIG_DIR`（默认 `~/.config/open-image-generator`）下的 `credentials.enc.json`，目录 0700、文件 0600，写入采用临时文件 + rename。
+`src/lib/user-config/` 已实现：路径由统一 runtime policy 决定，`USER_CONFIG_DIR` 可显式覆盖。development 默认在 `<projectRoot>/data/config`；Windows Web production 默认在 `%LOCALAPPDATA%/Open Image Generator/config`；macOS/Linux Web production 保持 `~/.config/open-image-generator`。凭据文件名为 `credentials.enc.json`，写入采用临时文件 + rename。POSIX 加固目录 0700、文件 0600；Windows 继承当前用户目录 ACL，不用 POSIX mode 伪装 ACL 保证。
 
 ---
 

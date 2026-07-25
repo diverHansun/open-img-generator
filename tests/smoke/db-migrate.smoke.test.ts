@@ -34,6 +34,21 @@ function removeSqliteFiles(file: string) {
   }
 }
 
+function createMigrationProjectFixture(sourceRoot: string) {
+  const fixtureRoot = fs.mkdtempSync(path.join(sourceRoot, '.next-smoke-env-'));
+  for (const relativePath of [
+    'scripts/migrate-db.mjs',
+    'src/lib/runtime-paths/core.js',
+    'src/lib/runtime-paths/preflight.js',
+    'src/lib/db/schema-manifest.json',
+  ]) {
+    const target = path.join(fixtureRoot, relativePath);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(sourceRoot, relativePath), target);
+  }
+  return fixtureRoot;
+}
+
 function runMigration(root: string, file: string) {
   return JSON.parse(
     execFileSync(process.execPath, ['scripts/migrate-db.mjs'], {
@@ -133,6 +148,101 @@ function startLockHolder(file: string) {
 }
 
 describe('db:migrate', () => {
+  it('resolves relative runtime paths from the project root when invoked elsewhere', () => {
+    const root = path.resolve(__dirname, '../..');
+    const relativeRoot = `.next-smoke-migrate-${Date.now()}`;
+    const targetRoot = path.join(root, relativeRoot);
+    const environment = { ...process.env };
+    environment.DATABASE_URL = `file:./${relativeRoot}/app.db`;
+    environment.LOCAL_STORAGE_DIR = `./${relativeRoot}/images`;
+    environment.USER_CONFIG_DIR = `./${relativeRoot}/config`;
+    environment.APP_LOG_DIR = `./${relativeRoot}/logs`;
+
+    try {
+      const report = JSON.parse(execFileSync(
+        process.execPath,
+        [path.join(root, 'scripts', 'migrate-db.mjs'), '--mode=development'],
+        { cwd: os.tmpdir(), env: environment, encoding: 'utf8' },
+      ));
+      expect(report.databasePath).toBe(path.join(targetRoot, 'app.db'));
+      expect(fs.statSync(path.join(targetRoot, 'images')).isDirectory()).toBe(true);
+      expect(fs.statSync(path.join(targetRoot, 'config')).isDirectory()).toBe(true);
+      expect(fs.statSync(path.join(targetRoot, 'logs')).isDirectory()).toBe(true);
+    } finally {
+      fs.rmSync(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('loads runtime path overrides from the project .env.local', () => {
+    const root = path.resolve(__dirname, '../..');
+    const workspaceEnvironmentFile = path.join(root, '.env.local');
+    const workspaceEnvironmentSnapshot = fs.existsSync(workspaceEnvironmentFile)
+      ? fs.readFileSync(workspaceEnvironmentFile, 'utf8')
+      : undefined;
+    const fixtureRoot = createMigrationProjectFixture(root);
+    const environmentFile = path.join(fixtureRoot, '.env.local');
+    const targetRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime dotenv 测试 '));
+    const unixPath = (value: string) => value.replaceAll('\\', '/');
+    const environment = { ...process.env };
+    delete environment.DATABASE_URL;
+    delete environment.LOCAL_STORAGE_DIR;
+    delete environment.USER_CONFIG_DIR;
+    delete environment.APP_LOG_DIR;
+
+    fs.writeFileSync(environmentFile, [
+      `DATABASE_URL=file:${unixPath(path.join(targetRoot, 'app.db'))}`,
+      `LOCAL_STORAGE_DIR=${unixPath(path.join(targetRoot, 'images'))}`,
+      `USER_CONFIG_DIR=${unixPath(path.join(targetRoot, 'config'))}`,
+      `APP_LOG_DIR=${unixPath(path.join(targetRoot, 'logs'))}`,
+      '',
+    ].join('\n'));
+    try {
+      const report = JSON.parse(execFileSync(
+        process.execPath,
+        ['scripts/migrate-db.mjs', '--mode=development'],
+        { cwd: fixtureRoot, env: environment, encoding: 'utf8' },
+      ));
+      expect(report.databasePath).toBe(path.join(targetRoot, 'app.db'));
+      expect(fs.statSync(path.join(targetRoot, 'images')).isDirectory()).toBe(true);
+      expect(
+        fs.existsSync(workspaceEnvironmentFile)
+          ? fs.readFileSync(workspaceEnvironmentFile, 'utf8')
+          : undefined,
+      ).toBe(workspaceEnvironmentSnapshot);
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+      fs.rmSync(targetRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [['--mode'], 'missing'],
+    [['--mode='], 'empty'],
+    [['--mode=development', '--mode=production'], 'duplicate'],
+  ])('rejects %s CLI mode arguments (%s)', (arguments_, _caseName) => {
+    const root = path.resolve(__dirname, '../..');
+    const targetRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'invalid-mode-'));
+    const environment = {
+      ...process.env,
+      DATABASE_URL: `file:${path.join(targetRoot, 'app.db')}`,
+      LOCAL_STORAGE_DIR: path.join(targetRoot, 'images'),
+      USER_CONFIG_DIR: path.join(targetRoot, 'config'),
+      APP_LOG_DIR: path.join(targetRoot, 'logs'),
+    };
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        ['scripts/migrate-db.mjs', ...arguments_],
+        { cwd: root, env: environment, encoding: 'utf8' },
+      );
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('--mode');
+    } finally {
+      fs.rmSync(targetRoot, { recursive: true, force: true });
+    }
+  });
+
   it('drops legacy orphan generations and produces an idempotent valid schema', () => {
     const root = path.resolve(__dirname, '../..');
     const file = path.join(os.tmpdir(), `ai-image-migrate-${Date.now()}.db`);

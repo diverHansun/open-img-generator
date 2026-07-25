@@ -45,8 +45,10 @@ describe('encrypted user credentials', () => {
       ARK_API_KEY: 'ark-secret',
       FAL_KEY: 'fal-secret',
     });
-    expect(fs.statSync(tempDir).mode & 0o777).toBe(0o700);
-    expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(tempDir).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('uses environment credentials first and falls back to the encrypted store', () => {

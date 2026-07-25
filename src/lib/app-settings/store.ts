@@ -1,6 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+  applyPrivateDirectoryPermissions,
+  applyPrivateFilePermissions,
+} from '../runtime-paths/preflight.js';
 
 import { getUserConfigDirectory } from '../user-config/paths';
 
@@ -73,7 +77,7 @@ export function writeAppSettings(settings: AppSettings): void {
 
   const directory = getUserConfigDirectory();
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  fs.chmodSync(directory, 0o700);
+  applyPrivateDirectoryPermissions(directory);
 
   const filePath = getAppSettingsFilePath();
   const temporaryPath = path.join(
@@ -85,9 +89,9 @@ export function writeAppSettings(settings: AppSettings): void {
       encoding: 'utf8',
       mode: 0o600,
     });
-    fs.chmodSync(temporaryPath, 0o600);
+    applyPrivateFilePermissions(temporaryPath);
     fs.renameSync(temporaryPath, filePath);
-    fs.chmodSync(filePath, 0o600);
+    applyPrivateFilePermissions(filePath);
   } finally {
     try {
       fs.rmSync(temporaryPath, { force: true });

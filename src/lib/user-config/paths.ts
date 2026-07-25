@@ -1,11 +1,8 @@
-import os from 'node:os';
 import path from 'node:path';
+import { getRuntimePaths } from '../runtime-paths';
 
 export function getUserConfigDirectory(): string {
-  return path.resolve(
-    process.env.USER_CONFIG_DIR ??
-      path.join(os.homedir(), '.config', 'open-image-generator'),
-  );
+  return getRuntimePaths().userConfigDirectory;
 }
 
 export function getCredentialsFilePath(): string {

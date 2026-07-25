@@ -9,7 +9,7 @@
 
 - API key at rest 必须加密（或委托 OS 凭证柜）；禁止明文提交 git。
 - 日志与 API 响应禁止打印 key。
-- 文件权限：目录 0700、凭据文件 0600（如 `~/.config/open-image-generator/credentials.enc.json`）。
+- 文件权限：POSIX 为目录 0700、凭据文件 0600；Windows 继承用户配置目录 ACL，不断言无意义的 POSIX mode。development 默认路径为仓库 `data/config/`，Windows Web production 默认路径为 `%LOCALAPPDATA%/Open Image Generator/config/`。
 
 ---
 

@@ -36,6 +36,7 @@ data/
 *.provisionprofile
 .idea/
 .vscode/
+.worktrees/
 
 # debug
 npm-debug.log*

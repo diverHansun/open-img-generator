@@ -1,18 +1,15 @@
 import Database from 'better-sqlite3';
-import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { getRuntimePaths } from '../runtime-paths';
 import * as schema from './schema';
 
 export type DbClient = BetterSQLite3Database<typeof schema>;
+type ClosableDbClient = DbClient & { $client?: { close(): void } };
+const lazyClientClosers = new WeakMap<object, () => void>();
 
 export function getDatabasePath(): string {
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    return path.resolve('./data/app.db');
-  }
-  const databasePath = url.replace(/^file:/, '');
-  return databasePath === ':memory:' ? databasePath : path.resolve(databasePath);
+  return getRuntimePaths().databasePath;
 }
 
 export function getDatabasePathHash(): string {
@@ -30,7 +27,7 @@ export function createLazyDbClient(
   factory: () => DbClient = () => createDbClient(getDatabasePath()),
 ): DbClient {
   let client: DbClient | undefined;
-  return new Proxy({} as DbClient, {
+  const proxy = new Proxy({} as DbClient, {
     get(_target, property) {
       client ??= factory();
       const value = Reflect.get(client, property, client);
@@ -41,6 +38,20 @@ export function createLazyDbClient(
       return Reflect.set(client, property, value, client);
     },
   });
+  lazyClientClosers.set(proxy, () => {
+    (client as ClosableDbClient | undefined)?.$client?.close();
+    client = undefined;
+  });
+  return proxy;
 }
 
 export const db: DbClient = createLazyDbClient();
+
+export function closeDbClient(client: DbClient = db): void {
+  const closeLazyClient = lazyClientClosers.get(client);
+  if (closeLazyClient) {
+    closeLazyClient();
+    return;
+  }
+  (client as ClosableDbClient).$client?.close();
+}

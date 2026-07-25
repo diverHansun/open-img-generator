@@ -11,6 +11,7 @@ import {
 } from '../db';
 import { StorageError } from '../errors';
 import { logSafeEvent } from '../observability/safe-logger';
+import { toPortableStoragePath } from './relative-path';
 
 const MARKER_NAME = '.open-image-storage.json';
 const LOCK_NAME = '.cleanup.lock';
@@ -55,7 +56,7 @@ function walkFormalMediaFiles(root: string): string[] {
   const visit = (directory: string) => {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const absolute = path.join(directory, entry.name);
-      const relative = path.relative(root, absolute);
+      const relative = toPortableStoragePath(path.relative(root, absolute));
       if (entry.isDirectory()) {
         if (relative === '.staging' || relative === '.tmp') continue;
         visit(absolute);
@@ -69,7 +70,10 @@ function walkFormalMediaFiles(root: string): string[] {
 }
 
 function liveMediaPaths(client: DbClient): string[] {
-  return [...listStoragePaths(client), ...listVideoStoragePaths(client)].sort();
+  return [
+    ...listStoragePaths(client),
+    ...listVideoStoragePaths(client),
+  ].map(toPortableStoragePath).sort();
 }
 
 function setsEqual(left: readonly string[], right: readonly string[]): boolean {
