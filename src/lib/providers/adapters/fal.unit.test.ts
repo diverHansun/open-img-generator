@@ -121,6 +121,119 @@ describe('FalProvider', () => {
     });
   });
 
+  it.each([
+    {
+      model: 'fal-ai/gpt-image-1/text-to-image',
+      aspectRatio: undefined,
+      count: 1,
+      expected: {
+        image_size: 'auto',
+        num_images: 1,
+        background: 'auto',
+        quality: 'auto',
+        output_format: 'png',
+      },
+    },
+    {
+      model: 'fal-ai/gpt-image-1.5',
+      aspectRatio: '2:3',
+      count: 2,
+      expected: {
+        image_size: '1024x1536',
+        num_images: 2,
+        background: 'auto',
+        quality: 'high',
+        output_format: 'png',
+      },
+    },
+    {
+      model: 'openai/gpt-image-2',
+      aspectRatio: '16:9',
+      count: 1,
+      expected: {
+        image_size: 'landscape_16_9',
+        num_images: 1,
+        quality: 'high',
+        output_format: 'png',
+      },
+    },
+  ])('uses GPT Image request fields for $model', async ({ model, aspectRatio, count, expected }) => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        request_id: 'gpt-image-req',
+        status_url: `https://queue.fal.run/${model}/requests/gpt-image-req/status`,
+        response_url: `https://queue.fal.run/${model}/requests/gpt-image-req/response`,
+      }),
+    });
+
+    const result = await provider.submit(
+      makeNormalizedRequest({ aspectRatio, count }),
+      model,
+    );
+
+    expect(result.kind).toBe('async');
+    const [url, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    expect(url).toBe(`https://queue.fal.run/${model}`);
+    expect(JSON.parse(String(init?.body))).toEqual({
+      prompt: 'A cat wearing a space helmet',
+      ...expected,
+    });
+  });
+
+  it.each([
+    {
+      model: 'fal-ai/gpt-image-1/text-to-image',
+      expected: { quality: 'medium', background: 'transparent', output_format: 'webp' },
+    },
+    {
+      model: 'fal-ai/gpt-image-1.5',
+      expected: { quality: 'medium', background: 'transparent', output_format: 'webp' },
+    },
+    {
+      model: 'openai/gpt-image-2',
+      expected: { quality: 'medium', output_format: 'webp' },
+    },
+  ])('allowlists GPT Image options for $model', async ({ model, expected }) => {
+    mockFetch({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({
+        request_id: 'gpt-image-options-req',
+        status_url: `https://queue.fal.run/${model}/requests/gpt-image-options-req/status`,
+        response_url: `https://queue.fal.run/${model}/requests/gpt-image-options-req/response`,
+      }),
+    });
+
+    await provider.submit(
+      makeNormalizedRequest({
+        providerOptions: {
+          ...expected,
+          background: 'transparent',
+          output_format: 'webp',
+          quality: 'medium',
+          sync_mode: true,
+          seed: 42,
+          arbitrary: 'ignored',
+        },
+      }),
+      model,
+    );
+
+    const [, init] = vi.mocked(global.fetch).mock.calls[0] ?? [];
+    const body = JSON.parse(String(init?.body));
+    expect(body).toMatchObject(expected);
+    expect(body.sync_mode).toBeUndefined();
+    expect(body.seed).toBeUndefined();
+    expect(body.arbitrary).toBeUndefined();
+    if (model === 'openai/gpt-image-2') {
+      expect(body.background).toBeUndefined();
+    }
+  });
+
   it('uses the documented per-model Banana defaults', async () => {
     mockFetch({
       ok: true,

@@ -34,6 +34,10 @@ describe('registry', () => {
     expect(provider?.capabilities.has('fal-ai/flux/schnell')).toBe(true);
     expect(provider?.capabilities.has('fal-ai/nano-banana-2')).toBe(true);
     expect(provider?.capabilities.has('fal-ai/nano-banana-pro')).toBe(true);
+    expect(provider?.capabilities.has('fal-ai/gpt-image-1/text-to-image')).toBe(true);
+    expect(provider?.capabilities.has('fal-ai/gpt-image-1.5')).toBe(true);
+    expect(provider?.capabilities.has('openai/gpt-image-2')).toBe(true);
+    expect(provider?.capabilities.has('fal-ai/gpt-image-1-mini')).toBe(false);
   });
 
   it('returns zenmux provider when ZENMUX_API_KEY is set', () => {

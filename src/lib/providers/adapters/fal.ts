@@ -75,6 +75,7 @@ function trustedFalHandleUrl(value: unknown): string {
 }
 
 type FluxImageProfile = Extract<FalImageProfile, { kind: 'flux-image-size' }>;
+type GptImageProfile = Extract<FalImageProfile, { kind: 'gpt-image-size' }>;
 type BananaImageProfile = Extract<FalImageProfile, { kind: 'banana-aspect-ratio' }>;
 
 function resolveFluxSize(req: NormalizedRequest, profile: FluxImageProfile): string {
@@ -89,6 +90,9 @@ function buildRequestBody(
   req: NormalizedRequest,
   profile: FalImageProfile,
 ): Record<string, unknown> {
+  if (profile.kind === 'gpt-image-size') {
+    return buildGptImageRequestBody(req, profile);
+  }
   if (profile.kind === 'banana-aspect-ratio') {
     return buildBananaRequestBody(req, profile);
   }
@@ -114,6 +118,57 @@ function buildRequestBody(
     if (profile.allowedProviderOptions.includes(key)) {
       body[key] = value;
     }
+  }
+
+  return body;
+}
+
+function resolveGptImageSize(req: NormalizedRequest, profile: GptImageProfile): string {
+  if (req.aspectRatio && profile.aspectRatioSizes[req.aspectRatio]) {
+    return profile.aspectRatioSizes[req.aspectRatio];
+  }
+
+  return profile.defaultSize;
+}
+
+function buildGptImageRequestBody(
+  req: NormalizedRequest,
+  profile: GptImageProfile,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    prompt: req.prompt,
+    image_size: resolveGptImageSize(req, profile),
+    num_images: profile.maxCount > 1 ? req.count ?? 1 : 1,
+    quality: profile.defaultQuality,
+    output_format: 'png',
+  };
+
+  if (profile.defaultBackground) body.background = profile.defaultBackground;
+
+  const requestedQuality = req.providerOptions?.quality;
+  if (
+    typeof requestedQuality === 'string' &&
+    profile.qualityValues.includes(requestedQuality)
+  ) {
+    body.quality = requestedQuality;
+  }
+
+  const requestedBackground = req.providerOptions?.background;
+  if (
+    profile.backgroundValues &&
+    typeof requestedBackground === 'string' &&
+    profile.backgroundValues.includes(requestedBackground)
+  ) {
+    body.background = requestedBackground;
+  }
+
+  const requestedOutputFormat = req.providerOptions?.output_format;
+  if (
+    requestedOutputFormat === 'jpeg' ||
+    requestedOutputFormat === 'png' ||
+    requestedOutputFormat === 'webp'
+  ) {
+    body.output_format = requestedOutputFormat;
   }
 
   return body;

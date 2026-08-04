@@ -15,6 +15,18 @@ export type FalImageProfile =
       supportsNegativePrompt: boolean;
     }>
   | Readonly<{
+      kind: 'gpt-image-size';
+      defaultSize: string;
+      aspectRatioSizes: Readonly<Record<string, string>>;
+      supportedSizes: readonly string[];
+      supportedAspectRatios: readonly string[];
+      maxCount: number;
+      qualityValues: readonly string[];
+      defaultQuality: string;
+      backgroundValues?: readonly string[];
+      defaultBackground?: string;
+    }>
+  | Readonly<{
       kind: 'banana-aspect-ratio';
       defaultAspectRatio: string;
       defaultResolution?: string;
@@ -33,6 +45,31 @@ const FAL_IMAGE_SIZES = [
 
 const FAL_ASPECT_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16'] as const;
 const FAL_ASPECT_RATIO_SIZES = {
+  '1:1': 'square_hd',
+  '4:3': 'landscape_4_3',
+  '3:4': 'portrait_4_3',
+  '16:9': 'landscape_16_9',
+  '9:16': 'portrait_16_9',
+} as const;
+
+const GPT_IMAGE_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536'] as const;
+const GPT_IMAGE_ASPECT_RATIOS = ['1:1', '3:2', '2:3'] as const;
+const GPT_IMAGE_ASPECT_RATIO_SIZES = {
+  '1:1': '1024x1024',
+  '3:2': '1536x1024',
+  '2:3': '1024x1536',
+} as const;
+const GPT_IMAGE_2_SIZES = [
+  'square_hd',
+  'square',
+  'portrait_4_3',
+  'portrait_16_9',
+  'landscape_4_3',
+  'landscape_16_9',
+  'auto',
+] as const;
+const GPT_IMAGE_2_ASPECT_RATIOS = ['1:1', '4:3', '3:4', '16:9', '9:16'] as const;
+const GPT_IMAGE_2_ASPECT_RATIO_SIZES = {
   '1:1': 'square_hd',
   '4:3': 'landscape_4_3',
   '3:4': 'portrait_4_3',
@@ -120,8 +157,87 @@ function bananaSpec(
   };
 }
 
+function gptImageSpec(
+  model: string,
+  displayName: string,
+  options: {
+    defaultSize: string;
+    supportedSizes: readonly string[];
+    supportedAspectRatios: readonly string[];
+    aspectRatioSizes: Readonly<Record<string, string>>;
+    maxCount: number;
+    qualityValues: readonly string[];
+    defaultQuality: string;
+    backgroundValues?: readonly string[];
+    defaultBackground?: string;
+  },
+): ProviderModelSpec<FalImageProfile> {
+  return {
+    capabilities: {
+      providerId: 'fal',
+      model,
+      displayName,
+      modes: ['text-to-image'],
+      maxCount: options.maxCount,
+      supportedSizes: [...options.supportedSizes],
+      supportedAspectRatios: [...options.supportedAspectRatios],
+      supportsNegativePrompt: false,
+      supportsSeed: false,
+      protocol: 'async',
+      defaultSize: options.defaultSize,
+    },
+    profile: {
+      kind: 'gpt-image-size',
+      defaultSize: options.defaultSize,
+      aspectRatioSizes: options.aspectRatioSizes,
+      supportedSizes: options.supportedSizes,
+      supportedAspectRatios: options.supportedAspectRatios,
+      maxCount: options.maxCount,
+      qualityValues: options.qualityValues,
+      defaultQuality: options.defaultQuality,
+      ...(options.backgroundValues ? { backgroundValues: options.backgroundValues } : {}),
+      ...(options.defaultBackground ? { defaultBackground: options.defaultBackground } : {}),
+    },
+    imageOutput: {
+      delivery: 'remote',
+      allowedRemoteHosts: ['.fal.media', '.fal.ai'],
+    },
+  };
+}
+
 const specs = [
   fluxSpec('fal-ai/flux/schnell', 'FLUX Schnell', { maxCount: 4 }),
+  gptImageSpec('fal-ai/gpt-image-1/text-to-image', 'GPT Image 1', {
+    defaultSize: 'auto',
+    supportedSizes: GPT_IMAGE_SIZES,
+    supportedAspectRatios: GPT_IMAGE_ASPECT_RATIOS,
+    aspectRatioSizes: GPT_IMAGE_ASPECT_RATIO_SIZES,
+    maxCount: 1,
+    qualityValues: ['auto', 'low', 'medium', 'high'],
+    defaultQuality: 'auto',
+    backgroundValues: ['auto', 'transparent', 'opaque'],
+    defaultBackground: 'auto',
+  }),
+  gptImageSpec('fal-ai/gpt-image-1.5', 'GPT Image 1.5', {
+    defaultSize: '1024x1024',
+    supportedSizes: GPT_IMAGE_SIZES.filter((size) => size !== 'auto'),
+    supportedAspectRatios: GPT_IMAGE_ASPECT_RATIOS,
+    aspectRatioSizes: GPT_IMAGE_ASPECT_RATIO_SIZES,
+    maxCount: 4,
+    qualityValues: ['low', 'medium', 'high'],
+    defaultQuality: 'high',
+    backgroundValues: ['auto', 'transparent', 'opaque'],
+    defaultBackground: 'auto',
+  }),
+  gptImageSpec('openai/gpt-image-2', 'GPT Image 2', {
+    defaultSize: 'landscape_4_3',
+    supportedSizes: GPT_IMAGE_2_SIZES,
+    supportedAspectRatios: GPT_IMAGE_2_ASPECT_RATIOS,
+    aspectRatioSizes: GPT_IMAGE_2_ASPECT_RATIO_SIZES,
+    maxCount: 1,
+    qualityValues: ['auto', 'low', 'medium', 'high'],
+    defaultQuality: 'high',
+  }),
   bananaSpec('fal-ai/nano-banana', 'Nano Banana', {
     defaultAspectRatio: '1:1',
     supportedAspectRatios: [

@@ -248,6 +248,20 @@ type ProviderErrorCode =
 
 未指定 aspectRatio/width/height 时使用 `defaultSize`（`square_hd`）。
 
+### fal / GPT Image 1、GPT Image 1.5、GPT Image 2
+
+Fal GPT Image 模型均使用异步 Queue；本批只公开文生图，不公开编辑 endpoint。模型 ID 必须使用 fal.ai 的实际 endpoint ID：
+
+| displayName | model | maxCount | defaultSize |
+|------|------|------:|------|
+| GPT Image 1 | `fal-ai/gpt-image-1/text-to-image` | 1 | `auto` |
+| GPT Image 1.5 | `fal-ai/gpt-image-1.5` | 4 | `1024x1024` |
+| GPT Image 2 | `openai/gpt-image-2` | 1 | `landscape_4_3` |
+
+GPT Image 1 和 1.5 支持 `auto`、`1024x1024`、`1536x1024`、`1024x1536`；公开比映射为 `1:1`、`3:2`、`2:3`。GPT Image 2 使用 `square_hd`、`square`、`portrait_4_3`、`portrait_16_9`、`landscape_4_3`、`landscape_16_9` 和 `auto`，公开比为 `1:1`、`4:3`、`3:4`、`16:9`、`9:16`。
+
+三者均不支持 seed 或 negative prompt。`quality` 与 `output_format` 通过 Fal 私有 profile 的 allowlist 处理；`background` 仅发送给 GPT Image 1/1.5。GPT Image 1 Mini 的 API 本批明确不进入 Fal model catalog。
+
 #### zenmux 公开比 → size 映射（adapter 内部）
 
 | aspectRatio | size |

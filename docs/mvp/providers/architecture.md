@@ -126,7 +126,7 @@ src/lib/providers/
 
 ZenMux（OpenAI Images 与 Gemini `generateContent`）、SiliconFlow、智谱、Doubao 与 Qwen `multimodal-sync` 模型的 `submit()` 成功响应本身承载完整图片，统一使用 `SYNC_IMAGE_GENERATION_TIMEOUT_MS`：默认 180 秒、只接受不大于 180 秒的正整数毫秒，非法配置回退默认值。fal、Qwen async profiles 与 Kling 的 submit 仅创建远端 task，继续使用 HTTP helper 的 30 秒 submit / 15 秒 poll 默认值。任何已进入网络的 submit 超时仍是 `unknown`，由 job-engine 终态收口，绝不自动重放。
 
-Fal 的 Banana/FLUX 私有 profile 各自声明允许字段。未知 `providerOptions` 不再透传；原版/Lite Banana 不发送 `resolution`，FLUX Pro/Flex 不伪造 `num_images`，Klein `4b` 与 `4b/base` 分别表示 distilled 与 full-CFG 方言。
+Fal 的 Banana、GPT Image 和 FLUX 私有 profile 各自声明允许字段。未知 `providerOptions` 不再透传；原版/Lite Banana 不发送 `resolution`，GPT Image 1/1.5/2 分别维护尺寸、质量、背景和输出格式差异，FLUX Pro/Flex 不伪造 `num_images`，Klein `4b` 与 `4b/base` 分别表示 distilled 与 full-CFG 方言。
 
 ### 4.2 ModelSpec 静态声明，不运行时探测
 

@@ -57,7 +57,7 @@
 
 ### 2.3 Fal Async 路径
 
-Fal 还需逐 profile 验证：原版/Lite Banana 不发送 resolution；Nano Banana 2/Pro 只发送支持的 resolution；FLUX 2 Dev/Pro/Flex/Klein 的 count、negative prompt 和 providerOptions 严格按模型 allowlist，任意未知字段被丢弃。
+Fal 还需逐 profile 验证：原版/Lite Banana 不发送 resolution；Nano Banana 2/Pro 只发送支持的 resolution；GPT Image 1/1.5/2 使用各自的 image_size、quality、background 和 output_format 方言；FLUX 2 Dev/Pro/Flex/Klein 的 count、negative prompt 和 providerOptions 严格按模型 allowlist，任意未知字段被丢弃。
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
@@ -71,6 +71,8 @@ Fal 还需逐 profile 验证：原版/Lite Banana 不发送 resolution；Nano Ba
 | cancel 已完成任务 | mock 400 | 返回 `PollResult.status="failed"` |
 | Nano Banana 2/Pro | model spec 选择 Banana profile | 发送 `aspect_ratio/resolution/num_images`，不发送 FLUX `image_size` |
 | Banana 安全字段 | providerOptions 含 sync/web search/image_size | 只接收已验证的 resolution/output_format/safety_tolerance，其余不进入请求 |
+| GPT Image 1/1.5 | model spec 选择 GPT Image profile | 发送 `image_size/num_images/quality/background/output_format`；不发送 seed、negative prompt 或 sync_mode |
+| GPT Image 2 | model spec 选择 GPT Image 2 profile | 发送 `image_size/num_images/quality/output_format`；不发送不支持的 background |
 
 ### 2.4 SiliconFlow / 智谱 Sync 路径
 
@@ -118,6 +120,7 @@ Fal 还需逐 profile 验证：原版/Lite Banana 不发送 resolution；Nano Ba
 | 未知模型 | capabilities("nonexistent") | 返回 null |
 | adapter 未知模型 | 对七个 adapter 各传入未声明 model | 统一 `INVALID_REQUEST/not_started` 且无网络副作用 |
 | fal 模型 | capabilities("fal-ai/flux/schnell") | protocol="async"，supportsSeed=true |
+| Fal GPT Image 模型 | capabilities("fal-ai/gpt-image-1.5") | protocol="async"，supportsSeed=false，支持 `1:1`/`3:2`/`2:3` |
 
 ### 2.8 请求翻译与公开宽高比映射
 
