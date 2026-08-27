@@ -12,8 +12,8 @@ type QwenSizeProfile = Readonly<{
 }>;
 
 export type QwenImageProfile =
-  | (QwenSizeProfile & Readonly<{ kind: 'legacy-text2image-async' }>)
   | (QwenSizeProfile & Readonly<{ kind: 'multimodal-sync' }>)
+  | (QwenSizeProfile & Readonly<{ kind: 'wan-multimodal-sync' }>)
   | (QwenSizeProfile & Readonly<{ kind: 'multimodal-async' }>);
 
 const SQUARE_1K_RATIO_SIZES = {
@@ -26,33 +26,77 @@ const SQUARE_1K_RATIO_SIZES = {
   '9:16': '720*1280',
 } as const;
 
+const QWEN_MULTIMODAL_SYNC_PROFILE = {
+  kind: 'multimodal-sync',
+  path: ['services', 'aigc', 'multimodal-generation', 'generation'],
+  defaultSize: '1024*1024',
+  aspectRatioSizes: SQUARE_1K_RATIO_SIZES,
+} satisfies QwenImageProfile;
+
+const WAN_MULTIMODAL_SYNC_PROFILE = {
+  kind: 'wan-multimodal-sync',
+  path: ['services', 'aigc', 'multimodal-generation', 'generation'],
+  defaultSize: '1024*1024',
+  aspectRatioSizes: SQUARE_1K_RATIO_SIZES,
+} satisfies QwenImageProfile;
+
+const WAN_MULTIMODAL_ASYNC_PROFILE = {
+  kind: 'multimodal-async',
+  path: ['services', 'aigc', 'image-generation', 'generation'],
+  defaultSize: '1024*1024',
+  aspectRatioSizes: SQUARE_1K_RATIO_SIZES,
+} satisfies QwenImageProfile;
+
 const specs = [
   {
     capabilities: {
       providerId: 'qwen',
-      model: 'qwen-image-plus',
-      displayName: 'Qwen-Image Plus',
+      model: 'qwen-image-3.0-pro',
+      displayName: 'Qwen Image 3.0 Pro',
       modes: ['text-to-image'],
-      maxCount: 1,
-      supportedSizes: ['1664*928', '1472*1104', '1328*1328', '1104*1472', '928*1664'],
-      supportedAspectRatios: ['16:9', '4:3', '1:1', '3:4', '9:16'],
+      maxCount: 6,
+      supportedSizes: Object.values(SQUARE_1K_RATIO_SIZES),
+      supportedAspectRatios: Object.keys(SQUARE_1K_RATIO_SIZES),
       supportsNegativePrompt: true,
       supportsSeed: true,
-      protocol: 'async',
-      defaultSize: '1664*928',
+      protocol: 'sync',
+      defaultSize: '1024*1024',
     } satisfies ProviderCapabilities,
-    profile: {
-      kind: 'legacy-text2image-async',
-      path: ['services', 'aigc', 'text2image', 'image-synthesis'],
-      defaultSize: '1664*928',
-      aspectRatioSizes: {
-        '16:9': '1664*928',
-        '4:3': '1472*1104',
-        '1:1': '1328*1328',
-        '3:4': '1104*1472',
-        '9:16': '928*1664',
-      },
-    },
+    profile: QWEN_MULTIMODAL_SYNC_PROFILE,
+    imageOutput: { delivery: 'remote', allowedRemoteHosts: ['.aliyuncs.com'] },
+  },
+  {
+    capabilities: {
+      providerId: 'qwen',
+      model: 'qwen-image-3.0',
+      displayName: 'Qwen Image 3.0',
+      modes: ['text-to-image'],
+      maxCount: 6,
+      supportedSizes: Object.values(SQUARE_1K_RATIO_SIZES),
+      supportedAspectRatios: Object.keys(SQUARE_1K_RATIO_SIZES),
+      supportsNegativePrompt: true,
+      supportsSeed: true,
+      protocol: 'sync',
+      defaultSize: '1024*1024',
+    } satisfies ProviderCapabilities,
+    profile: QWEN_MULTIMODAL_SYNC_PROFILE,
+    imageOutput: { delivery: 'remote', allowedRemoteHosts: ['.aliyuncs.com'] },
+  },
+  {
+    capabilities: {
+      providerId: 'qwen',
+      model: 'qwen-image-2.0-pro-2026-06-22',
+      displayName: 'Qwen Image 2.0 Pro (2026-06-22)',
+      modes: ['text-to-image'],
+      maxCount: 6,
+      supportedSizes: Object.values(SQUARE_1K_RATIO_SIZES),
+      supportedAspectRatios: Object.keys(SQUARE_1K_RATIO_SIZES),
+      supportsNegativePrompt: true,
+      supportsSeed: true,
+      protocol: 'sync',
+      defaultSize: '1024*1024',
+    } satisfies ProviderCapabilities,
+    profile: QWEN_MULTIMODAL_SYNC_PROFILE,
     imageOutput: { delivery: 'remote', allowedRemoteHosts: ['.aliyuncs.com'] },
   },
   {
@@ -69,12 +113,24 @@ const specs = [
       protocol: 'sync',
       defaultSize: '1024*1024',
     } satisfies ProviderCapabilities,
-    profile: {
-      kind: 'multimodal-sync',
-      path: ['services', 'aigc', 'multimodal-generation', 'generation'],
+    profile: QWEN_MULTIMODAL_SYNC_PROFILE,
+    imageOutput: { delivery: 'remote', allowedRemoteHosts: ['.aliyuncs.com'] },
+  },
+  {
+    capabilities: {
+      providerId: 'qwen',
+      model: 'wan2.7-image',
+      displayName: 'Wan 2.7 Image',
+      modes: ['text-to-image'],
+      maxCount: 4,
+      supportedSizes: Object.values(SQUARE_1K_RATIO_SIZES),
+      supportedAspectRatios: Object.keys(SQUARE_1K_RATIO_SIZES),
+      supportsNegativePrompt: false,
+      supportsSeed: true,
+      protocol: 'sync',
       defaultSize: '1024*1024',
-      aspectRatioSizes: SQUARE_1K_RATIO_SIZES,
-    },
+    } satisfies ProviderCapabilities,
+    profile: WAN_MULTIMODAL_SYNC_PROFILE,
     imageOutput: { delivery: 'remote', allowedRemoteHosts: ['.aliyuncs.com'] },
   },
   {
@@ -91,12 +147,7 @@ const specs = [
       protocol: 'async',
       defaultSize: '1024*1024',
     } satisfies ProviderCapabilities,
-    profile: {
-      kind: 'multimodal-async',
-      path: ['services', 'aigc', 'image-generation', 'generation'],
-      defaultSize: '1024*1024',
-      aspectRatioSizes: SQUARE_1K_RATIO_SIZES,
-    },
+    profile: WAN_MULTIMODAL_ASYNC_PROFILE,
     imageOutput: { delivery: 'remote', allowedRemoteHosts: ['.aliyuncs.com'] },
   },
 ] satisfies readonly ProviderModelSpec<QwenImageProfile>[];

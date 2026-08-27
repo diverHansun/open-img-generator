@@ -230,4 +230,82 @@ describe('sync generation end-to-end (zenmux)', () => {
     expect(completed.status).toBe('completed');
     expect(completed.images).toHaveLength(1);
   });
+
+  it('completes standard Wan 2.7 through its sync multimodal profile', async () => {
+    const imageBuffer = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ...Buffer.from('wan-image-integration'),
+    ]);
+    server.use(
+      http.post(
+        'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
+        async ({ request }) => {
+          const body = await request.json() as Record<string, unknown>;
+          expect(body).toMatchObject({
+            model: 'wan2.7-image',
+            input: {
+              messages: [{
+                role: 'user',
+                content: [{ text: 'A Wan sunrise' }],
+              }],
+            },
+            parameters: {
+              size: '1024*1024',
+              n: 1,
+              watermark: false,
+              enable_sequential: false,
+              thinking_mode: true,
+            },
+          });
+          return HttpResponse.json({
+            output: {
+              choices: [{
+                message: {
+                  content: [{
+                    type: 'image',
+                    image: 'https://dashscope-test.oss-accelerate.aliyuncs.com/wan.png',
+                  }],
+                },
+              }],
+            },
+          });
+        },
+      ),
+      http.get(
+        'https://dashscope-test.oss-accelerate.aliyuncs.com/wan.png',
+        () => new HttpResponse(new Uint8Array(imageBuffer), {
+          headers: { 'content-type': 'image/png' },
+        }),
+      ),
+    );
+
+    const postResponse = await postGeneration(
+      new Request('http://localhost:3000/api/generations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientRequestId: '35bca6c7-7c6f-4c9a-aa61-333333333333',
+          targets: [{ provider: 'qwen', model: 'wan2.7-image' }],
+          prompt: 'A Wan sunrise',
+          aspectRatio: '1:1',
+          sessionId: 'default-session',
+        }),
+      }),
+    );
+    expect(postResponse.status).toBe(202);
+    const postBody = await postResponse.json();
+
+    await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    const completedResponse = await getGeneration(
+      new Request(`http://localhost:3000/api/generations/${postBody.id}`),
+      { params: Promise.resolve({ id: postBody.id }) },
+    );
+    const completed = await completedResponse.json();
+    expect(completed.status).toBe('completed');
+    expect(completed.images).toHaveLength(1);
+    expect(completed.images[0].url).toMatch(/^\/api\/images\//);
+  });
 });

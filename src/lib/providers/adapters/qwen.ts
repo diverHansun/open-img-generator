@@ -32,14 +32,6 @@ import {
 } from '../error-diagnostics';
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
-const LEGACY_RESERVED_PARAMETER_KEYS = new Set([
-  'negative_prompt',
-  'size',
-  'n',
-  'prompt_extend',
-  'watermark',
-  'seed',
-]);
 
 function baseUrl(): URL {
   return trustedProviderBaseUrl(
@@ -63,13 +55,6 @@ function resolveSize(req: NormalizedRequest, profile: QwenImageProfile): string 
   return profile.aspectRatioSizes[req.aspectRatio ?? ''] ?? profile.defaultSize;
 }
 
-function parseDimensions(size: string): { width: number | null; height: number | null } {
-  const match = /^(\d+)[*x](\d+)$/.exec(size);
-  return match
-    ? { width: Number(match[1]), height: Number(match[2]) }
-    : { width: null, height: null };
-}
-
 function contentTypeFromUrl(url: string): string {
   try {
     const pathname = new URL(url).pathname.toLowerCase();
@@ -79,31 +64,6 @@ function contentTypeFromUrl(url: string): string {
     // Keep the documented PNG default for opaque provider URLs.
   }
   return 'image/png';
-}
-
-function buildLegacyRequestBody(
-  req: NormalizedRequest,
-  model: string,
-  profile: QwenImageProfile,
-): Record<string, unknown> {
-  const parameters: Record<string, unknown> = {
-    size: resolveSize(req, profile),
-    n: req.count ?? 1,
-    prompt_extend: true,
-    watermark: false,
-  };
-  if (req.negativePrompt) parameters.negative_prompt = req.negativePrompt;
-  if (req.seed !== undefined) parameters.seed = req.seed;
-
-  for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
-    if (!LEGACY_RESERVED_PARAMETER_KEYS.has(key)) parameters[key] = value;
-  }
-
-  return {
-    model,
-    input: { prompt: req.prompt },
-    parameters,
-  };
 }
 
 function buildMultimodalRequestBody(
@@ -120,6 +80,9 @@ function buildMultimodalRequestBody(
   if (profile.kind === 'multimodal-sync') {
     parameters.prompt_extend = true;
     if (req.negativePrompt) parameters.negative_prompt = req.negativePrompt;
+  } else if (profile.kind === 'wan-multimodal-sync') {
+    parameters.enable_sequential = false;
+    parameters.thinking_mode = true;
   } else {
     parameters.enable_sequential = false;
     parameters.thinking_mode = false;
@@ -144,41 +107,13 @@ function buildRequestBody(
   model: string,
   profile: QwenImageProfile,
 ): Record<string, unknown> {
-  return profile.kind === 'legacy-text2image-async'
-    ? buildLegacyRequestBody(req, model, profile)
-    : buildMultimodalRequestBody(req, model, profile);
+  return buildMultimodalRequestBody(req, model, profile);
 }
 
 function readOutput(payload: unknown): Record<string, unknown> | null {
   if (!payload || typeof payload !== 'object') return null;
   const output = (payload as Record<string, unknown>).output;
   return output && typeof output === 'object' ? (output as Record<string, unknown>) : null;
-}
-
-function parseLegacyResults(payload: unknown): ProviderImageRef[] {
-  const output = readOutput(payload);
-  const rawResults = output?.results;
-  if (!Array.isArray(rawResults)) return [];
-
-  return rawResults.flatMap((item, index) => {
-    if (!item || typeof item !== 'object') return [];
-    const result = item as Record<string, unknown>;
-    if (typeof result.url !== 'string' || result.url.length === 0) return [];
-    const dimensions =
-      typeof result.size === 'string'
-        ? parseDimensions(result.size)
-        : { width: null, height: null };
-    return [{
-      source: 'remote' as const,
-      url: result.url,
-      width: dimensions.width,
-      height: dimensions.height,
-      contentType: contentTypeFromUrl(result.url),
-      index,
-      revisedPrompt:
-        typeof result.actual_prompt === 'string' ? result.actual_prompt : undefined,
-    }];
-  });
 }
 
 function parseMultimodalResults(payload: unknown): ProviderImageRef[] {
@@ -210,13 +145,8 @@ function parseMultimodalResults(payload: unknown): ProviderImageRef[] {
   return images;
 }
 
-function parseResults(
-  payload: unknown,
-  profile: QwenImageProfile,
-): ProviderImageRef[] {
-  return profile.kind === 'legacy-text2image-async'
-    ? parseLegacyResults(payload)
-    : parseMultimodalResults(payload);
+function parseResults(payload: unknown): ProviderImageRef[] {
+  return parseMultimodalResults(payload);
 }
 
 function qwenErrorCode(payload: unknown): unknown {
@@ -264,14 +194,14 @@ export class QwenProvider implements ImageProvider {
 
     try {
       const body = buildRequestBody(req, model, spec.profile);
-      if (spec.profile.kind === 'multimodal-sync') {
+      if (spec.profile.kind !== 'multimodal-async') {
         const data = await postJson(
           generationUrl(spec.profile),
           body,
           this.authHeaders(),
           { timeoutMs: resolveSyncImageGenerationTimeoutMs() },
         );
-        const images = parseResults(data, spec.profile);
+        const images = parseResults(data);
         if (images.length === 0) {
           return {
             kind: 'failed',
@@ -307,7 +237,7 @@ export class QwenProvider implements ImageProvider {
 
   async poll(handle: JobHandle): Promise<PollResult> {
     const spec = qwenModelSpecs.get(handle.model);
-    if (!spec || spec.profile.kind === 'multimodal-sync') {
+    if (!spec || spec.profile.kind !== 'multimodal-async') {
       return { status: 'failed', error: unsupportedModelError(this.id) };
     }
 
@@ -324,7 +254,7 @@ export class QwenProvider implements ImageProvider {
       if (status === 'RUNNING') return { status: 'running' };
       if (status === 'CANCELED' || status === 'CANCELLED') return { status: 'cancelled' };
       if (status === 'SUCCEEDED') {
-        const images = parseResults(data, spec.profile);
+        const images = parseResults(data);
         return images.length > 0
           ? { status: 'completed', images }
           : {

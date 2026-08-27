@@ -86,8 +86,12 @@ describe('registry', () => {
     const provider = getById('qwen');
     expect(provider).toBeDefined();
     expect(provider?.id).toBe('qwen');
-    expect(provider?.capabilities.has('qwen-image-plus')).toBe(true);
+    expect(provider?.capabilities.has('qwen-image-plus')).toBe(false);
+    expect(provider?.capabilities.has('qwen-image-3.0-pro')).toBe(true);
+    expect(provider?.capabilities.has('qwen-image-3.0')).toBe(true);
+    expect(provider?.capabilities.has('qwen-image-2.0-pro-2026-06-22')).toBe(true);
     expect(provider?.capabilities.has('qwen-image-2.0-pro')).toBe(true);
+    expect(provider?.capabilities.has('wan2.7-image')).toBe(true);
     expect(provider?.capabilities.has('wan2.7-image-pro')).toBe(true);
   });
 
