@@ -96,8 +96,8 @@ type SubmitResult =
 
 | kind | 含义 | 适用厂商 |
 |------|------|----------|
-| `sync` | 当场完成；ZenMux/豆包优先内联 Base64，SiliconFlow/智谱返回临时 URL | zenmux、siliconflow、zhipu、doubao |
-| `async` | 任务已提交，需后续 poll | fal、qwen、kling |
+| `sync` | 当场完成；ZenMux/豆包优先内联 Base64，SiliconFlow/智谱返回临时 URL，Qwen/Wan 返回 choices 中的图片 URL | zenmux、siliconflow、zhipu、doubao、qwen（Qwen sync 与 Wan 标准版） |
+| `async` | 任务已提交，需后续 poll | fal、qwen（仅 Wan Pro）、kling |
 | `failed` | 单次调用失败（含超时、4xx、5xx） | 全部 |
 
 ### 3.5 JobHandle
@@ -107,7 +107,7 @@ async 厂商的任务句柄，providers 内部结构，job-engine 原样存储�
 | 字段 | 含义 | fal 映射 | Qwen 映射 |
 |------|------|----------|----------|
 | `providerId` | 厂商标识 | `"fal"` | `"qwen"` |
-| `model` | 模型 id | `"fal-ai/flux/schnell"` | `"qwen-image-plus"` |
+| `model` | 模型 id | `"fal-ai/flux/schnell"` | `"wan2.7-image-pro"` |
 | `externalId` | 厂商侧任务 id | `request_id` | `task_id` |
 | `statusUrl` | 状态查询 URL | submit 响应的 `status_url`（仅 exact-origin 后持久化） | 从受信 base + `externalId` 构建；字段为旧行兼容，不作为执行 URL |
 | `responseUrl` | 结果获取 URL | submit 响应的 `response_url`（仅 exact-origin 后持久化） | 与 `statusUrl` 相同（成功响应内含结果；不信任旧字段） |
@@ -328,20 +328,20 @@ Doubao adapter 使用独立 Ark API（默认 `https://ark.cn-beijing.volces.com/
 
 当前 ModelSpec ID 为 `doubao-seedream-4-0-250828`、`doubao-seedream-4-5-251128`、`doubao-seedream-5-0-260128`；三者首批保持单张、非流式、`sequential_image_generation=disabled`，优先请求 `b64_json` 立即落盘。
 
-### qwen / qwen-image-plus、qwen-image-2.0-pro、wan2.7-image-pro
+### qwen / Qwen Image 与 Wan 2.7 Image
 
-| 字段 | 值 |
-|------|-----|
-| protocol | `async` |
-| modes | `["text-to-image"]` |
-| maxCount | 1（Qwen Image Plus HTTP API 固定 n=1） |
-| supportedSizes | `["1664*928", "1472*1104", "1328*1328", "1104*1472", "928*1664"]` |
-| supportedAspectRatios | `["16:9", "4:3", "1:1", "3:4", "9:16"]` |
-| supportsNegativePrompt | true |
-| supportsSeed | true |
-| defaultSize | `"1664*928"` |
+本批公开 capabilities 仍严格限制为 `text-to-image`；虽然官方接口还支持图片输入，本产品当前不声明 `image-to-image`，也不向生成页增加参考图输入。
 
-Qwen adapter 由私有 profile 选择协议：`qwen-image-plus` 使用 `legacy-text2image-async`；`qwen-image-2.0-pro` 使用 `multimodal-sync`；`wan2.7-image-pro` 使用 `multimodal-async`。两种新 profile 仅构造单轮纯文本 `messages[].content[].text`，首批固定 `n=1`，Wan 明确关闭 sequential 与 thinking。异步任务和图片 URL 有效期约 24 小时，job-engine 必须及时转存。
+| model | protocol | profile | maxCount | supportsNegativePrompt | supportsSeed |
+|------|----------|---------|----------|------------------------|--------------|
+| `qwen-image-3.0-pro` | `sync` | `multimodal-sync` | 6 | true | true |
+| `qwen-image-3.0` | `sync` | `multimodal-sync` | 6 | true | true |
+| `qwen-image-2.0-pro-2026-06-22` | `sync` | `multimodal-sync` | 6 | true | true |
+| `qwen-image-2.0-pro` | `sync` | `multimodal-sync` | 6 | true | true |
+| `wan2.7-image` | `sync` | `wan-multimodal-sync` | 4 | false | true |
+| `wan2.7-image-pro` | `async` | `multimodal-async` | 4 | false | true |
+
+Qwen sync 模型使用 `multimodal-generation/generation`，构造单轮纯文本 `messages[].content[].text`，支持 `prompt_extend`、negative prompt、seed。Wan 标准版使用同一同步端点，但独立发送 `enable_sequential=false`、`thinking_mode=true`，不发送 Qwen 专属 `negative_prompt`；Wan Pro 保持 `image-generation/generation` + `X-DashScope-Async: enable`，并由 task poll 获取 `choices`。DashScope 异步任务和图片 URL 有效期约 24 小时，job-engine 必须及时转存。
 
 ---
 

@@ -12,7 +12,7 @@
 
 - registry 按 env key 启用/禁用 provider 的行为
 - zenmux、SiliconFlow、智谱、Doubao adapter 的请求翻译与响应解析（sync 路径）
-- fal、Qwen、Kling adapter 的请求翻译、submit 句柄解析、poll 状态机（async 路径）
+- fal、Wan Pro、Kling adapter 的请求翻译、submit 句柄解析、poll 状态机（async 路径）
 - http-client 的超时与错误码映射
 - capabilities 静态声明与 model 查询
 - 私有 ModelSpec 到公开 capabilities 的单向投影、重复 model ID 和未知模型安全门
@@ -95,10 +95,11 @@ Fal 还需逐 profile 验证：原版/Lite Banana 不发送 resolution；Nano Ba
 | Doubao 公开比/seed | `aspectRatio="4:3"` + seed | 请求体含 `size="2048x1536"` + `seed` |
 | Doubao 图生图 | `referenceImages` | 请求体含 `image[]` |
 | Doubao 新模型 | Seedream 4.5 / 5.0 Lite | model 精确透传；关闭组图/流式；请求 `b64_json` |
-| Qwen 正常 submit | model=`qwen-image-plus` | `kind="async"`，返回 `task_id` 句柄 |
-| Qwen poll | PENDING/RUNNING/SUCCEEDED/FAILED/CANCELED | 映射统一 `PollResult` 状态 |
+| Qwen Image 3.0 Pro submit | model=`qwen-image-3.0-pro` | `kind="sync"`，无 async header，解析 `choices[].message.content[].image` |
+| Qwen Image 3.0 / 2.0 Pro snapshot | 新 model ID | 使用同一 Qwen multimodal sync body；旧 `qwen-image-plus` 不在目录且提交前拒绝 |
 | Qwen HTTP 鉴权/限流/超时 | mock 401/429/TimeoutError | `AUTH_FAILED`/可重试 `RATE_LIMITED`/`TIMEOUT` |
 | Qwen Image 2.0 Pro | `multimodal-sync` | 单轮 text content，直接解析 `output.choices[].message.content[].image` |
+| Wan 2.7 Image submit | model=`wan2.7-image` | `multimodal-generation/generation`，无 async header；`thinking_mode=true`、不发送 negative prompt |
 | Wan 2.7 Image Pro submit | `multimodal-async` | `image-generation/generation` + async header；关闭 sequential/thinking |
 | Wan poll | SUCCEEDED + choices | 转为 ProviderImageRef 并立即进入 storage |
 
@@ -145,7 +146,7 @@ Fal 还需逐 profile 验证：原版/Lite Banana 不发送 resolution；Nano Ba
 | SiliconFlow capabilities | `1:1`/`3:4`/`1:2`/`9:16`，负向词与 seed 为 true |
 | 智谱 capabilities | 官方七种尺寸/公开比，`quality=hd`，负向词与 seed 为 false |
 | Doubao capabilities | Seedream 4.0 的 2K/4K 与七种公开比，seed 为 true |
-| Qwen capabilities | Qwen Image Plus 五种官方尺寸，负向词与 seed 为 true，protocol=async |
+| Qwen/Wan capabilities | 新增三种 Qwen sync + Wan 标准 sync；六个当前 model 均仅公开 `text-to-image`；旧 Plus 不存在 |
 
 ---
 
@@ -168,10 +169,10 @@ Fal 还需逐 profile 验证：原版/Lite Banana 不发送 resolution；Nano Ba
 | http-client 正确注入 Authorization | mock fetch 断言 header |
 | fal 使用 `Key $FAL_KEY` 格式 | mock fetch 断言 header 值 |
 | sync providers 使用 Bearer key | mock fetch 断言 ZenMux/SiliconFlow/智谱/Doubao header 值 |
-| Qwen 使用 Bearer + Async header | mock fetch 断言 `Authorization` 与 `X-DashScope-Async: enable` |
+| Wan Pro 使用 Bearer + Async header | mock fetch 断言 `Authorization` 与 `X-DashScope-Async: enable`；Qwen/Wan 标准 sync 不带该 header |
 | 所有授权请求拒绝自动 redirect | mock 302，断言 `redirect: 'manual'`、只有一次 fetch |
 | 普通 JSON 响应上限 | mock `Content-Length` 或 chunked stream 超过 2 MiB，断言 body 被取消且只返回安全错误 |
-| 动态/历史 handle URL | Fal 非同源 URL 在 fetch 前拒绝；Qwen/Kling 从受信 base + 编码 `externalId` 重建 URL |
+| 动态/历史 handle URL | Fal 非同源 URL 在 fetch 前拒绝；Wan/Kling 从受信 base + 编码 `externalId` 重建 URL |
 
 ---
 

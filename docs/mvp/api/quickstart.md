@@ -69,7 +69,9 @@ SESSION=$(curl -s -X POST http://127.0.0.1:3000/api/projects/$PROJECT/sessions \
 
 ---
 
-## 3. Sync 路径（ZenMux 示例；SiliconFlow / 智谱 / Doubao 同契约）
+## 3. Sync 路径（ZenMux 示例；SiliconFlow / 智谱 / Doubao / Qwen / Wan 同为同步提交）
+
+Qwen 新增的文生图模型可将 target 替换为 `{ "provider": "qwen", "model": "qwen-image-3.0" }`、`qwen-image-3.0-pro` 或 `qwen-image-2.0-pro-2026-06-22`；标准 Wan 2.7 使用 `{ "provider": "qwen", "model": "wan2.7-image" }`。本批示例仍只传文本 prompt。
 
 ```bash
 curl -s -X POST http://127.0.0.1:3000/api/generations \
@@ -106,9 +108,9 @@ curl -s -o out.png http://127.0.0.1:3000/api/images/{imageId}
 
 ---
 
-## 4. Async 路径（fal / Qwen / Kling）
+## 4. Async 路径（fal / Wan Pro / Kling）
 
-下面先用 fal 展示轮询流程。Qwen 使用同一套流程，只需把 target 换成 `{ "provider": "qwen", "model": "qwen-image-plus" }`；Kling 换成 `{ "provider": "kling", "model": "kling-v3" }`，服务端使用独立 Kling API。Kling 图生图可将 `mode` 设为 `image-to-image` 并传一张 `referenceImages`。详情 GET 才是用户手动推进入口；若开启 worker，则由后台扫描 due job。
+下面先用 fal 展示轮询流程。Wan Pro 可将 target 换成 `{ "provider": "qwen", "model": "wan2.7-image-pro" }`；Kling 换成 `{ "provider": "kling", "model": "kling-v3" }`，服务端使用独立 Kling API。Kling 图生图可将 `mode` 设为 `image-to-image` 并传一张 `referenceImages`。详情 GET 才是用户手动推进入口；若开启 worker，则由后台扫描 due job。
 
 提交:
 
@@ -144,7 +146,7 @@ while true; do
 done
 ```
 
-取消仍在运行的 generation（Kling/Qwen 会立即停止本地 poll，并记录 `CANCEL_UNSUPPORTED`）：
+取消仍在运行的 generation（Kling/Wan Pro 会立即停止本地 poll，并记录 `CANCEL_UNSUPPORTED`）：
 
 ```bash
 curl -s -X POST -b cookies.txt \

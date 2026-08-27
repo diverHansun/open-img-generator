@@ -41,12 +41,12 @@ API 层
   → 返回 ProviderInfo[] 给 API 层
 ```
 
-### 2.2 Sync 路径（zenmux / siliconflow / zhipu / doubao / qwen multimodal-sync）
+### 2.2 Sync 路径（zenmux / siliconflow / zhipu / doubao / qwen multimodal-sync / wan2.7-image）
 
 ```
 job-engine
   → 构造 NormalizedRequest（prompt 已由 prompt 模块处理）
-  → registry.getById("zenmux" / "siliconflow" / "zhipu" / "doubao")
+  → registry.getById("zenmux" / "siliconflow" / "zhipu" / "doubao" / "qwen")
   → provider.submit(req, model)
     → adapter 在本 Provider ModelSpec 中查找 model；未知模型以 not_started 失败
     → zenmux adapter: NormalizedRequest 翻译为 OpenAI Images API 请求体
@@ -55,13 +55,18 @@ job-engine
       - count → n
     → http-client: POST https://zenmux.ai/api/v1/images/generations
     → zenmux adapter: 解析响应 data[].url → ProviderImageRef[]
+    → qwen adapter:
+      - Qwen Image 3/2 与 Wan 标准版使用单轮 text content
+      - Qwen sync / Wan standard sync 均解析 output.choices[].message.content[].image
+      - Wan Pro 不进入此路径，继续走下方 async submit/poll
+    → http-client: POST DashScope multimodal-generation/generation
   → 返回 SubmitResult { kind: "sync", images: [...] }
 → job-engine 拿到 images[].url，交给 storage 下载转存
 ```
 
 SiliconFlow、智谱与 Doubao 的差异只存在于 adapter 内部：分别解析 `images[].url`、`data[].url` 与 Ark `data[].b64_json`/URL fallback；Doubao 额外支持 `image[]` 参考图。providers 不负责最终持久化，内联图片先交由 job-engine/storage 暂存，远程 URL 则立即下载。
 
-### 2.3 Async 路径 — Submit（fal / qwen legacy/Wan / kling）
+### 2.3 Async 路径 — Submit（fal / Wan Pro / kling）
 
 ```
 job-engine
@@ -81,21 +86,21 @@ job-engine
 → generation 状态置为 pending
 ```
 
-Qwen 的 DashScope HTTP 请求需要 `X-DashScope-Async: enable`，submit 响应返回 `task_id`；Qwen adapter 将 `/api/v1/tasks/:taskId` 保存为 status/response URL。Kling 使用独立 base URL 与 `/v1/images/generations/:taskId`，submit 返回 `data.task_id`，后续由详情 GET 或后台 worker 的惰性推进触发 poll。
+Wan Pro 的 DashScope HTTP 请求需要 `X-DashScope-Async: enable`，submit 响应返回 `task_id`；Qwen adapter 将 `/api/v1/tasks/:taskId` 保存为 status/response URL。Qwen 3、Qwen 2 与标准 Wan 2.7 走同步 multimodal endpoint，不进入本流程。Kling 使用独立 base URL 与 `/v1/images/generations/:taskId`，submit 返回 `data.task_id`，后续由详情 GET 或后台 worker 的惰性推进触发 poll。
 
-### 2.4 Async 路径 — Poll（fal / qwen / kling，惰性推进）
+### 2.4 Async 路径 — Poll（fal / Wan Pro / kling，惰性推进）
 
 ```
 job-engine（在 GET /api/generations/:id 时触发）
   → 从 generation_jobs 读取 provider_handle
     → registry.getById("fal" / "qwen" / "kling")
   → provider.poll(handle)
-    → fal / qwen adapter: GET handle.statusUrl
+    → fal / Wan Pro adapter: GET handle.statusUrl
     → 解析状态:
       - IN_QUEUE → PollResult { status: "pending" }
       - IN_PROGRESS → PollResult { status: "running" }
       - COMPLETED → GET handle.responseUrl → 解析 images → PollResult { status: "completed", images }
-      - Qwen CANCELED / Kling canceled → PollResult { status: "cancelled" }
+      - Wan CANCELED / Kling canceled → PollResult { status: "cancelled" }
       - 错误 → PollResult { status: "failed", error }
   → 返回 PollResult 给 job-engine
 → job-engine 根据 status 更新 generation_jobs 状态
@@ -108,7 +113,7 @@ job-engine（在 GET /api/generations/:id 时触发）
 job-engine（后续前端"取消"功能时）
   → job-engine 先写 cancel_requested_at，停止后续 poll
   → provider.cancel(handle)（仅 provider 声明时调用；fal 支持）
-  → Kling/Qwen 无远程端点时保留 CANCEL_UNSUPPORTED 诊断
+  → Kling/Wan 无远程端点时保留 CANCEL_UNSUPPORTED 诊断
 → job-engine 更新 generation_jobs 状态为 cancelled
 ```
 
@@ -153,7 +158,7 @@ API 路由为 `POST /api/generations/:id/cancel`；取消与 submit/poll 竞争�
 | 输入 | `NormalizedRequest` + model id 字符串 |
 | 输出 | `Promise<SubmitResult>` |
 | 同步/异步 | 异步函数；async 厂商返回的 SubmitResult.kind 为 "async"，sync 厂商返回 "sync" |
-| 超时 | sync（ZenMux、SiliconFlow、智谱、Doubao）通过共享 `SYNC_IMAGE_GENERATION_TIMEOUT_MS` 使用默认/最大 180s；async task submit 继续为 30s |
+| 超时 | sync（ZenMux、SiliconFlow、智谱、Doubao、Qwen、Wan 标准版）通过共享 `SYNC_IMAGE_GENERATION_TIMEOUT_MS` 使用默认/最大 180s；async task submit 继续为 30s |
 | 副作用 | 向外部厂商发起 HTTP 请求 |
 
 ### 3.4 ImageProvider.poll(handle)（仅 async provider）

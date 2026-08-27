@@ -89,7 +89,7 @@ src/lib/providers/
 │   ├── siliconflow.ts        # SiliconFlow sync image generations adapter
 │   ├── zhipu.ts              # Zhipu GLM-Image sync adapter
 │   ├── doubao.ts              # Doubao/Ark Seedream sync adapter
-│   └── qwen.ts                # Qwen Image/DashScope async adapter
+│   └── qwen.ts                # Qwen Image/Wan DashScope sync + async adapter
 └── capabilities/
     ├── fal.ts               # fal 各 model 的 capabilities 声明
     ├── zenmux.ts            # zenmux 各 model 的 capabilities 声明
@@ -124,7 +124,7 @@ src/lib/providers/
 
 ### 4.1.1 同步与异步的 timeout 边界
 
-ZenMux（OpenAI Images 与 Gemini `generateContent`）、SiliconFlow、智谱、Doubao 与 Qwen `multimodal-sync` 模型的 `submit()` 成功响应本身承载完整图片，统一使用 `SYNC_IMAGE_GENERATION_TIMEOUT_MS`：默认 180 秒、只接受不大于 180 秒的正整数毫秒，非法配置回退默认值。fal、Qwen async profiles 与 Kling 的 submit 仅创建远端 task，继续使用 HTTP helper 的 30 秒 submit / 15 秒 poll 默认值。任何已进入网络的 submit 超时仍是 `unknown`，由 job-engine 终态收口，绝不自动重放。
+ZenMux（OpenAI Images 与 Gemini `generateContent`）、SiliconFlow、智谱、Doubao、Qwen `multimodal-sync` 与 Wan `wan-multimodal-sync` 模型的 `submit()` 成功响应本身承载完整图片，统一使用 `SYNC_IMAGE_GENERATION_TIMEOUT_MS`：默认 180 秒、只接受不大于 180 秒的正整数毫秒，非法配置回退默认值。fal、Wan `multimodal-async` profile 与 Kling 的 submit 仅创建远端 task，继续使用 HTTP helper 的 30 秒 submit / 15 秒 poll 默认值。任何已进入网络的 submit 超时仍是 `unknown`，由 job-engine 终态收口，绝不自动重放。
 
 Fal 的 Banana、GPT Image 和 FLUX 私有 profile 各自声明允许字段。未知 `providerOptions` 不再透传；原版/Lite Banana 不发送 `resolution`，GPT Image 1/1.5/2 分别维护尺寸、质量、背景和输出格式差异，FLUX Pro/Flex 不伪造 `num_images`，Klein `4b` 与 `4b/base` 分别表示 distilled 与 full-CFG 方言。
 
@@ -146,7 +146,7 @@ NormalizedRequest 中含 `providerOptions?: Record<string, unknown>`，各 adapt
 
 ### 4.4 Provider 分批接入
 
-当前已完成 Batch 1（SiliconFlow、智谱）、Batch 2（Doubao/Ark、Qwen/DashScope）与 Batch 3（Kling 独立 API）。Qwen 按 ModelSpec 同时支持 legacy text2image async、multimodal sync 和 multimodal async；Kling 仍是创建任务 + poll 异步流程。Kling 标准图片端点单次最多 1 张参考图、最多 9 张结果，标准协议没有远程取消端点。
+当前已完成 Batch 1（SiliconFlow、智谱）、Batch 2（Doubao/Ark、Qwen/DashScope）与 Batch 3（Kling 独立 API）。Qwen/Wan 按 ModelSpec 支持 multimodal sync 与 Wan multimodal async；本批不再支持 Qwen legacy text2image 协议。Kling 仍是创建任务 + poll 异步流程。Kling 标准图片端点单次最多 1 张参考图、最多 9 张结果，标准协议没有远程取消端点。
 
 Kling adapter 使用 `https://api-singapore.klingai.com`（可由 `KLING_BASE_URL` 覆盖），`POST/GET /v1/images/generations`，Bearer `KLING_API_KEY`；不复用 DashScope 鉴权或 URL。标准端点没有远程 cancel，因此取消由 job-engine 本地标记兜底。
 
