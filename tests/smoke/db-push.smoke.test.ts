@@ -25,9 +25,12 @@ describe('db migration smoke', () => {
         .all();
       const names = tables.map((t: { name: string }) => t.name);
       expect(names).toContain('sessions');
+      expect(names).toContain('projects');
       expect(names).toContain('generations');
       expect(names).toContain('generation_jobs');
       expect(names).toContain('images');
+      expect(names).toContain('favorites');
+      expect(names).toContain('model_preferences');
       sqlite.close();
     } finally {
       try {

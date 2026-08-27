@@ -1,0 +1,59 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { NextRequest } from 'next/server';
+import { middleware } from './middleware';
+
+describe('API authentication middleware', () => {
+  const originalToken = process.env.APP_AUTH_TOKEN;
+
+  afterEach(() => {
+    if (originalToken === undefined) delete process.env.APP_AUTH_TOKEN;
+    else process.env.APP_AUTH_TOKEN = originalToken;
+  });
+
+  it('uses the structured error contract for unauthenticated API requests', async () => {
+    process.env.APP_AUTH_TOKEN = 'test-token';
+
+    const response = middleware(
+      new NextRequest('http://localhost:3000/api/project-summaries', {
+        headers: { 'X-Request-Id': 'middleware-request-1' },
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get('X-Request-Id')).toBe('middleware-request-1');
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+        message: 'Authentication required',
+        retryable: false,
+        requestId: 'middleware-request-1',
+      },
+    });
+  });
+
+  it('does not echo an unsafe correlation ID in authentication failures', async () => {
+    process.env.APP_AUTH_TOKEN = 'test-token';
+
+    const response = middleware(
+      new NextRequest('http://localhost:3000/api/generations', {
+        headers: { 'X-Request-Id': 'unsafe request id' },
+      }),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error.requestId).toBe(response.headers.get('X-Request-Id'));
+    expect(body.error.requestId).not.toBe('unsafe request id');
+  });
+
+  it('keeps readiness and liveness probes public when authentication is enabled', () => {
+    process.env.APP_AUTH_TOKEN = 'test-token';
+
+    for (const path of ['/api/health', '/api/health/live']) {
+      const response = middleware(new NextRequest(`http://localhost:3000${path}`));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-middleware-next')).toBe('1');
+    }
+  });
+});

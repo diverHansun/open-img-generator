@@ -1,233 +1,237 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
+
 import { createTestDb } from '../../../tests/helpers/db';
-import { createSession } from '../db/queries/sessions';
-import { sessions } from '../db';
-import { submitGeneration, getGeneration } from './orchestrator';
+import {
+  favorites,
+  generationJobs,
+  generations,
+  getGenerationWithJobsAndImages,
+  markImageStorageMissing,
+  sessions,
+} from '../db';
+import { IdempotencyKeyReusedError } from '../errors';
+import type { ImageProvider } from '../providers';
 import * as providers from '../providers';
 import * as storage from '../storage';
-import type { ImageProvider, SubmitResult as ProviderSubmitResult, PollResult } from '../providers';
+import { getGeneration, submitGeneration } from './orchestrator';
+import { serializeSafeJobError } from './job-error';
 
-vi.mock('../providers', async () => {
+vi.mock('../providers', () => ({ getById: vi.fn() }));
+vi.mock('../storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../storage')>()),
+  downloadAndStore: vi.fn(),
+}));
+
+const clientRequestId = '15a6fecc-4f40-4ed2-8f51-353423be9af1';
+
+function makeProvider(overrides: Partial<ImageProvider> = {}): ImageProvider {
   return {
-    getById: vi.fn(),
-  };
-});
+    id: 'fal',
+    displayName: 'fal.ai',
+    capabilities: new Map([
+      [
+        'fal-ai/flux/schnell',
+        {
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          displayName: 'FLUX Schnell',
+          modes: ['text-to-image'],
+          maxCount: 4,
+          supportedSizes: ['square_hd'],
+          supportedAspectRatios: ['1:1'],
+          supportsNegativePrompt: false,
+          supportsSeed: true,
+          protocol: 'async',
+          defaultSize: 'square_hd',
+        },
+      ],
+    ]),
+    submit: vi.fn(),
+    ...overrides,
+  } as ImageProvider;
+}
 
-vi.mock('../storage', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../storage')>();
+function params(overrides: Partial<Parameters<typeof submitGeneration>[0]> = {}) {
   return {
-    ...original,
-    downloadAndStore: vi.fn(),
+    clientRequestId,
+    prompt: 'A quiet reading room',
+    sessionId: 'default-session',
+    targets: [{ provider: 'fal' as const, model: 'fal-ai/flux/schnell' }],
+    ...overrides,
   };
-});
+}
 
-const now = '2026-07-12T10:00:00.000Z';
-
-describe('orchestrator', () => {
+describe('generation orchestrator durable admission', () => {
   let db: ReturnType<typeof createTestDb>['db'];
-  const originalEnv = { ...process.env };
 
   beforeEach(() => {
     db = createTestDb().db;
     process.env.FAL_KEY = 'test-fal-key';
-    process.env.ZENMUX_API_KEY = 'test-zenmux-key';
     vi.mocked(providers.getById).mockReset();
     vi.mocked(storage.downloadAndStore).mockReset();
   });
 
   afterEach(() => {
-    process.env = { ...originalEnv };
+    delete process.env.FAL_KEY;
   });
 
-  function makeProvider(config: Partial<ImageProvider> & { submit: ImageProvider['submit'] }): ImageProvider {
-    return {
-      id: 'fal',
-      displayName: 'fal.ai',
-      capabilities: new Map([
-        [
-          'fal-ai/flux/schnell',
-          {
-            providerId: 'fal',
-            model: 'fal-ai/flux/schnell',
-            displayName: 'FLUX Schnell',
-            modes: ['text-to-image'],
-            maxCount: 4,
-            supportedSizes: ['square_hd'],
-            supportedAspectRatios: [],
-            supportsNegativePrompt: false,
-            supportsSeed: true,
-            protocol: 'async',
-            defaultSize: 'square_hd',
-          },
-        ],
-      ]),
-      ...config,
-    } as ImageProvider;
-  }
+  it('commits a queued job with a recoverable snapshot before any provider call', async () => {
+    const submit = vi.fn();
+    vi.mocked(providers.getById).mockReturnValue(makeProvider({ submit }));
 
-  describe('submitGeneration', () => {
-    it('returns pending for async provider', async () => {
-      vi.mocked(providers.getById).mockReturnValue(
-        makeProvider({
-          submit: vi.fn().mockResolvedValue({
-            kind: 'async',
-            handle: {
-              providerId: 'fal',
-              model: 'fal-ai/flux/schnell',
-              externalId: 'req-1',
-              statusUrl: 'https://status',
-              responseUrl: 'https://response',
-              cancelUrl: null,
-              submittedAt: now,
-            },
-          }),
-        }),
-      );
+    const result = await submitGeneration(
+      params({ seed: 42, aspectRatio: '1:1' }),
+      { db },
+    );
 
-      const result = await submitGeneration(
-        { provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat' },
-        { db },
-      );
-
-      expect(result.status).toBe('pending');
+    expect(result).toMatchObject({ status: 'pending', replayed: false });
+    expect(submit).not.toHaveBeenCalled();
+    const stored = getGenerationWithJobsAndImages(result.generationId, db)!;
+    expect(stored.jobs[0]).toMatchObject({
+      status: 'pending',
+      phase: 'queued',
+      requestSnapshotVersion: 1,
+      attemptCount: 0,
     });
+    expect(stored.jobs[0]!.requestSnapshot).toContain('"seed":42');
+    expect(stored.jobs[0]!.requestSnapshot).not.toContain('clientRequestId');
+  });
 
-    it('returns completed for sync provider after storing images', async () => {
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
+  it('durably admits more than eight distinct valid targets', async () => {
+    const base = makeProvider().capabilities.get('fal-ai/flux/schnell')!;
+    const capabilities = new Map(
+      Array.from({ length: 9 }, (_, index) => {
+        const model = `fal-ai/flux/model-${index}`;
+        return [model, { ...base, model }] as const;
+      }),
+    );
+    const submit = vi.fn();
+    vi.mocked(providers.getById).mockReturnValue(
+      makeProvider({ capabilities, submit }),
+    );
 
-      vi.mocked(providers.getById).mockReturnValue(
-        makeProvider({
-          id: 'zenmux',
-          submit: vi.fn().mockResolvedValue({
-            kind: 'sync',
-            images: [{ url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 }],
-          } as ProviderSubmitResult),
-          capabilities: new Map([
-            [
-              'openai/gpt-image-2',
-              {
-                providerId: 'zenmux',
-                model: 'openai/gpt-image-2',
-                displayName: 'GPT Image 2',
-                modes: ['text-to-image'],
-                maxCount: 4,
-                supportedSizes: ['1024x1024'],
-                supportedAspectRatios: ['1:1'],
-                supportsNegativePrompt: false,
-                supportsSeed: false,
-                protocol: 'sync',
-                defaultSize: '1024x1024',
-              },
-            ],
-          ]),
-        }),
-      );
+    const result = await submitGeneration(params({
+      targets: Array.from({ length: 9 }, (_, index) => ({
+        provider: 'fal' as const,
+        model: `fal-ai/flux/model-${index}`,
+      })),
+    }), { db });
 
-      const result = await submitGeneration(
-        { provider: 'zenmux', model: 'openai/gpt-image-2', prompt: 'A cat' },
-        { db },
-      );
+    expect(getGenerationWithJobsAndImages(result.generationId, db)?.jobs).toHaveLength(9);
+    expect(submit).not.toHaveBeenCalled();
+  });
 
-      expect(result.status).toBe('completed');
-    });
+  it('exposes only safe Provider waiting metadata in the public job view', async () => {
+    vi.mocked(providers.getById).mockReturnValue(makeProvider());
+    const result = await submitGeneration(params(), { db });
+    const nextAttemptAt = '2099-01-01T00:00:00.000Z';
+    db.update(generationJobs).set({
+      error: serializeSafeJobError('RATE_LIMITED', true),
+      nextPollAt: nextAttemptAt,
+    }).where(eq(generationJobs.generationId, result.generationId)).run();
 
-    it('returns failed when provider submit fails', async () => {
-      vi.mocked(providers.getById).mockReturnValue(
-        makeProvider({
-          submit: vi.fn().mockResolvedValue({
-            kind: 'failed',
-            error: { code: 'AUTH_FAILED', message: 'bad key', retryable: false },
-          }),
-        }),
-      );
+    const view = await getGeneration(result.generationId, { db });
 
-      const result = await submitGeneration(
-        { provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat' },
-        { db },
-      );
-
-      expect(result.status).toBe('failed');
-    });
-
-    it('touches session when sessionId provided', async () => {
-      createSession({ id: 's1', title: 'Test', createdAt: now, updatedAt: now }, db);
-      vi.mocked(providers.getById).mockReturnValue(
-        makeProvider({
-          submit: vi.fn().mockResolvedValue({
-            kind: 'async',
-            handle: {
-              providerId: 'fal',
-              model: 'fal-ai/flux/schnell',
-              externalId: 'req-1',
-              statusUrl: 'https://status',
-              responseUrl: 'https://response',
-              cancelUrl: null,
-              submittedAt: now,
-            },
-          }),
-        }),
-      );
-
-      await submitGeneration(
-        { provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat', sessionId: 's1' },
-        { db },
-      );
-
-      const session = db.select().from(sessions).where(eq(sessions.id, 's1')).get();
-      expect(session!.updatedAt).not.toBe(now);
+    expect(view.jobs[0]).toMatchObject({
+      status: 'pending',
+      waitingForProvider: true,
+      nextAttemptAt,
+      error: { code: 'RATE_LIMITED', retryable: true },
     });
   });
 
-  describe('getGeneration', () => {
-    it('throws NotFoundError for missing generation', async () => {
-      await expect(getGeneration('missing', { db })).rejects.toThrow('Generation not found');
+  it('replays the same durable generation without revalidating current provider configuration', async () => {
+    vi.mocked(providers.getById).mockReturnValue(makeProvider());
+    const first = await submitGeneration(params(), { db });
+    vi.mocked(providers.getById).mockReturnValue(undefined);
+
+    await expect(submitGeneration(params(), { db })).resolves.toEqual({
+      generationId: first.generationId,
+      status: 'pending',
+      replayed: true,
+    });
+    expect(db.select().from(generations).all()).toHaveLength(1);
+  });
+
+  it('rejects a reused key that describes different input without creating work', async () => {
+    vi.mocked(providers.getById).mockReturnValue(makeProvider());
+    await submitGeneration(params(), { db });
+
+    await expect(
+      submitGeneration(params({ prompt: 'A different room' }), { db }),
+    ).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
+    expect(db.select().from(generations).all()).toHaveLength(1);
+  });
+
+  it('touches the session in the same durable admission transaction', async () => {
+    vi.mocked(providers.getById).mockReturnValue(makeProvider());
+    const before = db
+      .select({ updatedAt: sessions.updatedAt })
+      .from(sessions)
+      .where(eq(sessions.id, 'default-session'))
+      .get()!.updatedAt;
+
+    await submitGeneration(params(), { db });
+
+    expect(
+      db
+        .select({ updatedAt: sessions.updatedAt })
+        .from(sessions)
+        .where(eq(sessions.id, 'default-session'))
+        .get()!.updatedAt,
+    ).not.toBe(before);
+  });
+
+  it('advances a sync target across dispatch and storing checkpoints', async () => {
+    const submit = vi.fn().mockResolvedValue({
+      kind: 'sync',
+      images: [
+        {
+          url: 'https://v3.fal.media/reading-room.png',
+          width: 1024,
+          height: 1024,
+          contentType: 'image/png',
+          index: 0,
+        },
+      ],
+    });
+    vi.mocked(providers.getById).mockReturnValue(makeProvider({ submit }));
+    vi.mocked(storage.downloadAndStore).mockResolvedValue({
+      storagePath: '2026/07/reading-room.png',
+      contentType: 'image/png',
+      sizeBytes: 42,
     });
 
-    it('advances async job and returns completed', async () => {
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
-
-      const poll = vi.fn().mockResolvedValue({
-        status: 'completed',
-        images: [{ url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 }],
-      } as PollResult);
-
-      vi.mocked(providers.getById).mockReturnValue(
-        makeProvider({
-          submit: vi.fn().mockResolvedValue({
-            kind: 'async',
-            handle: {
-              providerId: 'fal',
-              model: 'fal-ai/flux/schnell',
-              externalId: 'req-1',
-              statusUrl: 'https://status',
-              responseUrl: 'https://response',
-              cancelUrl: null,
-              submittedAt: now,
-            },
-          }),
-          poll,
-        }),
-      );
-
-      const submitResult = await submitGeneration(
-        { provider: 'fal', model: 'fal-ai/flux/schnell', prompt: 'A cat' },
-        { db },
-      );
-
-      const view = await getGeneration(submitResult.generationId, { db });
-      expect(view.status).toBe('completed');
-      expect(view.images).toHaveLength(1);
-      expect(view.images[0].url).toMatch(/^\/api\/images\//);
+    const admitted = await submitGeneration(params(), { db });
+    const afterDispatch = await getGeneration(admitted.generationId, { db });
+    expect(submit).toHaveBeenCalledOnce();
+    expect(afterDispatch.status).toBe('running');
+    expect(getGenerationWithJobsAndImages(admitted.generationId, db)!.jobs[0]).toMatchObject({
+      phase: 'storing',
+      resultSnapshot: expect.any(String),
     });
+
+    const completed = await getGeneration(admitted.generationId, { db });
+    expect(completed.status).toBe('completed');
+    expect(completed.images).toHaveLength(1);
+
+    const imageId = completed.images[0]!.id;
+    db.insert(favorites).values({
+      id: 'favorite-reading-room',
+      imageId,
+      createdAt: new Date().toISOString(),
+    }).run();
+    markImageStorageMissing(imageId, new Date().toISOString(), db);
+
+    const missingFavorite = await getGeneration(admitted.generationId, { db });
+    expect(missingFavorite.images[0]).toMatchObject({
+      id: imageId,
+      url: `/api/images/${imageId}`,
+      favorited: true,
+      delivery: 'remote',
+      availability: 'available',
+    });
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
   });
 });
-

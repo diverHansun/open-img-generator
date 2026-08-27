@@ -3,6 +3,7 @@
 > 初版审查: 2026-07-10
 > 二次审查（并行子代理）: 2026-07-12
 > 文档修复: 2026-07-12
+> 三次审查: 2026-07-16（Kling、user-config、worker、限流、认证、生命周期清理）
 > 范围: docs/mvp/ 全部模块文档 + docs/mvp/api/
 
 ---
@@ -109,10 +110,10 @@ GET /api/generations/:id（客户端轮询）
 
 ## 6. 已知 MVP 限制（by design）
 
-- 无 auth、无 rate limit（localhost-only，见 constraints §1）
+- 默认仍建议 localhost；`APP_AUTH_TOKEN` 可选开启单用户认证，generation admission/provider semaphore 提供进程内限流
 - 不持久化 width/count/seed 等输入参数
 - 无 list generations 端点
-- 无 cancel API
+- 取消 API 已实现；Kling/Qwen 等无远程端点时采用本地取消标记并返回 `CANCEL_UNSUPPORTED` 诊断
 - 无自动重试
 - sync provider count=1
 - 部分转存失败不自动续传

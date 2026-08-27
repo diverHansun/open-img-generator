@@ -1,32 +1,65 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { eq } from 'drizzle-orm';
+
 import { createTestDb } from '../../../tests/helpers/db';
-import { createGenerationAndJob, getGenerationWithJobsAndImages } from '../db/queries/generations';
-import { storeImages, completeSync, advance } from './lifecycle';
-import type { ProviderImageRef, PollResult } from '../providers';
-
-vi.mock('../storage', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../storage')>();
-  return {
-    ...original,
-    downloadAndStore: vi.fn(),
-  };
-});
-
-vi.mock('../providers', async () => {
-  return {
-    getById: vi.fn(),
-  };
-});
-
-import * as storage from '../storage';
+import {
+  createGenerationAndJob,
+  getGenerationJob,
+  getGenerationWithJobsAndImages,
+  generationJobs,
+  updateGenerationJob,
+} from '../db';
+import type { ImageProvider, PollResult, SubmitResult } from '../providers';
 import * as providers from '../providers';
+import * as storage from '../storage';
+import { StorageError } from '../errors';
+import {
+  createRequestSnapshot,
+  REQUEST_SNAPSHOT_VERSION,
+} from './request-snapshot';
+import { advance } from './lifecycle';
+import { cancelGeneration } from './orchestrator';
+
+vi.mock('../providers', () => ({ getById: vi.fn() }));
+vi.mock('../storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../storage')>()),
+  downloadAndStore: vi.fn(),
+  downloadAndStoreVideo: vi.fn(),
+  removeStoredFile: vi.fn(),
+  stageInlineImage: vi.fn(),
+  removeStagedImage: vi.fn(),
+}));
 
 const now = '2026-07-12T10:00:00.000Z';
 
-function seedGeneration(db: ReturnType<typeof createTestDb>['db'], handle?: object) {
-  const { job } = createGenerationAndJob(
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function provider(overrides: Partial<ImageProvider> = {}): ImageProvider {
+  return {
+    id: 'fal',
+    displayName: 'fal.ai',
+    capabilities: new Map(),
+    submit: vi.fn(),
+    ...overrides,
+  } as ImageProvider;
+}
+
+function seedJob(
+  db: ReturnType<typeof createTestDb>['db'],
+  patch: Record<string, unknown> = {},
+) {
+  createGenerationAndJob(
     {
       id: 'gen-1',
+      sessionId: 'default-session',
       prompt: 'A cat',
       status: 'pending',
       createdAt: now,
@@ -38,162 +71,866 @@ function seedGeneration(db: ReturnType<typeof createTestDb>['db'], handle?: obje
       provider: 'fal',
       model: 'fal-ai/flux/schnell',
       status: 'pending',
+      phase: 'queued',
+      requestSnapshot: createRequestSnapshot({ prompt: 'A cat', count: 2 }),
+      requestSnapshotVersion: REQUEST_SNAPSHOT_VERSION,
+      nextPollAt: '2000-01-01T00:00:00.000Z',
       createdAt: now,
       updatedAt: now,
     },
     db,
   );
-  if (handle) {
+  if (Object.keys(patch).length > 0) {
     db.update(generationJobs)
-      .set({ providerHandle: JSON.stringify(handle) })
-      .where(eq(generationJobs.id, job.id))
+      .set(patch)
+      .where(eq(generationJobs.id, 'job-1'))
       .run();
   }
-  return job;
+  return getGenerationJob('job-1', db)!;
 }
 
-import { generationJobs } from '../db';
-import { eq } from 'drizzle-orm';
-
-describe('lifecycle', () => {
+describe('durable lifecycle', () => {
   beforeEach(() => {
-    vi.mocked(storage.downloadAndStore).mockReset();
     vi.mocked(providers.getById).mockReset();
+    vi.mocked(storage.downloadAndStore).mockReset();
+    vi.mocked(storage.downloadAndStoreVideo).mockReset();
+    vi.mocked(storage.removeStoredFile).mockReset();
+    vi.mocked(storage.stageInlineImage).mockReset();
+    vi.mocked(storage.removeStagedImage).mockReset();
   });
 
-  describe('storeImages', () => {
-    it('downloads and creates image records', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db);
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
-
-      const images: ProviderImageRef[] = [
-        { url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 },
-      ];
-      const result = await storeImages(job.id, images, db);
-
-      expect(result.kind).toBe('ok');
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.images).toHaveLength(1);
+  it('claims queued dispatch once and persists the async handle', async () => {
+    const { db } = createTestDb();
+    const submit = vi.fn().mockResolvedValue({
+      kind: 'async',
+      handle: {
+        providerId: 'fal',
+        model: 'fal-ai/flux/schnell',
+        externalId: 'request-1',
+        statusUrl: 'https://status.example.test/request-1',
+        responseUrl: 'https://response.example.test/request-1',
+        cancelUrl: null,
+        submittedAt: now,
+      },
     });
+    vi.mocked(providers.getById).mockReturnValue(provider({ submit }));
+    const job = seedJob(db);
 
-    it('skips already stored images', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db);
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
+    const [first, second] = await Promise.all([
+      advance(job, db),
+      advance(job, db),
+    ]);
 
-      const images: ProviderImageRef[] = [
-        { url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 },
-      ];
-      await storeImages(job.id, images, db);
-      const result = await storeImages(job.id, images, db);
-
-      expect(result.kind).toBe('ok');
-      expect(storage.downloadAndStore).toHaveBeenCalledTimes(1);
-    });
-
-    it('returns failed on storage error and keeps previous images', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db);
-      vi.mocked(storage.downloadAndStore)
-        .mockResolvedValueOnce({ storagePath: '2026/07/1.png', contentType: 'image/png', sizeBytes: 1 })
-        .mockRejectedValueOnce(new Error('network down'));
-
-      const images: ProviderImageRef[] = [
-        { url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 },
-        { url: 'https://cdn.example.com/2.png', width: 1024, height: 1024, contentType: 'image/png', index: 1 },
-      ];
-      const result = await storeImages(job.id, images, db);
-
-      expect(result.kind).toBe('failed');
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.images).toHaveLength(1);
+    expect([first, second].sort()).toEqual(['advanced', 'skipped']);
+    expect(submit).toHaveBeenCalledOnce();
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      phase: 'polling',
+      status: 'pending',
+      providerHandle: expect.stringContaining('request-1'),
+      pollLeaseUntil: null,
     });
   });
 
-  describe('completeSync', () => {
-    it('marks job and generation completed after storing images', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db);
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
+  it('turns an expired dispatch lease into outcome_unknown without a second submit', async () => {
+    const { db } = createTestDb();
+    const submit = vi.fn();
+    vi.mocked(providers.getById).mockReturnValue(provider({ submit }));
+    const job = seedJob(db, {
+      phase: 'dispatching',
+      pollLeaseUntil: '2000-01-01T00:00:00.000Z',
+    });
 
-      await completeSync('gen-1', job.id, [
-        { url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 },
-      ], db);
-
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.status).toBe('completed');
-      expect(gen!.jobs[0].status).toBe('completed');
+    await expect(advance(job, db)).resolves.toBe('unknown');
+    expect(submit).not.toHaveBeenCalled();
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      status: 'failed',
+      phase: 'outcome_unknown',
+      error: expect.stringContaining('PROVIDER_OUTCOME_UNKNOWN'),
+      requestSnapshot: null,
+      requestSnapshotVersion: null,
+      resultSnapshot: null,
     });
   });
 
-  describe('advance', () => {
-    it('skips when optimistic lock fails', async () => {
-      const { db } = createTestDb();
-      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
-      // Simulate another request already advanced the job to completed.
-      db.update(generationJobs).set({ status: 'completed' }).where(eq(generationJobs.id, job.id)).run();
+  it('scrubs snapshots when an in-flight provider submit has an unknown outcome', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db);
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
+        submit: vi.fn().mockRejectedValue(new Error('connection reset')),
+      }),
+    );
 
-      const poll = vi.fn();
-      vi.mocked(providers.getById).mockReturnValue({ id: 'fal', poll } as unknown as ReturnType<typeof providers.getById>);
-
-      await advance({ ...job, status: 'pending' }, db);
-      expect(poll).not.toHaveBeenCalled();
+    await expect(advance(job, db)).resolves.toBe('unknown');
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      status: 'failed',
+      phase: 'outcome_unknown',
+      requestSnapshot: null,
+      requestSnapshotVersion: null,
+      resultSnapshot: null,
+      attemptCount: 0,
+      retryStartedAt: null,
     });
+  });
 
-    it('polls completed and stores images', async () => {
+  it('waits through repeated explicit rate limits without consuming the submit retry budget', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    try {
       const { db } = createTestDb();
-      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
-      vi.mocked(storage.downloadAndStore).mockResolvedValue({
-        storagePath: '2026/07/img.png',
-        contentType: 'image/png',
-        sizeBytes: 1234,
-      });
-
-      const pollResult: PollResult = {
-        status: 'completed',
-        images: [{ url: 'https://cdn.example.com/1.png', width: 1024, height: 1024, contentType: 'image/png', index: 0 }],
+      const rateLimited: SubmitResult = {
+        kind: 'failed',
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'retry later',
+          retryable: true,
+          disposition: 'rejected',
+          retryAfterMs: 5_000,
+        },
       };
-      vi.mocked(providers.getById).mockReturnValue({
-        id: 'fal',
-        poll: vi.fn().mockResolvedValue(pollResult),
-      } as unknown as ReturnType<typeof providers.getById>);
+      const submit = vi
+        .fn<() => Promise<SubmitResult>>()
+        .mockResolvedValueOnce(rateLimited)
+        .mockResolvedValueOnce(rateLimited)
+        .mockResolvedValueOnce(rateLimited)
+        .mockResolvedValueOnce(rateLimited)
+        .mockResolvedValueOnce({
+          kind: 'async',
+          handle: {
+            providerId: 'fal',
+            model: 'fal-ai/flux/schnell',
+            externalId: 'accepted-after-wait',
+            statusUrl: 'https://status.example.test/accepted-after-wait',
+            responseUrl: 'https://response.example.test/accepted-after-wait',
+            cancelUrl: null,
+            submittedAt: now,
+          },
+        });
+      vi.mocked(providers.getById).mockReturnValue(provider({ submit }));
+      const job = seedJob(db);
 
-      await advance(job, db);
+      await expect(advance(job, db)).resolves.toBe('retried');
+      const scheduled = getGenerationJob(job.id, db)!;
+      expect(scheduled).toMatchObject({
+        phase: 'queued',
+        status: 'pending',
+        attemptCount: 0,
+        retryStartedAt: null,
+        nextPollAt: '2026-07-20T00:00:05.000Z',
+        error: expect.stringContaining('RATE_LIMITED'),
+      });
+      expect(submit).toHaveBeenCalledOnce();
 
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.status).toBe('completed');
-    });
+      await expect(advance(scheduled, db)).resolves.toBe('skipped');
+      for (let attempt = 1; attempt < 4; attempt += 1) {
+        const waiting = getGenerationJob(job.id, db)!;
+        vi.setSystemTime(new Date(waiting.nextPollAt!));
+        await expect(advance(waiting, db)).resolves.toBe('retried');
+        expect(getGenerationJob(job.id, db)).toMatchObject({
+          phase: 'queued',
+          status: 'pending',
+          attemptCount: 0,
+          retryStartedAt: null,
+          error: expect.stringContaining('RATE_LIMITED'),
+        });
+      }
+      const waiting = getGenerationJob(job.id, db)!;
+      vi.setSystemTime(new Date(waiting.nextPollAt!));
+      await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('advanced');
+      expect(submit).toHaveBeenCalledTimes(5);
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        phase: 'polling',
+        attemptCount: 0,
+        retryStartedAt: null,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-    it('marks failed when poll returns failed', async () => {
+  it('keeps a rate-limited poll active beyond the bounded poll retry count', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    try {
       const { db } = createTestDb();
-      const job = seedGeneration(db, { providerId: 'fal', model: 'fal-ai/flux/schnell', externalId: 'r1' });
-
-      vi.mocked(providers.getById).mockReturnValue({
-        id: 'fal',
-        poll: vi.fn().mockResolvedValue({
-          status: 'failed',
-          error: { code: 'PROVIDER_ERROR', message: 'boom', retryable: false },
+      const job = seedJob(db, {
+        phase: 'polling',
+        status: 'running',
+        attemptCount: 99,
+        retryStartedAt: '2026-07-19T00:00:00.000Z',
+        providerHandle: JSON.stringify({
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          externalId: 'rate-limited-poll',
+          statusUrl: 'https://status.example.test/rate-limited-poll',
+          responseUrl: 'https://response.example.test/rate-limited-poll',
+          cancelUrl: null,
+          submittedAt: now,
         }),
-      } as unknown as ReturnType<typeof providers.getById>);
+      });
+      const poll = vi.fn().mockResolvedValue({
+        status: 'failed',
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'too many status checks',
+          retryable: true,
+          disposition: 'rejected',
+          retryAfterMs: 10_000,
+        },
+      } as PollResult);
+      vi.mocked(providers.getById).mockReturnValue(provider({ poll }));
 
-      await advance(job, db);
+      await expect(advance(job, db)).resolves.toBe('retried');
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        phase: 'polling',
+        status: 'running',
+        attemptCount: 0,
+        retryStartedAt: null,
+        nextPollAt: '2026-07-20T00:00:10.000Z',
+        error: expect.stringContaining('RATE_LIMITED'),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-      const gen = getGenerationWithJobsAndImages('gen-1', db);
-      expect(gen!.status).toBe('failed');
-      expect(gen!.jobs[0].status).toBe('failed');
+  it('does not replay a submit whose provider outcome is unknown', async () => {
+    const { db } = createTestDb();
+    const submit = vi.fn<() => Promise<SubmitResult>>().mockResolvedValue({
+      kind: 'failed',
+      error: {
+        code: 'PROVIDER_ERROR',
+        message: 'connection failed after send',
+        retryable: true,
+        disposition: 'unknown',
+      },
     });
+    vi.mocked(providers.getById).mockReturnValue(provider({ submit }));
+    const job = seedJob(db);
+
+    await expect(advance(job, db)).resolves.toBe('unknown');
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      phase: 'outcome_unknown',
+      status: 'failed',
+      nextPollAt: null,
+      error: expect.stringContaining('PROVIDER_OUTCOME_UNKNOWN'),
+    });
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('skipped');
+    expect(submit).toHaveBeenCalledOnce();
+  });
+
+  it('does not regress public running status when a poll returns pending', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db, {
+      phase: 'polling',
+      status: 'running',
+      providerHandle: JSON.stringify({
+        providerId: 'fal',
+        model: 'fal-ai/flux/schnell',
+        externalId: 'request-1',
+        statusUrl: 'https://status.example.test/request-1',
+        responseUrl: 'https://response.example.test/request-1',
+        cancelUrl: null,
+        submittedAt: now,
+      }),
+    });
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
+        poll: vi.fn().mockResolvedValue({ status: 'pending' } as PollResult),
+      }),
+    );
+
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      phase: 'polling',
+      status: 'running',
+      pollLeaseUntil: null,
+    });
+  });
+
+  it('persists a retryable poll failure and clears it after the next successful poll', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { db } = createTestDb();
+      const job = seedJob(db, {
+        phase: 'polling',
+        providerHandle: JSON.stringify({
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          externalId: 'retry-request',
+          statusUrl: 'https://status.example.test/retry-request',
+          responseUrl: 'https://response.example.test/retry-request',
+          cancelUrl: null,
+          submittedAt: now,
+        }),
+      });
+      const poll = vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'failed',
+          error: {
+            code: 'TIMEOUT',
+            message:
+              'temporary outage prompt=private https://signed.example/image?token=secret',
+            retryable: true,
+            disposition: 'rejected',
+            retryAfterMs: 5_000,
+          },
+        } as PollResult)
+        .mockResolvedValueOnce({ status: 'running' } as PollResult);
+      vi.mocked(providers.getById).mockReturnValue(provider({ poll }));
+
+      await expect(advance(job, db)).resolves.toBe('retried');
+      const scheduled = getGenerationJob(job.id, db)!;
+      expect(scheduled).toMatchObject({
+        status: 'pending',
+        phase: 'polling',
+        pollLeaseUntil: null,
+        attemptCount: 1,
+        retryStartedAt: '2026-07-20T00:00:00.000Z',
+        nextPollAt: '2026-07-20T00:00:05.000Z',
+        error: expect.stringContaining('TIMEOUT'),
+      });
+      expect(scheduled.error).not.toContain('prompt=private');
+      expect(scheduled.error).not.toContain('signed.example');
+
+      await expect(advance(scheduled, db)).resolves.toBe('skipped');
+      expect(poll).toHaveBeenCalledOnce();
+
+      vi.setSystemTime(new Date(scheduled.nextPollAt!));
+      await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe(
+        'advanced',
+      );
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        status: 'running',
+        phase: 'polling',
+        error: null,
+        attemptCount: 0,
+        retryStartedAt: null,
+        nextPollAt: '2026-07-20T00:00:10.000Z',
+      });
+      expect(poll).toHaveBeenCalledTimes(2);
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries a thrown poll exception without replaying dispatch', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { db } = createTestDb();
+      const job = seedJob(db, {
+        phase: 'polling',
+        providerHandle: JSON.stringify({
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          externalId: 'retry-throw',
+          statusUrl: 'https://status.example.test/retry-throw',
+          responseUrl: 'https://response.example.test/retry-throw',
+          cancelUrl: null,
+          submittedAt: now,
+        }),
+      });
+      vi.mocked(providers.getById).mockReturnValue(
+        provider({
+          poll: vi.fn().mockRejectedValue(new Error('socket reset')),
+        }),
+      );
+
+      await expect(advance(job, db)).resolves.toBe('retried');
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        phase: 'polling',
+        status: 'pending',
+        attemptCount: 1,
+        error: expect.stringContaining('PROVIDER_ERROR'),
+      });
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('turns a malformed poll result into a bounded retry checkpoint', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { db } = createTestDb();
+      const job = seedJob(db, {
+        phase: 'polling',
+        providerHandle: JSON.stringify({
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          externalId: 'malformed-poll',
+          statusUrl: 'https://status.example.test/malformed-poll',
+          responseUrl: 'https://response.example.test/malformed-poll',
+          cancelUrl: null,
+          submittedAt: now,
+        }),
+      });
+      vi.mocked(providers.getById).mockReturnValue(
+        provider({ poll: vi.fn().mockResolvedValue(undefined) }),
+      );
+
+      await expect(advance(job, db)).resolves.toBe('retried');
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        status: 'pending',
+        phase: 'polling',
+        pollLeaseUntil: null,
+        attemptCount: 1,
+        retryStartedAt: '2026-07-20T00:00:00.000Z',
+        nextPollAt: '2026-07-20T00:00:00.250Z',
+        error: expect.stringContaining('PROVIDER_ERROR'),
+      });
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('safely snapshots a completed result whose images getter throws', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      const { db } = createTestDb();
+      const job = seedJob(db, {
+        phase: 'polling',
+        providerHandle: JSON.stringify({
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          externalId: 'getter-poll',
+          statusUrl: 'https://status.example.test/getter-poll',
+          responseUrl: 'https://response.example.test/getter-poll',
+          cancelUrl: null,
+          submittedAt: now,
+        }),
+      });
+      const malformedResult = {
+        status: 'completed',
+        get images() {
+          throw new Error('provider images getter failed');
+        },
+      };
+      vi.mocked(providers.getById).mockReturnValue(
+        provider({ poll: vi.fn().mockResolvedValue(malformedResult) }),
+      );
+
+      await expect(advance(job, db)).resolves.toBe('retried');
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        status: 'pending',
+        phase: 'polling',
+        pollLeaseUntil: null,
+        attemptCount: 1,
+        retryStartedAt: '2026-07-20T00:00:00.000Z',
+        nextPollAt: '2026-07-20T00:00:00.250Z',
+        error: expect.stringContaining('PROVIDER_ERROR'),
+      });
+    } finally {
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops after the sixth retryable poll failure without scheduling a seventh call', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-20T00:00:00.000Z'));
+    try {
+      const { db } = createTestDb();
+      const job = seedJob(db, {
+        phase: 'polling',
+        attemptCount: 5,
+        retryStartedAt: '2026-07-20T00:00:00.000Z',
+        providerHandle: JSON.stringify({
+          providerId: 'fal',
+          model: 'fal-ai/flux/schnell',
+          externalId: 'retry-exhausted',
+          statusUrl: 'https://status.example.test/retry-exhausted',
+          responseUrl: 'https://response.example.test/retry-exhausted',
+          cancelUrl: null,
+          submittedAt: now,
+        }),
+      });
+      const poll = vi.fn().mockResolvedValue({
+        status: 'failed',
+        error: { code: 'TIMEOUT', message: 'still down', retryable: true },
+      } as PollResult);
+      vi.mocked(providers.getById).mockReturnValue(provider({ poll }));
+
+      await expect(advance(job, db)).resolves.toBe('failed');
+      expect(getGenerationJob(job.id, db)).toMatchObject({
+        status: 'failed',
+        phase: 'terminal',
+        error: expect.stringContaining('RETRY_EXHAUSTED'),
+        nextPollAt: null,
+        pollLeaseUntil: null,
+        attemptCount: 0,
+        retryStartedAt: null,
+      });
+      await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe(
+        'skipped',
+      );
+      expect(poll).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('persists result refs and stores one missing image per lease', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db, {
+      phase: 'polling',
+      attemptCount: 1,
+      retryStartedAt: now,
+      error: JSON.stringify({
+        code: 'TIMEOUT',
+        message: 'temporary',
+        retryable: true,
+      }),
+      providerHandle: JSON.stringify({
+        providerId: 'fal',
+        model: 'fal-ai/flux/schnell',
+        externalId: 'request-1',
+        statusUrl: 'https://status.example.test/request-1',
+        responseUrl: 'https://response.example.test/request-1',
+        cancelUrl: null,
+        submittedAt: now,
+      }),
+    });
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
+        poll: vi.fn().mockResolvedValue({
+          status: 'completed',
+          images: [
+            {
+              url: 'https://v3.fal.media/0.png',
+              width: 1,
+              height: 1,
+              contentType: 'image/png',
+              index: 0,
+            },
+            {
+              url: 'https://v3.fal.media/1.png',
+              width: 1,
+              height: 1,
+              contentType: 'image/png',
+              index: 1,
+            },
+          ],
+        } as PollResult),
+      }),
+    );
+    vi.mocked(storage.downloadAndStore)
+      .mockResolvedValueOnce({
+        storagePath: '0.png',
+        contentType: 'image/png',
+        sizeBytes: 1,
+      })
+      .mockResolvedValueOnce({
+        storagePath: '1.png',
+        contentType: 'image/png',
+        sizeBytes: 1,
+      });
+
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      phase: 'storing',
+      status: 'running',
+      error: null,
+      attemptCount: 0,
+      retryStartedAt: null,
+    });
+
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe(
+      'advanced',
+    );
+    expect(getGenerationWithJobsAndImages('gen-1', db)!.images).toHaveLength(1);
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
+    expect(getGenerationWithJobsAndImages('gen-1', db)!.images[0]).toMatchObject({
+      sourceKind: 'remote',
+      storagePath: null,
+      remoteUrl: 'https://v3.fal.media/0.png',
+    });
+
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe(
+      'completed',
+    );
+    expect(getGenerationWithJobsAndImages('gen-1', db)).toMatchObject({
+      status: 'completed',
+      images: expect.arrayContaining([expect.anything(), expect.anything()]),
+    });
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
+  });
+
+  it('persists a completed video result through the dedicated MP4 storage path', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db, {
+      phase: 'polling',
+      providerHandle: JSON.stringify({
+        providerId: 'doubao',
+        model: 'doubao-seedance-1-5-pro-251215',
+        externalId: 'video-task',
+        statusUrl: 'https://status.example.test/video-task',
+        responseUrl: 'https://status.example.test/video-task',
+        cancelUrl: null,
+        submittedAt: now,
+      }),
+    });
+    vi.mocked(providers.getById).mockReturnValue(provider({
+      poll: vi.fn().mockResolvedValue({
+        status: 'completed',
+        images: [],
+        videos: [{
+          url: 'https://cdn.example.test/video.mp4',
+          width: null,
+          height: null,
+          contentType: 'video/mp4',
+          index: 0,
+          durationSeconds: null,
+        }],
+      }),
+    }));
+    vi.mocked(storage.downloadAndStoreVideo).mockResolvedValue({
+      storagePath: '2026/07/video.mp4',
+      contentType: 'video/mp4',
+      sizeBytes: 24,
+    });
+
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('completed');
+
+    const generation = getGenerationWithJobsAndImages('gen-1', db)!;
+    expect(generation.status).toBe('completed');
+    expect(generation.images).toHaveLength(0);
+    expect(generation.videos).toEqual([
+      expect.objectContaining({ storagePath: '2026/07/video.mp4', contentType: 'video/mp4' }),
+    ]);
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
+  });
+
+  it('retries a transient image download and resumes the same storing checkpoint', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(now));
+    try {
+      const { db } = createTestDb();
+      const job = seedJob(db, {
+        phase: 'storing',
+        status: 'running',
+        resultSnapshot: JSON.stringify([{
+          url: 'https://cdn.example.test/retry.png',
+          width: 1,
+          height: 1,
+          contentType: 'image/png',
+          index: 0,
+        }]),
+      });
+      vi.mocked(storage.downloadAndStore)
+        .mockRejectedValueOnce(new StorageError('Remote image temporarily unavailable', {
+          retryable: true,
+          retryAfterMs: 1_000,
+          diagnostic: {
+            category: 'remote_download_timeout',
+            hostname: 'cdn.example.test',
+          },
+        }))
+        .mockResolvedValueOnce({
+          storagePath: '2026/07/retry.png',
+          contentType: 'image/png',
+          sizeBytes: 1,
+        });
+
+      await expect(advance(job, db)).resolves.toBe('retried');
+      const waiting = getGenerationJob(job.id, db)!;
+      expect(waiting).toMatchObject({
+        status: 'running',
+        phase: 'storing',
+        attemptCount: 1,
+        retryStartedAt: now,
+        pollLeaseUntil: null,
+      });
+      expect(JSON.parse(waiting.error!)).toMatchObject({
+        storageDiagnostic: {
+          category: 'remote_download_timeout',
+          hostname: 'cdn.example.test',
+        },
+      });
+      const retryAt = Date.parse(waiting.nextPollAt!);
+      vi.setSystemTime(new Date(retryAt));
+
+      await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe('completed');
+      expect(getGenerationJob(job.id, db)?.error).toBeNull();
+      expect(getGenerationWithJobsAndImages('gen-1', db)).toMatchObject({
+        status: 'completed',
+        images: [expect.objectContaining({ storagePath: '2026/07/retry.png' })],
+      });
+      expect(storage.downloadAndStore).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('continues polling legacy handle rows that do not have a request snapshot', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db, {
+      phase: 'polling',
+      requestSnapshot: null,
+      requestSnapshotVersion: null,
+      providerHandle: JSON.stringify({
+        providerId: 'fal',
+        model: 'fal-ai/flux/schnell',
+        externalId: 'legacy-request',
+        statusUrl: 'https://status.example.test/legacy-request',
+        responseUrl: 'https://response.example.test/legacy-request',
+        cancelUrl: null,
+        submittedAt: now,
+      }),
+    });
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
+        poll: vi.fn().mockResolvedValue({
+          status: 'completed',
+          images: [
+            {
+              url: 'https://v3.fal.media/legacy.png',
+              width: 1,
+              height: 1,
+              contentType: 'image/png',
+              index: 0,
+            },
+          ],
+        } as PollResult),
+      }),
+    );
+
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    expect(getGenerationJob(job.id, db)?.phase).toBe('storing');
+  });
+
+  it('stages a data URL before persisting an opaque recoverable result snapshot', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db);
+    const stagedReference = 'staging:11111111-1111-4111-8111-111111111111';
+    vi.mocked(storage.stageInlineImage).mockReturnValue({
+      reference: stagedReference,
+      contentType: 'image/png',
+      sizeBytes: 8,
+    });
+    vi.mocked(storage.downloadAndStore).mockResolvedValue({
+      storagePath: '2026/07/staged.png',
+      contentType: 'image/png',
+      sizeBytes: 8,
+    });
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
+        submit: vi.fn().mockResolvedValue({
+          kind: 'sync',
+          images: [
+            {
+              url: 'data:image/png;base64,iVBORw0KGgo=',
+              width: 1,
+              height: 1,
+              contentType: 'image/png',
+              index: 0,
+            },
+          ],
+        }),
+      }),
+    );
+
+    await expect(advance(job, db)).resolves.toBe('advanced');
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      phase: 'storing',
+      status: 'running',
+      resultSnapshot: expect.stringContaining(stagedReference),
+    });
+    expect(getGenerationJob(job.id, db)?.resultSnapshot).not.toContain(
+      'data:image',
+    );
+    await expect(advance(getGenerationJob(job.id, db)!, db)).resolves.toBe(
+      'completed',
+    );
+    expect(storage.downloadAndStore).toHaveBeenCalledWith(stagedReference);
+    expect(storage.removeStagedImage).toHaveBeenCalledWith(stagedReference);
+  });
+
+  it('turns a malformed provider image result into a durable terminal failure', async () => {
+    const { db } = createTestDb();
+    const job = seedJob(db);
+    vi.mocked(providers.getById).mockReturnValue(
+      provider({
+        submit: vi.fn().mockResolvedValue({
+          kind: 'sync',
+          images: [
+            {
+              url: 'https://cdn.example.test/bad.png',
+              width: 1,
+              height: 1,
+              // Runtime adapter data is untrusted even though the TypeScript
+              // type requires this field. It must not leave the job pending.
+              contentType: undefined,
+              index: 0,
+            },
+          ],
+        }),
+      }),
+    );
+
+    await expect(advance(job, db)).resolves.toBe('failed');
+    expect(storage.downloadAndStore).not.toHaveBeenCalled();
+    expect(getGenerationJob(job.id, db)).toMatchObject({
+      status: 'failed',
+      phase: 'terminal',
+      error: expect.stringContaining('STORAGE_RESPONSE_INVALID'),
+    });
+  });
+
+  it('cleans a downloaded image when cancellation wins during storage', async () => {
+    const { db } = createTestDb();
+    const stagedReference = 'staging:22222222-2222-4222-8222-222222222222';
+    const job = seedJob(db, {
+      phase: 'storing',
+      status: 'running',
+      resultSnapshot: JSON.stringify([
+        {
+          url: stagedReference,
+          width: 1,
+          height: 1,
+          contentType: 'image/png',
+          index: 0,
+        },
+      ]),
+    });
+    const download = deferred<{
+      storagePath: string;
+      contentType: string;
+      sizeBytes: number;
+    }>();
+    vi.mocked(storage.downloadAndStore).mockReturnValue(download.promise);
+
+    const storing = advance(job, db);
+    await Promise.resolve();
+    await cancelGeneration('gen-1', { db });
+    download.resolve({
+      storagePath: '2026/07/cancel-race.png',
+      contentType: 'image/png',
+      sizeBytes: 1,
+    });
+
+    await expect(storing).resolves.toBe('skipped');
+    expect(getGenerationWithJobsAndImages('gen-1', db)).toMatchObject({
+      images: [],
+      jobs: [
+        expect.objectContaining({ status: 'cancelled', resultSnapshot: null }),
+      ],
+    });
+    expect(storage.removeStoredFile).toHaveBeenCalledWith(
+      '2026/07/cancel-race.png',
+    );
+    expect(storage.removeStagedImage).toHaveBeenCalledWith(stagedReference);
   });
 });

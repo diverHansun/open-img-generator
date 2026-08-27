@@ -11,10 +11,11 @@
 ### 覆盖
 
 - registry 按 env key 启用/禁用 provider 的行为
-- zenmux adapter 的请求翻译与响应解析（sync 路径）
-- fal adapter 的请求翻译、submit 句柄解析、poll 状态机（async 路径）
+- zenmux、SiliconFlow、智谱、Doubao adapter 的请求翻译与响应解析（sync 路径）
+- fal、Wan Pro、Kling adapter 的请求翻译、submit 句柄解析、poll 状态机（async 路径）
 - http-client 的超时与错误码映射
 - capabilities 静态声明与 model 查询
+- 私有 ModelSpec 到公开 capabilities 的单向投影、重复 model ID 和未知模型安全门
 - NormalizedRequest 到厂商请求体的字段映射
 
 ### 不覆盖
@@ -35,9 +36,9 @@
 |------|------|------|
 | FAL_KEY 存在 | env 含 FAL_KEY | listEnabled() 包含 fal |
 | FAL_KEY 缺失 | env 无 FAL_KEY | listEnabled() 不包含 fal，不抛错 |
-| 两个 key 都存在 | env 含 FAL_KEY + ZENMUX_API_KEY | listEnabled() 包含 fal 和 zenmux |
+| Batch 1/2/3 key 存在 | env 含全部 provider key | listEnabled() 按固定顺序包含七个 provider |
 | 两个 key 都缺失 | env 无 key | listEnabled() 返回空数组 |
-| getById 未启用 | getById("fal")，无 FAL_KEY | 抛出 ProviderNotEnabledError |
+| getById 未启用 | getById("fal")，无 FAL_KEY | 返回 `undefined` |
 
 ### 2.2 Zenmux Sync 路径
 
@@ -49,34 +50,103 @@
 | 厂商 401 | mock 返回 401 | SubmitResult.kind="failed"，error.code="AUTH_FAILED" |
 | 厂商 422 | mock 返回 422 | SubmitResult.kind="failed"，error.code="INVALID_REQUEST" |
 | HTTP 超时 | mock 超时 | SubmitResult.kind="failed"，error.code="TIMEOUT" |
+| sync timeout budget | fake timer 在 30s 后仍未 abort、180s 时 abort | ZenMux、SiliconFlow、智谱、Doubao 都传入共享 180s 预算；已开始请求仍标记 `unknown`，不安全重投 |
+| GPT Image 1.5 | model=`openai/gpt-image-1.5` | 请求体使用所选 model；只透传 allowlist providerOptions；Base64 正常落盘 |
+| Gemini 图片模型 | Nano Banana/2/Pro/Lite | 使用 Vertex `generateContent`，只发送 text + imageConfig；inlineData 转入 Base64 staging |
+| 未知模型 | 任意不在 ZenMux spec 的 model | `INVALID_REQUEST/not_started`，fetch 未调用 |
 
 ### 2.3 Fal Async 路径
+
+Fal 还需逐 profile 验证：原版/Lite Banana 不发送 resolution；Nano Banana 2/Pro 只发送支持的 resolution；GPT Image 1/1.5/2 使用各自的 image_size、quality、background 和 output_format 方言；FLUX 2 Dev/Pro/Flex/Klein 的 count、negative prompt 和 providerOptions 严格按模型 allowlist，任意未知字段被丢弃。
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
 | 正常 submit | prompt="A cat", model="fal-ai/flux/schnell" | SubmitResult.kind="async"，handle.externalId 非空 |
+| async submit budget | mock `AbortSignal.timeout` | fal 继续使用 30s，未被 sync 三分钟预算改变 |
 | poll pending | mock status=IN_QUEUE | PollResult.status="pending" |
 | poll running | mock status=IN_PROGRESS | PollResult.status="running" |
 | poll completed | mock status=COMPLETED + response 含 images | PollResult.status="completed"，images 含 url |
 | poll failed | mock 5xx | PollResult.status="failed"，error.code="PROVIDER_ERROR" |
 | cancel | mock 202 | 正常返回，不抛错 |
-| cancel 已完成任务 | mock 400 | 抛出 ProviderError |
+| cancel 已完成任务 | mock 400 | 返回 `PollResult.status="failed"` |
+| Nano Banana 2/Pro | model spec 选择 Banana profile | 发送 `aspect_ratio/resolution/num_images`，不发送 FLUX `image_size` |
+| Banana 安全字段 | providerOptions 含 sync/web search/image_size | 只接收已验证的 resolution/output_format/safety_tolerance，其余不进入请求 |
+| GPT Image 1/1.5 | model spec 选择 GPT Image profile | 发送 `image_size/num_images/quality/background/output_format`；不发送 seed、negative prompt 或 sync_mode |
+| GPT Image 2 | model spec 选择 GPT Image 2 profile | 发送 `image_size/num_images/quality/output_format`；不发送不支持的 background |
 
-### 2.4 Capabilities 查询
+### 2.4 SiliconFlow / 智谱 Sync 路径
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| SiliconFlow 正常 submit | model=`Kwai-Kolors/Kolors` | `kind="sync"`，解析 `images[].url` |
+| SiliconFlow 公开比 | `aspectRatio="9:16"` | 请求体 `image_size="720x1280"` |
+| SiliconFlow 负向词与 seed | `negativePrompt` + `seed` | 请求体分别含 `negative_prompt` + `seed` |
+| Z-Image Turbo | `Tongyi-MAI/Z-Image-Turbo` | 请求体不含 Kolors-only `batch_size` |
+| 智谱正常 submit | model=`glm-image` | `kind="sync"`，解析 `data[].url` |
+| 智谱公开比 | `aspectRatio="3:2"` | 请求体 `size="1568x1056"` |
+| 智谱固定参数 | 任意合法请求 | `quality="hd"`、`watermark_enabled=true`、`user_id` 存在 |
+| 两家 401/422/5xx | mock HTTP error | 映射统一 `ProviderError`，超时为可重试 `TIMEOUT` |
+
+### 2.5 Doubao / Qwen 路径
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| Doubao 正常 submit | model=`doubao-seedream-4-0-250828` | 请求 `response_format=b64_json`；优先解析 `data[].b64_json`，仍兼容 URL fallback |
+| Doubao 公开比/seed | `aspectRatio="4:3"` + seed | 请求体含 `size="2048x1536"` + `seed` |
+| Doubao 图生图 | `referenceImages` | 请求体含 `image[]` |
+| Doubao 新模型 | Seedream 4.5 / 5.0 Lite | model 精确透传；关闭组图/流式；请求 `b64_json` |
+| Qwen Image 3.0 Pro submit | model=`qwen-image-3.0-pro` | `kind="sync"`，无 async header，解析 `choices[].message.content[].image` |
+| Qwen Image 3.0 / 2.0 Pro snapshot | 新 model ID | 使用同一 Qwen multimodal sync body；旧 `qwen-image-plus` 不在目录且提交前拒绝 |
+| Qwen HTTP 鉴权/限流/超时 | mock 401/429/TimeoutError | `AUTH_FAILED`/可重试 `RATE_LIMITED`/`TIMEOUT` |
+| Qwen Image 2.0 Pro | `multimodal-sync` | 单轮 text content，直接解析 `output.choices[].message.content[].image` |
+| Wan 2.7 Image submit | model=`wan2.7-image` | `multimodal-generation/generation`，无 async header；`thinking_mode=true`、不发送 negative prompt |
+| Wan 2.7 Image Pro submit | `multimodal-async` | `image-generation/generation` + async header；关闭 sequential/thinking |
+| Wan poll | SUCCEEDED + choices | 转为 ProviderImageRef 并立即进入 storage |
+
+### 2.6 Kling 独立 API
+
+| 场景 | 输入 | 预期 |
+|------|------|------|
+| 正常 submit | `KLING_API_KEY` + model=`kling-v3` | `kind="async"`，请求 `POST /v1/images/generations`，Bearer 鉴权 |
+| 图生图 | 单个 data URL reference | 去掉 `data:*;base64,` 前缀，写入 `image` |
+| poll | submitted/processing/succeed/failed | 映射 pending/running/completed/failed，解析 `data.task_result.images[].url` |
+| 多参考图 | 两个 referenceImages | adapter 返回 failed，不伪造多图协议 |
+| 取消能力 | 标准 Kling handle | `cancelUrl=null`，由 job-engine 本地取消兜底 |
+
+### 2.7 Capabilities 查询
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
 | 已知模型 | capabilities("openai/gpt-image-2") | 返回完整 ProviderCapabilities，protocol="sync" |
 | 未知模型 | capabilities("nonexistent") | 返回 null |
+| adapter 未知模型 | 对七个 adapter 各传入未声明 model | 统一 `INVALID_REQUEST/not_started` 且无网络副作用 |
 | fal 模型 | capabilities("fal-ai/flux/schnell") | protocol="async"，supportsSeed=true |
+| Fal GPT Image 模型 | capabilities("fal-ai/gpt-image-1.5") | protocol="async"，supportsSeed=false，支持 `1:1`/`3:2`/`2:3` |
 
-### 2.5 请求翻译
+### 2.8 请求翻译与公开宽高比映射
 
 | 场景 | 输入 | 预期 |
 |------|------|------|
-| 默认尺寸 | 无 width/height/aspectRatio | zenmux 使用 "1024x1024"；fal 使用 "square_hd" |
-| aspectRatio 优先 | aspectRatio="16:9"，无 width/height | 翻译为厂商支持的对应尺寸 |
-| providerOptions 透传 | providerOptions={ "guidance_scale": 7 } | fal 请求体含 guidance_scale（fal 认识的字段） |
+| 默认尺寸 | 无 width/height/aspectRatio | zenmux size="1024x1024"；fal image_size="square_hd" |
+| zenmux 公开比 | aspectRatio="1:1" | size="1024x1024" |
+| zenmux 公开比 | aspectRatio="3:2" | size="1536x1024" |
+| zenmux 公开比 | aspectRatio="2:3" | size="1024x1536" |
+| fal 公开比 | aspectRatio="1:1" | image_size="square_hd" |
+| fal 公开比 | aspectRatio="16:9" | image_size="landscape_16_9" |
+| fal 公开比 | aspectRatio="9:16" | image_size="portrait_16_9" |
+| width/height 优先 | width/height 与 aspectRatio 同时存在 | 按优先级用 width/height（或文档约定的等价翻译） |
+| providerOptions 透传 | providerOptions={ "guidance_scale": 7 } | fal 请求体含 guidance_scale（若 adapter 认识） |
+
+### 2.8 Capabilities 公开比
+
+| 场景 | 预期 |
+|------|------|
+| fal capabilities | supportedAspectRatios 非空，含 `1:1` 等公开比（不再为空数组） |
+| zenmux capabilities | 保持 `1:1`/`3:2`/`2:3` |
+| SiliconFlow capabilities | `1:1`/`3:4`/`1:2`/`9:16`，负向词与 seed 为 true |
+| 智谱 capabilities | 官方七种尺寸/公开比，`quality=hd`，负向词与 seed 为 false |
+| Doubao capabilities | Seedream 4.0 的 2K/4K 与七种公开比，seed 为 true |
+| Qwen/Wan capabilities | 新增三种 Qwen sync + Wan 标准 sync；六个当前 model 均仅公开 `text-to-image`；旧 Plus 不存在 |
 
 ---
 
@@ -98,7 +168,11 @@
 | adapter 不硬编码 API key | 代码审查 + 测试用 mock env |
 | http-client 正确注入 Authorization | mock fetch 断言 header |
 | fal 使用 `Key $FAL_KEY` 格式 | mock fetch 断言 header 值 |
-| zenmux 使用 `Bearer $ZENMUX_API_KEY` 格式 | mock fetch 断言 header 值 |
+| sync providers 使用 Bearer key | mock fetch 断言 ZenMux/SiliconFlow/智谱/Doubao header 值 |
+| Wan Pro 使用 Bearer + Async header | mock fetch 断言 `Authorization` 与 `X-DashScope-Async: enable`；Qwen/Wan 标准 sync 不带该 header |
+| 所有授权请求拒绝自动 redirect | mock 302，断言 `redirect: 'manual'`、只有一次 fetch |
+| 普通 JSON 响应上限 | mock `Content-Length` 或 chunked stream 超过 2 MiB，断言 body 被取消且只返回安全错误 |
+| 动态/历史 handle URL | Fal 非同源 URL 在 fetch 前拒绝；Wan/Kling 从受信 base + 编码 `externalId` 重建 URL |
 
 ---
 
@@ -108,7 +182,7 @@
 
 - **框架**: 项目标准测试框架（实现阶段确定，建议 vitest）
 - **位置**: `src/lib/providers/__tests__/`
-- **mock 策略**: mock `http-client` 层（不 mock fetch 全局），传入预设响应
+- **mock 策略**: 在 adapter 单测中 mock `global.fetch`，验证真实请求 URL、headers、body 与解析结果；不触发外部网络
 - **覆盖重点**: adapter 请求翻译、响应解析、registry 启用逻辑
 
 ### 4.2 契约测试
@@ -118,7 +192,7 @@
 
 ### 4.3 手工验证（可选，开发阶段）
 
-- 配置真实 FAL_KEY + ZENMUX_API_KEY
+- 配置真实 FAL_KEY / ZENMUX_API_KEY / SILICONFLOW_API_KEY / ZHIPU_API_KEY / ARK_API_KEY / DASHSCOPE_API_KEY
 - 通过 API 端点发起真实生成，确认 sync/async 两条路径端到端可用
 - 不在 CI 中运行
 
@@ -129,7 +203,11 @@ src/lib/providers/__tests__/
 ├── registry.test.ts
 ├── adapters/
 │   ├── fal.test.ts
-│   └── zenmux.test.ts
+│   ├── zenmux.test.ts
+│   ├── siliconflow.test.ts
+│   ├── zhipu.test.ts
+│   ├── doubao.test.ts
+│   └── qwen.test.ts
 ├── http-client.test.ts
 └── fixtures/
     ├── fal-submit-response.json

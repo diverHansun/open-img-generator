@@ -1,38 +1,58 @@
 import type { ImageProvider, ProviderId, ProviderInfo } from './types';
 import { FalProvider } from './adapters/fal';
 import { ZenmuxProvider } from './adapters/zenmux';
+import { SiliconFlowProvider } from './adapters/siliconflow';
+import { ZhipuProvider } from './adapters/zhipu';
+import { DoubaoProvider } from './adapters/doubao';
+import { QwenProvider } from './adapters/qwen';
+import { hasCredential } from '../user-config';
 
 const registry = new Map<ProviderId, ImageProvider>();
+let noProviderWarningShown = false;
 
-function isEnabled(id: ProviderId): boolean {
-  switch (id) {
-    case 'fal':
-      return !!process.env.FAL_KEY;
-    case 'zenmux':
-      return !!process.env.ZENMUX_API_KEY;
-    default:
-      return false;
-  }
-}
+type ProviderDefinition = {
+  isEnabled: () => boolean;
+  create: () => ImageProvider;
+};
 
-function createAdapter(id: ProviderId): ImageProvider | undefined {
-  switch (id) {
-    case 'fal':
-      return new FalProvider();
-    case 'zenmux':
-      return new ZenmuxProvider();
-    default:
-      return undefined;
-  }
-}
+const providerOrder: ProviderId[] = [
+  'fal',
+  'zenmux',
+  'siliconflow',
+  'zhipu',
+  'doubao',
+  'qwen',
+];
+
+const definitions: Partial<Record<ProviderId, ProviderDefinition>> = {
+  fal: { isEnabled: () => hasCredential('FAL_KEY'), create: () => new FalProvider() },
+  zenmux: {
+    isEnabled: () => hasCredential('ZENMUX_API_KEY'),
+    create: () => new ZenmuxProvider(),
+  },
+  siliconflow: {
+    isEnabled: () => hasCredential('SILICONFLOW_API_KEY'),
+    create: () => new SiliconFlowProvider(),
+  },
+  zhipu: {
+    isEnabled: () => hasCredential('ZHIPU_API_KEY'),
+    create: () => new ZhipuProvider(),
+  },
+  doubao: {
+    isEnabled: () => hasCredential('ARK_API_KEY'),
+    create: () => new DoubaoProvider(),
+  },
+  qwen: {
+    isEnabled: () => hasCredential('DASHSCOPE_API_KEY'),
+    create: () => new QwenProvider(),
+  },
+};
 
 function ensureAdapter(id: ProviderId): ImageProvider | undefined {
-  if (!isEnabled(id)) return undefined;
+  const definition = definitions[id];
+  if (!definition || !definition.isEnabled()) return undefined;
   if (!registry.has(id)) {
-    const adapter = createAdapter(id);
-    if (adapter) {
-      registry.set(id, adapter);
-    }
+    registry.set(id, definition.create());
   }
   return registry.get(id);
 }
@@ -42,8 +62,7 @@ export function getById(id: ProviderId): ImageProvider | undefined {
 }
 
 export function listEnabled(): ProviderInfo[] {
-  const allIds: ProviderId[] = ['fal', 'zenmux'];
-  return allIds
+  const enabled = providerOrder
     .map((id) => {
       const provider = ensureAdapter(id);
       if (!provider) return undefined;
@@ -54,4 +73,9 @@ export function listEnabled(): ProviderInfo[] {
       };
     })
     .filter((info): info is ProviderInfo => info !== undefined);
+  if (enabled.length === 0 && !noProviderWarningShown) {
+    noProviderWarningShown = true;
+    console.warn('WARNING: no providers enabled');
+  }
+  return enabled;
 }

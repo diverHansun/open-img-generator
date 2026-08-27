@@ -1,132 +1,178 @@
-import { eq } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import { validate, type ValidationContext } from './validator';
-import * as prompt from '../prompt';
+
+import { eq } from 'drizzle-orm';
+
 import {
-  createGenerationAndJob,
+  admitGenerationWithJobs,
+  getGenerationByClientRequestId,
   getGenerationWithJobsAndImages,
-  touchSession,
-  generationJobs,
+  getImageAvailability,
+  listFavoriteImageIds,
+  requestGenerationCancellation,
+  deleteGenerationForHistory,
+  sessions,
   type DbClient,
+  type GenerationWithJobsAndImages,
 } from '../db';
+import {
+  GenerationNotDeletableError,
+  IdempotencyKeyReusedError,
+  NotFoundError,
+  OutcomeUnknownDeleteConfirmationRequiredError,
+  ValidationError,
+} from '../errors';
+import { assertStorageWritable, removeStoredFile } from '../storage';
+import * as prompt from '../prompt';
 import { getById } from '../providers';
-import type { NormalizedRequest } from '../providers';
-import { completeSync, advance, updateJobAndGeneration } from './lifecycle';
-import { NotFoundError } from '../errors';
-import type { GenerationWithJobsAndImages } from '../db';
+import type { NormalizedRequest, ProviderCapabilities } from '../providers';
+import { toSafeJobError } from './job-error';
+import { advance, cleanupStagedResultSnapshot } from './lifecycle';
+import { prepareGenerationIdempotency } from './idempotency';
+import {
+  createRequestSnapshot,
+  REQUEST_SNAPSHOT_VERSION,
+} from './request-snapshot';
 import type {
-  SubmitGenerationParams,
-  GenerationView,
   GenerationStatus,
+  GenerationTarget,
+  GenerationView,
+  SubmitGenerationParams,
 } from './types';
+import { validate } from './validator';
 
 export type SubmitResult = {
   generationId: string;
   status: GenerationStatus;
+  replayed: boolean;
 };
 
 export type OrchestratorContext = {
   db: DbClient;
 };
 
+const DETAIL_ADVANCE_BATCH_SIZE = 16;
+
+async function advanceJobsInBatches(
+  jobs: GenerationWithJobsAndImages['jobs'],
+  client: DbClient,
+): Promise<void> {
+  for (let offset = 0; offset < jobs.length; offset += DETAIL_ADVANCE_BATCH_SIZE) {
+    await Promise.allSettled(
+      jobs
+        .slice(offset, offset + DETAIL_ADVANCE_BATCH_SIZE)
+        .map((job) => advance(job, client)),
+    );
+  }
+}
+
 function buildNormalizedRequest(
   params: SubmitGenerationParams,
   processedPrompt: string,
+  capabilities: ProviderCapabilities,
 ): NormalizedRequest {
   return {
     prompt: processedPrompt,
     mode: params.mode,
-    width: params.width,
-    height: params.height,
-    aspectRatio: params.aspectRatio,
-    count: params.count,
-    negativePrompt: params.negativePrompt,
-    seed: params.seed,
-    providerOptions: params.providerOptions,
+    width: params.width ?? undefined,
+    height: params.height ?? undefined,
+    aspectRatio: params.aspectRatio ?? undefined,
+    count: params.count ?? undefined,
+    negativePrompt: params.negativePrompt ?? undefined,
+    seed: capabilities.supportsSeed ? params.seed ?? undefined : undefined,
+    referenceImages: params.referenceImages ?? undefined,
+    providerOptions: params.providerOptions ?? undefined,
   };
 }
 
+function buildDurableJobs(
+  params: SubmitGenerationParams,
+  processedPrompt: string,
+  generationId: string,
+  now: string,
+) {
+  return params.targets.map((target) => {
+    const provider = getById(target.provider);
+    const capabilities = provider?.capabilities.get(target.model);
+    // validate() ran immediately before this construction. Treat a mutable
+    // registry changing inside that tiny window as a validation failure rather
+    // than writing a queued job that cannot reconstruct its request.
+    if (!provider || !capabilities) {
+      throw new ValidationError('Provider configuration changed during admission');
+    }
+    return {
+      id: randomUUID(),
+      generationId,
+      provider: target.provider,
+      model: target.model,
+      status: 'pending' as const,
+      phase: 'queued' as const,
+      requestSnapshot: createRequestSnapshot(
+        buildNormalizedRequest(params, processedPrompt, capabilities),
+      ),
+      requestSnapshotVersion: REQUEST_SNAPSHOT_VERSION,
+      attemptCount: 0,
+      nextPollAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+}
+
+/**
+ * Durable admission only. Provider submission is intentionally performed by
+ * advance()/worker after this transaction has committed, so a lost HTTP
+ * response cannot erase the only record of a billable user intent.
+ */
 export async function submitGeneration(
   params: SubmitGenerationParams,
   ctx: OrchestratorContext,
 ): Promise<SubmitResult> {
-  validate(params, { db: ctx.db });
+  const { clientRequestId, requestHash } = prepareGenerationIdempotency(params);
+  const existing = getGenerationByClientRequestId(clientRequestId, ctx.db);
+  if (existing) {
+    if (existing.requestHash !== requestHash) {
+      throw new IdempotencyKeyReusedError(
+        'clientRequestId was already used for a different generation payload',
+      );
+    }
+    return {
+      generationId: existing.id,
+      status: existing.status as GenerationStatus,
+      replayed: true,
+    };
+  }
 
-  const processedPrompt = prompt.process(params.prompt);
+  validate(params, { db: ctx.db });
   const now = new Date().toISOString();
   const generationId = randomUUID();
-  const jobId = randomUUID();
-
-  createGenerationAndJob(
+  const processedPrompt = prompt.process(params.prompt);
+  const jobs = buildDurableJobs(params, processedPrompt, generationId, now);
+  const firstTarget = params.targets[0]!;
+  const mediaKind = getById(firstTarget.provider)?.capabilities.get(firstTarget.model)?.mediaKind ?? 'image';
+  const admission = admitGenerationWithJobs(
     {
       id: generationId,
       sessionId: params.sessionId,
       prompt: processedPrompt,
       status: 'pending',
+      mediaKind,
+      clientRequestId,
+      requestHash,
       createdAt: now,
       updatedAt: now,
     },
-    {
-      id: jobId,
-      generationId,
-      provider: params.provider,
-      model: params.model,
-      status: 'pending',
-      createdAt: now,
-      updatedAt: now,
-    },
+    jobs,
     ctx.db,
   );
-
-  if (params.sessionId) {
-    touchSession(params.sessionId, now, ctx.db);
+  if (admission.kind === 'conflict') {
+    throw new IdempotencyKeyReusedError(
+      'clientRequestId was already used for a different generation payload',
+    );
   }
-
-  const provider = getById(params.provider);
-  if (!provider) {
-    throw new Error(`Provider ${params.provider} disappeared after validation`);
-  }
-
-  const normalized = buildNormalizedRequest(params, processedPrompt);
-  const submitResult = await provider.submit(normalized, params.model);
-
-  switch (submitResult.kind) {
-    case 'sync':
-      await completeSync(generationId, jobId, submitResult.images, ctx.db);
-      break;
-    case 'async':
-      ctx.db
-        .update(generationJobs)
-        .set({
-          status: 'pending',
-          providerHandle: JSON.stringify(submitResult.handle),
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(generationJobs.id, jobId))
-        .run();
-      break;
-    case 'failed':
-      updateJobAndGeneration(
-        jobId,
-        generationId,
-        {
-          status: 'failed',
-          error: JSON.stringify(submitResult.error),
-          updatedAt: new Date().toISOString(),
-        },
-        ctx.db,
-      );
-      break;
-  }
-
-  const finalGeneration = getGenerationWithJobsAndImages(generationId, ctx.db);
-  if (!finalGeneration) {
-    throw new Error(`Generation ${generationId} not found after submit`);
-  }
-
   return {
-    generationId,
-    status: finalGeneration.status as GenerationStatus,
+    generationId: admission.generation.id,
+    status: admission.generation.status as GenerationStatus,
+    replayed: admission.kind === 'replayed',
   };
 }
 
@@ -135,50 +181,144 @@ export async function getGeneration(
   ctx: OrchestratorContext,
 ): Promise<GenerationView> {
   let generation = getGenerationWithJobsAndImages(id, ctx.db);
-  if (!generation) {
-    throw new NotFoundError(`Generation not found: ${id}`);
-  }
+  if (!generation) throw new NotFoundError(`Generation not found: ${id}`);
 
-  if (generation.status === 'pending' || generation.status === 'running') {
-    for (const job of generation.jobs) {
-      if (job.status === 'pending' || job.status === 'running') {
-        await advance(job, ctx.db);
-      }
-    }
-    generation = getGenerationWithJobsAndImages(id, ctx.db)!;
-  }
-
-  return toGenerationView(generation);
+  // Detail is a recovery trigger when the optional worker is intentionally
+  // disabled, but advance still honours persisted due times and leases.
+  await advanceJobsInBatches(generation.jobs, ctx.db);
+  generation = getGenerationWithJobsAndImages(id, ctx.db)!;
+  return toGenerationView(generation, ctx.db);
 }
 
-function toGenerationView(generation: GenerationWithJobsAndImages): GenerationView {
+/**
+ * Makes cancellation visible locally in one short DB write. A worker performs
+ * the best-effort remote cancellation later for jobs with a durable handle.
+ */
+export async function cancelGeneration(
+  id: string,
+  ctx: OrchestratorContext,
+): Promise<GenerationView> {
+  const requestedAt = new Date().toISOString();
+  const { generation, cancelledSnapshots } = ctx.db.transaction((tx) => {
+    const current = getGenerationWithJobsAndImages(id, tx);
+    if (!current) throw new NotFoundError(`Generation not found: ${id}`);
+    const cancelledSnapshots = current.jobs
+      .filter((job) => (
+        (job.status === 'pending' || job.status === 'running') &&
+        job.cancelRequestedAt === null
+      ))
+      .map((job) => job.resultSnapshot);
+    requestGenerationCancellation(id, requestedAt, tx);
+    return {
+      generation: getGenerationWithJobsAndImages(id, tx)!,
+      cancelledSnapshots,
+    };
+  });
+  for (const snapshot of cancelledSnapshots) cleanupStagedResultSnapshot(snapshot);
+  return toGenerationView(generation, ctx.db);
+}
+
+export function deleteGeneration(
+  id: string,
+  options: { confirmUnknownOutcome?: boolean },
+  ctx: OrchestratorContext,
+): void {
+  assertStorageWritable();
+  const resources = deleteGenerationForHistory(id, options, ctx.db);
+  if (resources.kind === 'not_found') {
+    throw new NotFoundError(`Generation not found: ${id}`);
+  }
+  if (resources.kind === 'confirmation_required') {
+    throw new OutcomeUnknownDeleteConfirmationRequiredError(
+      'Unknown provider outcome requires explicit deletion confirmation',
+    );
+  }
+  if (resources.kind === 'active') {
+    throw new GenerationNotDeletableError(
+      'Active generation cannot be deleted',
+    );
+  }
+  for (const snapshot of resources.resultSnapshots) {
+    cleanupStagedResultSnapshot(snapshot);
+  }
+  for (const storagePath of resources.storagePaths) {
+    try {
+      removeStoredFile(storagePath);
+    } catch {
+      // DB deletion is authoritative; orphan cleanup retries managed files.
+    }
+  }
+}
+
+function toGenerationView(
+  generation: GenerationWithJobsAndImages,
+  client: DbClient,
+): GenerationView {
+  const session = client
+    .select({ projectId: sessions.projectId })
+    .from(sessions)
+    .where(eq(sessions.id, generation.sessionId))
+    .get();
+  if (!session) throw new NotFoundError(`Session not found: ${generation.sessionId}`);
+  const favoriteImageIds = listFavoriteImageIds(
+    generation.images.map((image) => image.id),
+    client,
+  );
   return {
     id: generation.id,
     sessionId: generation.sessionId,
+    projectId: session.projectId,
     prompt: generation.prompt,
     status: generation.status as GenerationStatus,
+    mediaKind: generation.mediaKind as 'image' | 'video',
     createdAt: generation.createdAt,
     updatedAt: generation.updatedAt,
-    jobs: generation.jobs.map((job) => ({
-      id: job.id,
-      provider: job.provider as GenerationView['jobs'][number]['provider'],
-      model: job.model,
-      status: job.status as GenerationStatus,
-      error: job.error
-        ? (JSON.parse(job.error) as {
-            code: string;
-            message: string;
-            retryable: boolean;
-          })
-        : undefined,
-    })),
-    images: generation.images.map((image) => ({
-      id: image.id,
-      jobId: image.generationJobId,
-      index: image.index,
-      url: `/api/images/${image.id}`,
-      width: image.width,
-      height: image.height,
+    jobs: generation.jobs.map((job) => {
+      const error = toSafeJobError(job.error);
+      const waitingForProvider =
+        (job.phase === 'queued' || job.phase === 'polling') &&
+        (job.status === 'pending' || job.status === 'running') &&
+        error?.code === 'RATE_LIMITED' &&
+        error.retryable;
+      return {
+        id: job.id,
+        provider: job.provider as GenerationView['jobs'][number]['provider'],
+        model: job.model,
+        status: job.status as GenerationStatus,
+        error,
+        ...(waitingForProvider
+          ? {
+              waitingForProvider: true,
+              ...(job.nextPollAt ? { nextAttemptAt: job.nextPollAt } : {}),
+            }
+          : {}),
+      };
+    }),
+    images: generation.images.map((image) => {
+      const availability = getImageAvailability(image);
+      return {
+        id: image.id,
+        jobId: image.generationJobId,
+        index: image.index,
+        url: availability === 'available' ? `/api/images/${image.id}` : null,
+        width: image.width,
+        height: image.height,
+        favorited: favoriteImageIds.has(image.id),
+        delivery: image.sourceKind as 'managed' | 'remote',
+        availability,
+        removedAt: image.removedAt,
+      };
+    }),
+    videos: generation.videos.map((video) => ({
+      id: video.id,
+      jobId: video.generationJobId,
+      index: video.index,
+      url: video.storagePath ? `/api/videos/${video.id}` : null,
+      width: video.width,
+      height: video.height,
+      durationSeconds: video.durationSeconds,
+      availability: video.storagePath ? 'available' : (video.removalReason as 'retention_expired' | 'user_deleted' | 'storage_missing'),
+      removedAt: video.removedAt,
     })),
   };
 }

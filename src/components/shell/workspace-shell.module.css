@@ -1,0 +1,219 @@
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--color-canvas);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  padding: 1.125rem 0.875rem;
+  border-right: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.backLink,
+.mobileBackLink {
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-ink-muted);
+  font-size: 0.8125rem;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.backLink:hover,
+.mobileBackLink:hover {
+  color: var(--color-ink);
+}
+
+.backLink svg,
+.mobileBackLink svg,
+.navigation svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.workspaceTitle {
+  overflow: hidden;
+  margin: 1.375rem 0 1.5rem;
+  padding-inline: 0.6875rem;
+  font-size: 1.0625rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navigation {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.navLink,
+.activeLink {
+  position: relative;
+  display: flex;
+  min-height: 2.625rem;
+  align-items: center;
+  gap: 0.6875rem;
+  padding: 0 0.6875rem;
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-muted);
+  font-size: 0.875rem;
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.navLink:hover {
+  background: var(--color-accent-quiet);
+  color: var(--color-ink);
+}
+
+.activeLink {
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+  font-weight: 650;
+}
+
+.activeLink::before {
+  position: absolute;
+  left: -1px;
+  width: 3px;
+  height: 1.125rem;
+  border-radius: 999px;
+  background: var(--color-accent-strong);
+  content: '';
+}
+
+.sidebarFooter {
+  margin-top: auto;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+
+.main {
+  min-width: 0;
+  width: min(100%, calc(var(--content-max) + 5rem));
+  margin-inline: auto;
+  padding: clamp(1.75rem, 3vw, 2.875rem) clamp(1.125rem, 3vw, 3rem) 4rem;
+}
+
+.mobileHeader {
+  display: none;
+}
+
+.mobileMenu {
+  top: 0;
+  right: 0;
+  left: auto;
+  width: min(88vw, 22rem);
+  height: 100dvh;
+  translate: none;
+  transform: none;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 0;
+}
+
+.mobileBackLink {
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.errorState {
+  display: grid;
+  max-width: 36rem;
+  gap: var(--space-3);
+  padding-block: var(--space-7);
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.errorState p,
+.errorState small {
+  margin: 0;
+}
+
+.errorState small,
+.loading {
+  color: var(--color-ink-muted);
+}
+
+.loading {
+  animation: loading-fade 1.4s ease-in-out infinite alternate;
+}
+
+.errorState > div {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.skipLink {
+  position: fixed;
+  z-index: 100;
+  top: var(--space-2);
+  left: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-ink);
+  color: var(--color-surface);
+  transform: translateY(-160%);
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.skipLink:focus {
+  transform: translateY(0);
+}
+
+@media (max-width: 919px) {
+  .shell {
+    display: block;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .mobileHeader {
+    position: sticky;
+    z-index: 30;
+    top: 0;
+    display: flex;
+    min-height: 3.5rem;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-2) var(--space-4);
+    border-bottom: 1px solid var(--color-line);
+    background: var(--color-surface);
+    background: var(--color-glass);
+    backdrop-filter: blur(16px) saturate(108%);
+  }
+
+  .mobileHeader strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@keyframes loading-fade {
+  from {
+    opacity: 0.48;
+  }
+
+  to {
+    opacity: 0.88;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading {
+    animation: none;
+  }
+}

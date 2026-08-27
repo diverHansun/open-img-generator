@@ -22,6 +22,7 @@
 | **ProviderImageRef** | 厂商侧临时图片引用（URL + 元数据） | Value Object |
 | **ProviderCapabilities** | 某 (provider, model) 支持的能力声明 | Value Object（静态配置） |
 | **ProviderInfo** | 对外暴露的 provider 摘要（id + 模型列表 + capabilities） | Value Object |
+| **ProviderModelSpec&lt;Profile&gt;** | Provider 内部的公开 capabilities 与私有协议 profile 绑定 | Internal Value Object |
 
 ---
 
@@ -49,7 +50,7 @@
 type ProviderId = "fal" | "zenmux" | "siliconflow" | "zhipu" | "doubao" | "qwen" | "kling"
 ```
 
-MVP 仅实现 `"fal"` 与 `"zenmux"`。其余值为 registry 预留，adapter 未实现前不会被启用。
+当前已实现 `"fal"`、`"zenmux"`、`"siliconflow"`、`"zhipu"`、`"doubao"`、`"qwen"` 与 `"kling"`。Kling 使用独立 Kling API 和 Bearer key，不复用 DashScope。
 
 ### 3.2 ProviderMode
 
@@ -59,7 +60,7 @@ MVP 仅实现 `"fal"` 与 `"zenmux"`。其余值为 registry 预留，adapter �
 type ProviderMode = "text-to-image" | "image-to-image"
 ```
 
-MVP 两个首跑模型均支持 `text-to-image`。`image-to-image` 在 capabilities 中声明但 MVP 不暴露 API 参数。
+当前已实现的首跑模型均支持 `text-to-image`；Doubao 与 Kling 另外声明了参考图图生图能力。API 通过统一的 `referenceImages` 参数传入参考图，adapter 再按厂商限制翻译。
 
 ### 3.3 NormalizedRequest
 
@@ -75,10 +76,12 @@ MVP 两个首跑模型均支持 `text-to-image`。`image-to-image` 在 capabilit
 | `count` | 请求生成张数 | 可选，默认 1，受 capabilities.maxCount 约束 |
 | `negativePrompt` | 负向提示词 | 可选，capabilities 声明是否支持 |
 | `seed` | 随机种子 | 可选，capabilities 声明是否支持 |
-| `referenceImages` | 参考图 URL 列表（图生图用） | 可选，MVP 不使用 |
+| `referenceImages` | 参考图 URL/裸 Base64 列表（图生图用） | 可选；`image-to-image` 至少一张 |
 | `providerOptions` | 厂商特技透传（松散键值） | 可选 |
 
 **尺寸解析优先级**: `width`+`height` > `aspectRatio` > capabilities 默认值。adapter 负责翻译为厂商各自的尺寸字段（如 fal 的 `image_size`、zenmux 的 `size`）。
+
+**公开宽高比约定**: `aspectRatio` 与 `supportedAspectRatios` 使用同一套公开字符串（如 `"1:1"`、`"16:9"`）。UI 与 job-engine 只认公开比；厂商枚举仅出现在 adapter 映射与 `supportedSizes`。
 
 ### 3.4 SubmitResult
 
@@ -93,23 +96,25 @@ type SubmitResult =
 
 | kind | 含义 | 适用厂商 |
 |------|------|----------|
-| `sync` | 当场完成，images 含厂商临时 URL | zenmux |
-| `async` | 任务已提交，需后续 poll | fal |
+| `sync` | 当场完成；ZenMux/豆包优先内联 Base64，SiliconFlow/智谱返回临时 URL，Qwen/Wan 返回 choices 中的图片 URL | zenmux、siliconflow、zhipu、doubao、qwen（Qwen sync 与 Wan 标准版） |
+| `async` | 任务已提交，需后续 poll | fal、qwen（仅 Wan Pro）、kling |
 | `failed` | 单次调用失败（含超时、4xx、5xx） | 全部 |
 
 ### 3.5 JobHandle
 
 async 厂商的任务句柄，providers 内部结构，job-engine 原样存储并在 poll 时传回。
 
-| 字段 | 含义 | fal 映射 |
-|------|------|----------|
-| `providerId` | 厂商标识 | `"fal"` |
-| `model` | 模型 id | `"fal-ai/flux/schnell"` |
-| `externalId` | 厂商侧任务 id | `request_id` |
-| `statusUrl` | 状态查询 URL | submit 响应的 `status_url` |
-| `responseUrl` | 结果获取 URL | submit 响应的 `response_url` |
-| `cancelUrl` | 取消 URL | submit 响应的 `cancel_url` |
-| `submittedAt` | 提交时间（ISO 8601） | 本地记录 |
+| 字段 | 含义 | fal 映射 | Qwen 映射 |
+|------|------|----------|----------|
+| `providerId` | 厂商标识 | `"fal"` | `"qwen"` |
+| `model` | 模型 id | `"fal-ai/flux/schnell"` | `"wan2.7-image-pro"` |
+| `externalId` | 厂商侧任务 id | `request_id` | `task_id` |
+| `statusUrl` | 状态查询 URL | submit 响应的 `status_url`（仅 exact-origin 后持久化） | 从受信 base + `externalId` 构建；字段为旧行兼容，不作为执行 URL |
+| `responseUrl` | 结果获取 URL | submit 响应的 `response_url`（仅 exact-origin 后持久化） | 与 `statusUrl` 相同（成功响应内含结果；不信任旧字段） |
+| `cancelUrl` | 取消 URL | submit 响应的 `cancel_url`（仅 exact-origin 后持久化） | `null`（当前官方 HTTP 接口未提供取消调用） |
+| `submittedAt` | 提交时间（ISO 8601） | 本地记录 | 本地记录 |
+
+Kling 映射：`externalId=data.task_id`，`statusUrl/responseUrl=/v1/images/generations/:taskId`，`cancelUrl=null`。Qwen/Kling 的 poll 每次都从已校验的 base URL 与编码后的 `externalId` 重建，因此旧数据库中的 URL 不可把 Bearer credential 导向其他 host。
 
 job-engine 将 handle 序列化存入 `generation_jobs.provider_handle`（JSON），不在 providers 模块持久化。
 
@@ -157,8 +162,10 @@ type PollResult =
 |------|------|
 | `code` | 机器可读错误码（见下方枚举） |
 | `message` | 人类可读描述 |
-| `retryable` | job-engine 是否可重试（MVP job-engine 不重试，但字段预留） |
+| `retryable` | job-engine 是否可按当前 operation 的有界策略重试；不等同于 submit 可安全重放 |
 | `httpStatus` | 原始 HTTP 状态码（如有） |
+| `disposition` | `not_started` / `rejected` / `unknown`；submit 是否可安全重放的副作用事实 |
+| `retryAfterMs` | Provider 返回的、已上限化的建议等待时间（如有） |
 
 ```
 type ProviderErrorCode =
@@ -203,7 +210,7 @@ type ProviderErrorCode =
 
 ## 4. MVP 首跑模型的 Capabilities 声明
 
-### zenmux / openai/gpt-image-2
+### zenmux / openai/gpt-image-2、openai/gpt-image-1.5
 
 | 字段 | 值 |
 |------|-----|
@@ -223,11 +230,118 @@ type ProviderErrorCode =
 | protocol | `async` |
 | modes | `["text-to-image"]` |
 | maxCount | 4 |
-| supportedSizes | `["square_hd", "square", "portrait_4_3", "portrait_16_9", "landscape_4_3", "landscape_16_9"]` |
-| supportedAspectRatios | 通过 image_size 间接支持 |
+| supportedSizes | `["square_hd", "square", "portrait_4_3", "portrait_16_9", "landscape_4_3", "landscape_16_9"]`（厂商枚举，供映射/调试） |
+| supportedAspectRatios | `["1:1", "4:3", "3:4", "16:9", "9:16"]`（**公开比，须非空**） |
 | supportsNegativePrompt | false |
 | supportsSeed | true |
 | defaultSize | `"square_hd"` |
+
+#### fal 公开比 → image_size 映射（adapter 内部）
+
+| aspectRatio | image_size |
+|-------------|------------|
+| `1:1` | `square_hd` |
+| `4:3` | `landscape_4_3` |
+| `3:4` | `portrait_4_3` |
+| `16:9` | `landscape_16_9` |
+| `9:16` | `portrait_16_9` |
+
+未指定 aspectRatio/width/height 时使用 `defaultSize`（`square_hd`）。
+
+### fal / GPT Image 1、GPT Image 1.5、GPT Image 2
+
+Fal GPT Image 模型均使用异步 Queue；本批只公开文生图，不公开编辑 endpoint。模型 ID 必须使用 fal.ai 的实际 endpoint ID：
+
+| displayName | model | maxCount | defaultSize |
+|------|------|------:|------|
+| GPT Image 1 | `fal-ai/gpt-image-1/text-to-image` | 1 | `auto` |
+| GPT Image 1.5 | `fal-ai/gpt-image-1.5` | 4 | `1024x1024` |
+| GPT Image 2 | `openai/gpt-image-2` | 1 | `landscape_4_3` |
+
+GPT Image 1 和 1.5 支持 `auto`、`1024x1024`、`1536x1024`、`1024x1536`；公开比映射为 `1:1`、`3:2`、`2:3`。GPT Image 2 使用 `square_hd`、`square`、`portrait_4_3`、`portrait_16_9`、`landscape_4_3`、`landscape_16_9` 和 `auto`，公开比为 `1:1`、`4:3`、`3:4`、`16:9`、`9:16`。
+
+三者均不支持 seed 或 negative prompt。`quality` 与 `output_format` 通过 Fal 私有 profile 的 allowlist 处理；`background` 仅发送给 GPT Image 1/1.5。GPT Image 1 Mini 的 API 本批明确不进入 Fal model catalog。
+
+#### zenmux 公开比 → size 映射（adapter 内部）
+
+| aspectRatio | size |
+|-------------|------|
+| `1:1` | `1024x1024` |
+| `3:2` | `1536x1024` |
+| `2:3` | `1024x1536` |
+
+**扇出交集提示**: fal ∩ zenmux 的公开比目前主要为 `1:1`。web-ui 多选两模型时宽高比选项取交集；服务端仍按每 target 校验。
+
+### siliconflow / Kwai-Kolors/Kolors、Tongyi-MAI/Z-Image-Turbo
+
+| 字段 | 值 |
+|------|-----|
+| protocol | `sync` |
+| modes | `["text-to-image"]` |
+| maxCount | 1（当前同步 job-engine 约束；厂商 batch 能力暂不向上暴露） |
+| supportedSizes | `["1024x1024", "960x1280", "768x1024", "720x1440", "720x1280"]` |
+| supportedAspectRatios | `["1:1", "3:4", "1:2", "9:16"]` |
+| supportsNegativePrompt | true |
+| supportsSeed | true |
+| defaultSize | `"1024x1024"` |
+
+Kolors profile 允许 `batch_size`；Z-Image Turbo profile 明确禁止发送该 Kolors 专属字段。当前产品仍统一限制同步模型 `maxCount=1`。`Tongyi-MAI/Z-Image` 在真实密钥完成产品链路探测前不进入公开目录。
+
+#### SiliconFlow 公开比 → image_size 映射（adapter 内部）
+
+| aspectRatio | image_size |
+|-------------|------------|
+| `1:1` | `1024x1024` |
+| `3:4` | `960x1280` |
+| `1:2` | `720x1440` |
+| `9:16` | `720x1280` |
+
+### zhipu / glm-image
+
+| 字段 | 值 |
+|------|-----|
+| protocol | `sync` |
+| modes | `["text-to-image"]` |
+| maxCount | 1 |
+| supportedSizes | `["1280x1280", "1568x1056", "1056x1568", "1472x1088", "1088x1472", "1728x960", "960x1728"]` |
+| supportedAspectRatios | `["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"]` |
+| supportsNegativePrompt | false |
+| supportsSeed | false |
+| defaultSize | `"1280x1280"` |
+
+智谱 adapter 固定使用 `quality="hd"` 与 `watermark_enabled=true`，`user_id` 从 `ZHIPU_USER_ID` 读取，单用户默认值为 `local-user`。
+
+### doubao / Seedream 4.0、4.5、5.0 Lite
+
+| 字段 | 值 |
+|------|-----|
+| protocol | `sync` |
+| modes | `["text-to-image", "image-to-image"]` |
+| maxCount | 1（当前同步 job-engine 约束） |
+| supportedSizes | `["2K", "4K"]` |
+| supportedAspectRatios | `["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"]` |
+| supportsNegativePrompt | false |
+| supportsSeed | true |
+| defaultSize | `"2K"` |
+
+Doubao adapter 使用独立 Ark API（默认 `https://ark.cn-beijing.volces.com/api/v3`），文生图/图生图统一提交 `images/generations`；`referenceImages` 映射为 `image[]`，当前默认关闭组图并优先请求内联 Base64，仍兼容 URL fallback。
+
+当前 ModelSpec ID 为 `doubao-seedream-4-0-250828`、`doubao-seedream-4-5-251128`、`doubao-seedream-5-0-260128`；三者首批保持单张、非流式、`sequential_image_generation=disabled`，优先请求 `b64_json` 立即落盘。
+
+### qwen / Qwen Image 与 Wan 2.7 Image
+
+本批公开 capabilities 仍严格限制为 `text-to-image`；虽然官方接口还支持图片输入，本产品当前不声明 `image-to-image`，也不向生成页增加参考图输入。
+
+| model | protocol | profile | maxCount | supportsNegativePrompt | supportsSeed |
+|------|----------|---------|----------|------------------------|--------------|
+| `qwen-image-3.0-pro` | `sync` | `multimodal-sync` | 6 | true | true |
+| `qwen-image-3.0` | `sync` | `multimodal-sync` | 6 | true | true |
+| `qwen-image-2.0-pro-2026-06-22` | `sync` | `multimodal-sync` | 6 | true | true |
+| `qwen-image-2.0-pro` | `sync` | `multimodal-sync` | 6 | true | true |
+| `wan2.7-image` | `sync` | `wan-multimodal-sync` | 4 | false | true |
+| `wan2.7-image-pro` | `async` | `multimodal-async` | 4 | false | true |
+
+Qwen sync 模型使用 `multimodal-generation/generation`，构造单轮纯文本 `messages[].content[].text`，支持 `prompt_extend`、negative prompt、seed。Wan 标准版使用同一同步端点，但独立发送 `enable_sequential=false`、`thinking_mode=true`，不发送 Qwen 专属 `negative_prompt`；Wan Pro 保持 `image-generation/generation` + `X-DashScope-Async: enable`，并由 task poll 获取 `choices`。DashScope 异步任务和图片 URL 有效期约 24 小时，job-engine 必须及时转存。
 
 ---
 
@@ -238,9 +352,10 @@ type ProviderErrorCode =
 | ImageProvider 实例 | registry（懒创建） | 进程生命周期 | 进程退出 |
 | NormalizedRequest | job-engine | 单次 submit 调用 | GC |
 | SubmitResult / PollResult | adapter | 单次调用 | 返回给 job-engine 后由 job-engine 决定是否持久化 |
-| JobHandle | fal adapter（submit 时） | 从 submit 到 completed/failed/cancelled | job-engine 在 generation_jobs 中持久化，providers 不持有 |
+| JobHandle | fal / qwen adapter（submit 时） | 从 submit 到 completed/failed/cancelled | job-engine 在 generation_jobs 中持久化，providers 不持有 |
 | ProviderImageRef | adapter（解析响应时） | 厂商 URL 有效期（通常数小时） | URL 过期后不可下载；job-engine 须在过期前转存 |
 | ProviderCapabilities | capabilities 静态文件 | 编译时存在 | 随代码部署更新 |
+| ProviderModelSpec/profile | Provider capabilities 文件 | 编译时存在，仅 providers 内部可见 | 随对应 Provider 协议更新 |
 | ProviderError | adapter（错误时） | 单次调用 | 返回给 job-engine |
 
 **关键边界**: providers 产出的 ProviderImageRef.url 是临时资源。持久化由 job-engine 调用 storage 模块完成，providers 不感知转存结果。
@@ -252,4 +367,4 @@ type ProviderErrorCode =
 - 所有概念均可在 dfd-interface.md 的数据流中找到使用场景
 - ProviderImageRef 明确标注为临时资源，与 db 模块的 Image 实体区分
 - SubmitResult/PollResult 的 kind/status 枚举覆盖 sync + async 两种协议路径
-- MVP 首跑模型的 capabilities 与 model-interface-docs 一致
+- 当前 Batch 1/2 模型的 capabilities 与对应厂商 API 文档一致；同步 provider 的 `maxCount=1` 是现有 job-engine 约束，而非厂商能力上限

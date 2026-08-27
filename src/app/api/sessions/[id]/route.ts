@@ -1,29 +1,40 @@
 import { NextResponse } from 'next/server';
-import { getSession, db } from '../../../../lib/db';
-import { getGeneration } from '../../../../lib/job-engine';
+import { db } from '../../../../lib/db';
+import {
+  getSession,
+  listGenerations,
+  updateSession,
+} from '../../../../lib/library';
 import { handleApiError } from '../../error-handler';
+import { readJsonObject } from '../../request-body';
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
     const session = getSession(id, db);
+    const includeGenerations =
+      new URL(request.url).searchParams.get('include') === 'generations';
+    if (!includeGenerations) return NextResponse.json(session);
 
-    const generations = await Promise.all(
-      session.generations.map((generation) =>
-        getGeneration(generation.id, { db }),
-      ),
-    );
+    // Deliberately read-only. Only GET /api/generations/:id advances jobs.
+    const generations = listGenerations({ sessionId: id, limit: 50 }, db);
+    return NextResponse.json({ ...session, generations: generations.items });
+  } catch (err) {
+    return handleApiError(err);
+  }
+}
 
-    return NextResponse.json({
-      id: session.id,
-      title: session.title,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      generations,
-    });
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const body = await readJsonObject(request);
+    return NextResponse.json(updateSession(id, { title: body.title }, db));
   } catch (err) {
     return handleApiError(err);
   }

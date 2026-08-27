@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createTestDb } from '../../../tests/helpers/db';
 import { createSession } from '../db/queries/sessions';
-import { validate } from './validator';
+import { MAX_PROMPT_LENGTH, validate } from './validator';
 import type { SubmitGenerationParams } from './types';
 
 describe('validator', () => {
@@ -20,66 +20,169 @@ describe('validator', () => {
 
   function makeParams(overrides: Partial<SubmitGenerationParams> = {}): SubmitGenerationParams {
     return {
-      provider: 'fal',
-      model: 'fal-ai/flux/schnell',
+      clientRequestId: '15a6fecc-4f40-4ed2-8f51-353423be9af1',
+      targets: [{ provider: 'fal', model: 'fal-ai/flux/schnell' }],
       prompt: 'A cat',
+      sessionId: 'default-session',
       ...overrides,
     };
   }
 
-  it('passes for valid fal request', () => {
+  it('passes for a valid Fal request', () => {
     expect(() => validate(makeParams(), { db })).not.toThrow();
   });
 
-  it('throws when provider not enabled', () => {
+  it('allows prompts up to the service safety limit', () => {
+    expect(() =>
+      validate(makeParams({ prompt: 'x'.repeat(MAX_PROMPT_LENGTH) }), { db }),
+    ).not.toThrow();
+  });
+
+  it('rejects prompts above the service safety limit', () => {
+    expect(() =>
+      validate(makeParams({ prompt: 'x'.repeat(MAX_PROMPT_LENGTH + 1) }), { db }),
+    ).toThrow('Prompt exceeds the maximum allowed length');
+  });
+
+  it('requires a valid client request id for durable admission', () => {
+    expect(() => validate(makeParams({ clientRequestId: '' }), { db })).toThrow(
+      'clientRequestId',
+    );
+  });
+
+  it('rejects an empty target list', () => {
+    expect(() => validate(makeParams({ targets: [] }), { db })).toThrow('At least one target');
+  });
+
+  it('rejects duplicate targets', () => {
+    expect(() =>
+      validate(
+        makeParams({
+          targets: [
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+          ],
+        }),
+        { db },
+      ),
+    ).toThrow('Duplicate target');
+  });
+
+  it('throws when a target provider is not enabled', () => {
     delete process.env.FAL_KEY;
-    expect(() => validate(makeParams(), { db })).toThrow('Provider not enabled');
+    expect(() => validate(makeParams(), { db })).toThrow('Provider not enabled: fal');
   });
 
-  it('throws when model not found', () => {
-    expect(() => validate(makeParams({ model: 'unknown/model' }), { db })).toThrow('Model not found');
+  it('throws when a target model is not found', () => {
+    expect(() =>
+      validate(makeParams({ targets: [{ provider: 'fal', model: 'unknown/model' }] }), { db }),
+    ).toThrow('Model not found');
   });
 
-  it('throws when count exceeds max', () => {
+  it('throws when count exceeds a selected target maximum', () => {
     expect(() => validate(makeParams({ count: 10 }), { db })).toThrow('Count 10 exceeds max 4');
   });
 
-  it('throws when sync provider count > 1', () => {
+  it('accepts a sync target count within its declared maximum', () => {
     expect(() =>
-      validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', count: 2 }), { db }),
-    ).toThrow('Sync provider supports count=1 only in MVP');
+      validate(
+        makeParams({
+          targets: [{ provider: 'zenmux', model: 'openai/gpt-image-2' }],
+          count: 4,
+        }),
+        { db },
+      ),
+    ).not.toThrow();
   });
 
-  it('throws when seed not supported', () => {
+  it('rejects a seed when any selected target does not support it', () => {
     expect(() =>
-      validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', seed: 42 }), { db }),
-    ).toThrow('Seed not supported');
+      validate(
+        makeParams({
+          targets: [
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+            { provider: 'zenmux', model: 'openai/gpt-image-2' },
+          ],
+          seed: 42,
+        }),
+        { db },
+      ),
+    ).toThrow('Seed not supported by every selected target');
   });
 
-  it('throws when negative prompt not supported', () => {
+  it('rejects a negative prompt when any selected target does not support it', () => {
     expect(() =>
       validate(makeParams({ negativePrompt: 'bad' }), { db }),
-    ).toThrow('Negative prompt not supported');
+    ).toThrow('Negative prompt not supported by every selected target');
   });
 
-  it('throws when session not found', () => {
+  it('rejects an aspect ratio not supported by every selected target', () => {
+    expect(() =>
+      validate(
+        makeParams({
+          targets: [
+            { provider: 'fal', model: 'fal-ai/flux/schnell' },
+            { provider: 'zenmux', model: 'openai/gpt-image-2' },
+          ],
+          aspectRatio: '16:9',
+        }),
+        { db },
+      ),
+    ).toThrow('Unsupported aspect ratio');
+  });
+
+  it('throws when session is not found', () => {
     expect(() => validate(makeParams({ sessionId: 'missing' }), { db })).toThrow('Session not found');
   });
 
   it('passes when session exists', () => {
-    createSession({ id: 's1', title: 'Test', createdAt: 'now', updatedAt: 'now' }, db);
+    createSession({ id: 's1', projectId: 'default-project', title: 'Test', createdAt: 'now', updatedAt: 'now' }, db);
     expect(() => validate(makeParams({ sessionId: 's1' }), { db })).not.toThrow();
   });
 
-  it('throws for unsupported size', () => {
-    expect(() =>
-      validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', width: 999, height: 999 }), { db }),
-    ).toThrow('Unsupported size');
+  it('requires reference images for image-to-image mode', () => {
+    process.env.ARK_API_KEY = 'test-ark-key';
+    expect(() => validate(makeParams({
+      targets: [{ provider: 'doubao', model: 'doubao-seedream-4-0-250828' }],
+      mode: 'image-to-image',
+    }), { db })).toThrow('Image-to-image mode requires at least one reference image');
+    expect(() => validate(makeParams({
+      targets: [{ provider: 'doubao', model: 'doubao-seedream-4-0-250828' }],
+      mode: 'image-to-image',
+      referenceImages: ['data:image/png;base64,ZmFrZQ=='],
+    }), { db })).not.toThrow();
   });
 
-  it('throws when only width is provided', () => {
+  it('treats explicit null optional values as omitted at the API boundary', () => {
     expect(() =>
-      validate(makeParams({ provider: 'zenmux', model: 'openai/gpt-image-2', width: 1024 }), { db }),
-    ).toThrow('Both width and height are required');
+      validate(
+        makeParams({
+          width: null,
+          height: null,
+          aspectRatio: null,
+          count: null,
+          negativePrompt: null,
+          seed: null,
+          providerOptions: null,
+        }),
+        { db },
+      ),
+    ).not.toThrow();
+  });
+
+  it('accepts width and height together', () => {
+    expect(() => validate(makeParams({ width: 960, height: 1280 }), { db })).not.toThrow();
+  });
+
+  it('rejects incomplete or invalid dimensions', () => {
+    expect(() => validate(makeParams({ width: 960 }), { db })).toThrow(
+      'Width and height must be provided together',
+    );
+    expect(() => validate(makeParams({ width: 0, height: 1280 }), { db })).toThrow(
+      'Width and height must be positive integers',
+    );
+    expect(() => validate(makeParams({ width: 960.5, height: 1280 }), { db })).toThrow(
+      'Width and height must be positive integers',
+    );
   });
 });

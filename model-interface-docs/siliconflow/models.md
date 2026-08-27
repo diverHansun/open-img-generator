@@ -23,7 +23,6 @@
 |---|---|---|
 | `black-forest-labs/FLUX.1-schnell` | 初级档主力 | 1–4 步快速生成，开源 FLUX 蒸馏版 |
 | `black-forest-labs/FLUX.1-dev` | 初级档备选 | 12B 商用版 |
-| `Kwai-Kolors/Kolors` | 初级档备选 | 中文友好的开源 SD-based 模型 |
 | `stabilityai/stable-diffusion-3-5-large` | 初级档备选 | SD 3.5 大模型 |
 | `Qwen/Qwen-Image` | 初级档备选 / 中文 | 通义 Qwen-Image |
 

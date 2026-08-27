@@ -1,0 +1,271 @@
+.page {
+  width: 100%;
+}
+
+.backLink {
+  display: inline-flex;
+  min-height: 2.25rem;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  color: var(--color-ink-muted);
+  font-size: 0.8125rem;
+}
+
+.backLink:hover {
+  color: var(--color-ink);
+}
+
+.backLink svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.detailHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.detailHeader > :first-child {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-top: 1.25rem;
+}
+
+.detailHeader > :last-child {
+  width: 100%;
+}
+
+.configurationSection,
+.capabilitiesSection {
+  border-top: 1px solid var(--color-line-strong);
+}
+
+.configurationSection {
+  max-width: 52rem;
+  padding: var(--space-5) 0 var(--space-6);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.sectionHeader,
+.capabilitiesHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.sectionHeader p,
+.sectionHeader h2,
+.capabilitiesHeader h2,
+.capabilitiesHeader span {
+  margin: 0;
+}
+
+.sectionHeader p {
+  margin-bottom: var(--space-1);
+  color: var(--color-ink-muted);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sectionHeader h2,
+.capabilitiesHeader h2 {
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.sectionHeader > svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--color-accent-strong);
+}
+
+.environmentState,
+.credentialForm {
+  display: grid;
+  max-width: 43rem;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+
+.environmentState p,
+.environmentState small,
+.formIntroduction,
+.formHelp,
+.formError {
+  margin: 0;
+}
+
+.environmentState p,
+.formIntroduction {
+  color: var(--color-ink-muted);
+  line-height: 1.6;
+}
+
+.environmentState small,
+.formHelp {
+  color: var(--color-ink-muted);
+  font-size: 0.75rem;
+}
+
+.credentialForm > label {
+  margin-top: var(--space-2);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.formHelp {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.formError {
+  color: var(--color-danger);
+  font-size: 0.8125rem;
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.capabilitiesSection {
+  margin-top: var(--space-7);
+  padding-top: var(--space-4);
+}
+
+.capabilitiesHeader {
+  min-height: 3rem;
+  align-items: baseline;
+  padding: 0 var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-line-strong);
+}
+
+.capabilitiesHeader span {
+  color: var(--color-ink-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.modelList {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.model {
+  min-width: 0;
+}
+
+.model > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 3.25rem;
+  padding: var(--space-3) var(--space-2);
+}
+
+.model h3,
+.model code {
+  margin: 0;
+}
+
+.model h3 {
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.model code {
+  overflow-wrap: anywhere;
+  color: var(--color-ink-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  text-align: right;
+}
+
+.emptyModels {
+  display: grid;
+  gap: var(--space-2);
+  padding-block: var(--space-6);
+  border-bottom: 1px solid var(--color-line);
+}
+
+.emptyModels h3,
+.emptyModels p {
+  margin: 0;
+}
+
+.emptyModels h3 {
+  font-size: 0.875rem;
+}
+
+.emptyModels p {
+  color: var(--color-ink-muted);
+}
+
+.detailLoading {
+  display: grid;
+  gap: var(--space-3);
+  border-top: 1px solid var(--color-line);
+}
+
+.detailLoading i {
+  display: block;
+  height: 3.25rem;
+  background: var(--color-surface-subtle);
+  animation: provider-detail-loading 1s ease-in-out infinite alternate;
+}
+
+.detailLoading i:nth-of-type(2) {
+  width: min(100%, 52rem);
+  height: 10rem;
+}
+
+.detailLoading i:nth-of-type(3),
+.detailLoading i:nth-of-type(4) {
+  height: 5rem;
+}
+
+@keyframes provider-detail-loading {
+  to {
+    opacity: 0.42;
+  }
+}
+
+@media (max-width: 660px) {
+  .detailHeader {
+    grid-template-columns: 1fr;
+  }
+
+  .detailHeader > :first-child {
+    display: none;
+  }
+
+  .formActions,
+  .model > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .formActions button {
+    width: 100%;
+  }
+
+  .model code {
+    text-align: left;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .detailLoading i {
+    animation: none;
+  }
+}

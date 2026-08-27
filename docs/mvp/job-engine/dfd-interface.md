@@ -2,8 +2,10 @@
 
 > 模块路径: `src/lib/job-engine/`
 > 前置文档: goals-duty.md, architecture.md
-> 文档顺序: ④ dfd-interface(本文) → ⑦ test
+> 文档顺序: ④ dfd-interface(本文) → ⑤ use-case → ⑦ test
 > 运行时约束: 见 `docs/mvp/api/constraints.md`
+> 修订说明: 2026-07-15 `targets[]` 扇出；共享 aspectRatio；按 target 构造 NormalizedRequest
+> 修订说明: 2026-07-20 improve-1 D1/D2：POST durable admission；phase/lease worker、opaque staging 与持久化 poll/cancel retry
 
 ---
 
@@ -14,393 +16,280 @@
 | 方向 | 模块 | 交互内容 |
 |------|------|----------|
 | 上游调用方 | API 层 | 调用 submitGeneration / getGeneration |
-| 下游依赖 | providers | submit / poll / capabilities 查询 |
-| 下游依赖 | prompt | process(prompt) → 处理后的 prompt |
-| 下游依赖 | storage | downloadAndStore(url) → storagePath |
-| 下游依赖 | db | generation / job / image 的 CRUD |
+| 上游调用方 | web-ui（经 API） | POST targets + 轮询 GET |
+| 下游依赖 | providers | 每 target submit / poll / capabilities |
+| 下游依赖 | prompt | process(prompt) |
+| 下游依赖 | storage | downloadAndStore(url) |
+| 下游依赖 | db | generation / job / image CRUD |
 
 ### 本文档范围
 
-- job-engine 的两条核心数据流（submit 和 get）
-- 对外函数接口定义
-- API 层路由契约（作为 job-engine 的 HTTP 暴露层附载于此）
+- submit / get 两条核心数据流（含扇出）
+- 对外函数与 API 路由契约中与 generation 相关的部分
 
-不描述: providers 内部协议翻译、storage 文件写入细节、db schema 定义。
+不描述: providers 内部映射表细节（见 providers/dfd-interface）、web-ui 控件交集算法、db schema DDL。
 
 ---
 
 ## 2. Data Flow Description（数据流描述）
 
-### 2.1 Submit 流程（POST /api/generations）
+### 2.1 Durable admission 流程（POST /api/generations）
 
 ```
 API 层: POST /api/generations
-  → 解析 body: SubmitGenerationParams（JSON）
+  → 解析 body → SubmitGenerationParams
   → job-engine.submitGeneration(params)
 
-  orchestrator:
+  orchestrator（本步骤不调用 Provider）:
     1. validator.validate(params)
-       → registry.getById(provider) — 确认启用
-       → provider.capabilities(model) — 确认 model 存在
-       → 校验 count <= maxCount, mode 在 modes 中, 尺寸合法
-       → 若 seed 有值且 capabilities.supportsSeed === false → 400
-       → 若 negativePrompt 有值且 capabilities.supportsNegativePrompt === false → 400
-       → 若 sessionId 有值: db.sessionExists(sessionId) 为 false → 400
-       → sync provider（protocol === "sync"）且 count > 1 → 400（MVP sync 限制 count=1，见 constraints.md）
+       → targets 非空；每个 (provider, model) 唯一
+       → 对每个 target:
+            registry.getById(provider) 启用
+            capabilities(model) 存在
+            mode ∈ modes
+            count ≤ maxCount；若 protocol=sync 且 count>1 → 400
+            若提交了 aspectRatio: 必须 ∈ supportedAspectRatios
+            若提交了 width/height: 两者同有；由 adapter/校验规则处理（见 constraints）
+            若 negativePrompt 有值且 !supportsNegativePrompt → 400
+            seed: 不在校验阶段因「某 target 不支持」而整单 400；构造 NormalizedRequest 时对不支持的 target 省略 seed
+       → sessionId **必填**: 缺失或 !sessionExists → 400
+       → 任一 target 失败 → 整单 ValidationError，不写库
 
     2. prompt.process(prompt) → processedPrompt
 
-    3. db.transaction(() => {
-         createGeneration({ sessionId, prompt: processedPrompt, status: "pending" })
-         createGenerationJob({ generationId, provider, model, status: "pending" })
-       })
-       → generationId, jobId
-
-    4. 若 sessionId 非空: db.touchSession(sessionId)
-
-    5. 构造 NormalizedRequest（显式 pick，不含 provider/model/sessionId）:
-         {
+    3. 每个 target 构造 capability 裁剪后的 NormalizedRequest：
+         normalized = {
            prompt: processedPrompt,
            mode, width, height, aspectRatio, count,
-           negativePrompt, seed, providerOptions
+           negativePrompt,
+           seed: caps.supportsSeed ? seed : undefined,
+           referenceImages,
+           providerOptions
          }
+         → createRequestSnapshot(normalized, version=1)
+         → 只允许白名单 JSON、深度/键数/字符串/总字节上限；不得含 session、credential、Provider 原始对象
 
-    6. provider.submit(normalizedRequest, model) → SubmitResult
+    4. db.transaction(IMMEDIATE, () => {
+         按 clientRequestId + canonical request hash 去重
+         createGeneration({ sessionId, prompt: processedPrompt, status: "pending",
+                            clientRequestId, requestHash })
+         for target in targets:
+           createGenerationJob({ generationId, provider, model, status: "pending",
+                                 phase: "queued", requestSnapshot, requestSnapshotVersion: 1,
+                                 nextPollAt: now })
+         touchSession(sessionId)
+       })
 
-    7a. [sync 路径] SubmitResult.kind === "sync":
-        → lifecycle.completeSync(jobId, submitResult.images)
-          → lifecycle.storeImages(jobId, images)  // 见 §2.6
-          → db.updateJob(jobId, { status: "completed", updatedAt: now })
-          → db.updateGeneration(generationId, { status: "completed", updatedAt: now })
+       同一 clientRequestId + 同一 hash → 返回既有 generation（replayed）；同 key 异 hash → 409。
 
-    7b. [sync 失败] SubmitResult.kind === "failed":
-        → db.updateJob(jobId, { status: "failed", error, updatedAt: now })
-        → db.updateGeneration(generationId, { status: "failed", updatedAt: now })
-
-    7c. [async 路径] SubmitResult.kind === "async":
-        → db.updateJob(jobId, {
-             status: "pending",
-             providerHandle: serialize(handle),
-             updatedAt: now
-           })
-        → generation 保持 pending
-
-  → 返回 { generationId, status } 给 API 层
-  → API 层返回 201 { id, status, links: { self: "/api/generations/:id" } }
+  → 返回 { generationId, status: "pending", replayed }
+  → API 在 commit 后启动默认 worker（不 await）
+  → API 202 + Location: /api/generations/:id
+     { id, status, replayed, links: { self: "/api/generations/:id" } }
 ```
 
-**201 响应 status 枚举**: `"pending"` | `"completed"` | `"failed"`
+**`202` status 枚举**: `"pending"` | `"running"` | `"completed"` | `"failed"` | `"cancelled"`。
+新接纳任务通常为 `pending`；重放同一 `clientRequestId` 时可返回既有的任一状态。
 
-| 路径 | status |
-|------|--------|
-| async submit 成功 | `pending` |
-| sync submit 成功且转存完成 | `completed` |
-| provider submit 失败 | `failed` |
+| 接纳结果 | status / 行为 |
+|--------------|--------|
+| 首次有效 POST | `pending`；所有 job 是 `queued`，尚未调用 Provider |
+| 同 key、同 payload 重放 | 返回相同 generation，`replayed=true`；不创建 job、不重复 dispatch |
+| 同 key、不同 payload | 409 `IDEMPOTENCY_KEY_REUSED` |
+| 后续 worker/详情推进 | 公开状态按 job 结果变为 `running` / 终态；部分成功仍可聚合为 `completed` |
 
-校验失败（步骤 1）抛 ValidationError，API 层返回 400，**不创建** generation 记录。
+校验失败（步骤 1）→ 400，**不创建** generation。
 
-### 2.2 Get 流程（GET /api/generations/:id）— 含惰性 poll
-
-```
-API 层: GET /api/generations/:id
-  → job-engine.getGeneration(id)
-
-  orchestrator:
-    1. db.getGenerationWithJobsAndImages(id) → 不存在则 NotFoundError
-
-    2. 若 generation.status 为 "pending" 或 "running":
-       → 对每个 status 为 pending/running 的 job:
-         → lifecycle.advance(job)  // 含乐观锁，见 architecture.md §4.5
-           → 反序列化 providerHandle
-           → provider.poll(handle) → PollResult
-           → 按 PollResult.status 更新:
-             - pending → job 保持 pending
-             - running → db.updateJob({ status: "running", updatedAt: now })
-             - completed → lifecycle.storeImages(jobId, images) → updateJob(completed)
-             - failed → db.updateJob({ status: "failed", error, updatedAt: now })
-             - cancelled → db.updateJob({ status: "cancelled", updatedAt: now })
-           → db.updateGeneration 聚合 status + updatedAt
-
-    3. 重新读取 db.getGenerationWithJobsAndImages(id)
-
-  → 返回 GenerationView 给 API 层
-  → API 层返回 200 JSON
-```
-
-已完成（`completed` / `failed` / `cancelled`）的 generation **不触发** poll。
-
-### 2.3 Session 关联（可选）
+### 2.2 Phase/lease 推进与详情读取（worker + GET /api/generations/:id）
 
 ```
-POST /api/generations { sessionId: "xxx", ... }
-  → validator 确认 session 存在
-  → db.createGeneration({ sessionId: "xxx", ... })
-  → submit 成功后 db.touchSession(sessionId)
-  → 正常走 provider 流程
+默认 in-process worker:
+  1. listDueGenerationJobs(now, batchSize)
+     → 仅 phase ∈ {queued, dispatching, polling, storing, cancelling}
+       且 due、lease 已过期/为空的 job
+  2. 对每个 job 调用同一个 lifecycle.advance(job)
+     queued      → claim dispatch lease → 从 versioned request snapshot 恢复 → provider.submit
+     dispatching → lease 过期但无 durable result → outcome_unknown（不盲目 replay）
+     polling     → claim lease → provider.poll；typed retryable failure 写 retry state + next due，非 retryable/预算耗尽才 terminal
+     storing     → claim lease → 每次处理一张 result snapshot 中尚未落库的图片
+     cancelling  → claim lease → 若有 handle 则 provider.cancel（best effort）；仅 remote `cancelled` 确认成功，`pending/running` 按 cancel budget 重排，`completed` 以安全的“取消未确认”诊断收口且不复活本地状态
+  3. 所有外部结果写回均以 phase + lease + cancel marker CAS；再聚合 generation.status
 
-POST /api/generations { ... }  // 无 sessionId
-  → db.createGeneration({ sessionId: null, ... })
-  → 不调用 touchSession
+详情 GET:
+  1. getGeneration 先读取 generation/jobs/images（无则 404）
+  2. 可对其 jobs 调用同一个 advance，但 claim 条件仍要求 due 且无有效 lease
+  3. 重新读取并返回 GenerationView
 ```
 
-session 的 CRUD 由 API 层直接调 db 模块，不经过 job-engine。
+worker 默认启用；只有 `JOB_WORKER_ENABLED=false` 才关闭。关闭时详情 GET 是恢复辅助入口，**不是**绕过 `next_poll_at` 或有效 lease 的强制 poll。已全部终态的 generation 不触发外部工作。
 
-### 2.4 GET /api/sessions/:id — 含嵌套 generation 推进
+**D2 retry 规则**：poll 仅在 `ProviderError.retryable === true` 或调用抛错时重排，最多 6 次外部 poll/10 分钟；remote cancel 同理，最多 3 次/30 秒。`attempt_count`、`retry_started_at`、error 与 `next_poll_at` 在同一 lease CAS 写入，因此新进程继续同一预算；成功 pending/running、进入 storing、终态及本地取消会清空 retry state。submit 永不走此路径。
 
-```
-API 层: GET /api/sessions/:id
-  → db.getSession(id) → 不存在则 404
-  → db.listGenerationsBySession(id)
-  → 对每个 status 为 pending/running 的 generation:
-       → job-engine.getGeneration(gen.id)  // 复用惰性 poll + 转存逻辑
-  → 重新 db.listGenerationsBySession(id)
-  → 返回 { id, title, createdAt, updatedAt, generations: GenerationView[] }
-```
-
-session 详情页必须与单条 `GET /api/generations/:id` 行为一致，避免 async 任务在 session 视图下永远 pending。
-
-### 2.5 图片访问（GET /api/images/:id）
+### 2.3 Cancel 流程（POST /api/generations/:id/cancel）
 
 ```
-API 层: GET /api/images/:id
-  → db.getImage(id) → { storagePath, contentType, ... }
-  → storage.getReadStream(storagePath)  // MVP 仅二进制流，无重定向
-  → 返回 HTTP 200 + Content-Type + 二进制 body
+API → orchestrator.cancelGeneration
+  → 一个短 DB transaction 批量 CAS 所有 active jobs:
+       status=cancelled, cancel_requested_at=now, phase=cancelling/terminal
+       重新聚合 generation.status
+  → 立即返回本地 GenerationView；不等待 Provider
+  → worker 后续处理 phase=cancelling：有 durable handle 时尽力调用 provider.cancel(handle)
+  → retryable remote failure、或 remote 仍为 pending/running 时写下一次 due（最多 3 次/30 秒）；不支持/非 retryable/预算耗尽才收口 terminal
+  → 全程不复活 public status；预算耗尽也保持 `cancelled`
 ```
 
-此路由不经过 job-engine，API 层直接调 db + storage。
+尚未 claim 的 queued job 直接 terminal；dispatch/storing 期间的 lease 与晚到 async handle 受 cancellation CAS 保护，晚到 handle 只可用于远端 cancel。取消先于图片 checkpoint 赢得事务时，不会出现新的 image row；已完成 checkpoint 的图片保持已持久化资产。
 
-### 2.6 图片转存（lifecycle.storeImages）
+### 2.4 Session 关联（必填，2026-07-16）
 
-对 `ProviderImageRef[]` 逐张处理，sync/async 路径共用:
+每次 submit 必须带合法 `sessionId`：校验存在 → 写入 `generations.session_id` → `touchSession`。
+**禁止** `session_id=null` 的独立生成。
 
-```
-对每张 ref（按 index 顺序）:
-  1. 若 db.imageExists(jobId, index) → 跳过（幂等，防并发 GET 重复转存）
-  2. storage.downloadAndStore(ref.url) → { storagePath, contentType, sizeBytes }
-  3. db.createImage({
-       jobId,
-       index,
-       storagePath,
-       contentType,          // 以 storage 返回值为准
-       width: ref.width,     // 优先 ProviderImageRef，缺失则 NULL
-       height: ref.height,
-       sizeBytes
-     })
-  4. 任一张 downloadAndStore 失败:
-       → 已成功的 image 记录保留（不 rollback 文件）
-       → db.updateJob(jobId, { status: "failed", error: StorageError, updatedAt: now })
-       → db.updateGeneration 聚合为 failed
-       → 中止剩余张数，不再继续
-```
+Session / Project CRUD 由 **library + API** 负责，不经 job-engine。Session 必属某 Project（db 约束）。
 
-**部分转存规则（MVP）**: 任一张失败 → job 与 generation 均为 `failed`；已成功入库的 images 保留在响应中；不自动重试剩余张数。客户端需发起新 generation。
+### 2.5 GET session / project 树 — 只读聚合
 
-### 2.7 Provider 列表（GET /api/providers）
+`GET /api/sessions/:id?include=generations` 与 History 列表只经 library 读取已存状态，**不调用** job-engine。`GET /api/generations/:id` 可作 due/lease 允许时的恢复辅助，但不推进未 due 或有有效 lease 的 job。
 
-```
-API 层: GET /api/providers
-  → providers.registry.listEnabled()
-  → 返回 ProviderInfo[]
-```
+### 2.6 图片访问
 
-此路由不经过 job-engine，API 层直接调 providers。
+仍不经 job-engine：API → db.getImage → storage.getReadStream。
+
+### 2.7 图片转存与 inline staging（lifecycle）
+
+转存作用域为单个 job，使用 `phase=storing` 的 result snapshot 恢复：
+
+- `imageExists(jobId, index)` 幂等
+- 每张图片先物化文件，再以 lease-guarded 短事务插入 image row、更新 phase/status 与 generation 聚合；失败或取消失去 checkpoint 时删除本次尝试文件
+- 单 job 内任一张失败 → 该 job failed；已成功 images 保留
+- **不**将其他 job 标失败
+- data URL/Base64 先分块写入私有 staging；每张受 25 MiB、Provider metadata content-type 与 PNG/JPEG/WebP magic-byte 一致性检查，result snapshot 仅保存 `staging:<uuid>`，不保存 raw data URL/Base64。远端 URL 下载也在 storage 内以逐跳 HTTPS/DNS/IP/redirect 与 25 MiB 流式校验收口；`.tmp`/staging 残留由 orphan grace cleanup 回收。
+
+### 2.8 Provider 列表
+
+`GET /api/providers` 不经 job-engine；API → registry.listEnabled()。web-ui 用其驱动模型多选与参数显隐。
 
 ---
 
 ## 3. Interface Definition（接口定义）
 
-### 3.1 job-engine 对外函数
-
-#### submitGeneration(params)
+### 3.1 submitGeneration(params)
 
 | 属性 | 值 |
 |------|-----|
-| 输入 | `SubmitGenerationParams`（见下方） |
-| 输出 | `{ generationId: string; status: GenerationStatus }` |
-| 同步/异步 | 同步（sync 路径可能阻塞较久，见 constraints.md） |
-| 失败 | 校验失败抛 ValidationError；provider 失败不抛，写入 db 后返回 status=`failed` |
+| 输入 | `SubmitGenerationParams` |
+| 输出 | `{ generationId: string; status: GenerationStatus; replayed: boolean }` |
+| 成功语义 | durable admission 已 commit；不等待 Provider submit / poll / 下载 |
+| 失败 | ValidationError → 不落库；同 key 异 payload → IdempotencyKeyReusedError（409）。Provider/存储失败在后续 JobView.error 中可见，不作为本次 POST 的同步结果 |
 
 ```
+GenerationTarget {
+  provider: ProviderId   // 必填
+  model: string          // 必填
+}
+
 SubmitGenerationParams {
-  provider: ProviderId       // 必填
-  model: string              // 必填
-  prompt: string             // 必填
-  sessionId?: string         // 可选；须已存在
-  mode?: ProviderMode        // 默认 "text-to-image"
+  clientRequestId: string         // 必填，RFC 4122 UUID；同一浏览器用户意图的稳定身份
+  prompt: string                 // 必填
+  targets: GenerationTarget[]    // 必填，长度 ≥ 1，(provider,model) 唯一
+  sessionId: string  // 2026-07-16 必填；缺失 → ValidationError
+  mode?: ProviderMode            // 默认 text-to-image
   width?: number
   height?: number
-  aspectRatio?: string
-  count?: number             // 默认 1
+  aspectRatio?: string           // 公开宽高比，如 "1:1"；各 adapter 自行映射
+  count?: number                 // 默认 1；对每个 target 分别校验
   negativePrompt?: string
-  seed?: number
+  seed?: number                  // 可选。构造每 target 的 NormalizedRequest 时：
+                                 //   所有 targets supportsSeed → 传入 seed；否则整单校验失败。
+                                 // web-ui：仅全部选中模型 supportsSeed 才展示 seed 控件。
+  referenceImages?: string[]     // image-to-image 至少一张；按 adapter 限制裁剪/翻译
   providerOptions?: Record<string, unknown>
 }
 ```
 
-**持久化边界**: 上列除 `provider`、`model`、`prompt`、`sessionId` 外，其余字段仅存在于单次请求运行时（校验 → `NormalizedRequest` → adapter），**不写入 db**。详见 `db/data-model.md` §3.0。
+**Breaking change**: 移除顶层单字段 `provider` / `model`；改由 `targets[]` 表达。单模型请求为 `targets: [{ provider, model }]`。
 
-**NormalizedRequest 构造**（步骤 5 显式字段，禁止 `...params` 扩散）:
+**持久化边界**: 不是持久化原始 API body。admission 为每个 target 保存 capability 裁剪后的、版本化 `NormalizedRequest` snapshot（含相应的尺寸/count/seed/referenceImages 等白名单字段），仅供重启后安全恢复 dispatch；API/UI 不返回 snapshot，job 终态时清理。`provider`/`model` 仍分别写在 job 行；credential、session、Provider 原始对象和 raw Base64/data URL 不得进入 snapshot。
 
-```
-pick(params, [
-  "mode", "width", "height", "aspectRatio", "count",
-  "negativePrompt", "seed", "providerOptions"
-]) + { prompt: processedPrompt }
-```
-
-#### getGeneration(id)
+### 3.2 getGeneration(id)
 
 | 属性 | 值 |
 |------|-----|
-| 输入 | generation id 字符串 |
-| 输出 | `GenerationView`（见下方） |
-| 同步/异步 | 同步（内部可能触发 poll HTTP 调用） |
-| 失败 | 不存在抛 NotFoundError |
+| 输出 | `GenerationView` |
+| 失败 | NotFoundError |
 
 ```
-GenerationStatus = "pending" | "running" | "completed" | "failed" | "cancelled"
-
 GenerationView {
-  id: string
-  sessionId: string | null
-  prompt: string
-  status: GenerationStatus
-  createdAt: string          // ISO 8601
-  updatedAt: string
-  jobs: JobView[]
-  images: ImageView[]
+  id, sessionId, projectId, prompt, status, createdAt, updatedAt,
+  jobs: JobView[],      // 长度 = targets 数
+  images: ImageView[]   // 跨 job 扁平列表；用 jobId 归属
 }
 
-JobView {
-  id: string
-  provider: ProviderId
-  model: string
-  status: GenerationStatus
-  error?: ProviderError
-}
-
-ImageView {
-  id: string
-  jobId: string
-  index: number              // 批次内序号，与 ProviderImageRef.index 对应
-  url: string                // 本地访问 URL: /api/images/:id
-  width: number | null
-  height: number | null
-}
+JobView { id, provider, model, status, error?, waitingForProvider?, nextAttemptAt? }
+ImageView { id, jobId, index, url, width, height, favorited }
 ```
 
-#### createImage 写入契约（db 层，job-engine 调用）
+`getGeneration()` 读取后可以辅助调用 `advance()`，但 caller 不可据此假设同步完成：只有该 job 当前 due 且 lease 可 claim 时才可能发生一次生命周期动作。
 
-```
-CreateImageParams {
-  jobId: string
-  index: number              // 0-based，(jobId, index) 唯一
-  storagePath: string
-  contentType: string        // 来自 storage.downloadAndStore
-  width: number | null       // 来自 ProviderImageRef，缺失则 null
-  height: number | null
-  sizeBytes: number          // 来自 storage.downloadAndStore
-}
-```
+`error` 永远是安全 code 的 DTO。D2 可在 active/cancelling job 上暂存 retryable 诊断供恢复；前端不应把这种 retryable 诊断渲染为终态失败。明确 Provider 限流时额外返回 `waitingForProvider=true` 和本地计算的 `nextAttemptAt`，用于显示“持续等待、可取消”；下一次成功 phase 会清除这些等待状态。
 
-### 3.2 API 路由契约
+### 3.3 API 路由契约（generation 相关）
 
 #### POST /api/generations
 
 | 属性 | 值 |
 |------|-----|
 | 请求体 | SubmitGenerationParams（JSON） |
-| 成功响应 | 201 `{ id, status, links: { self: "/api/generations/:id" } }` |
-| status | `"pending"` \| `"completed"` \| `"failed"` |
-| 校验失败 | 400 `{ error: string }` |
-| provider 未启用 | 400 `{ error: "Provider not enabled" }` |
-| sessionId 不存在 | 400 `{ error: "Session not found" }` |
-| sync provider count > 1 | 400 `{ error: "Sync provider supports count=1 only in MVP" }` |
+| 请求大小 | 有界 JSON body；超过 API 上限返回 413 `PAYLOAD_TOO_LARGE` |
+| 幂等 | `clientRequestId` 必填；可选 `Idempotency-Key` 若提供必须与 body 完全一致 |
+| 成功 | `202 Accepted` `{ id, status, replayed, links: { self } }`，并带 `Location: /api/generations/:id` |
+| 校验失败 | 400 |
+| 同 key、异 payload | 409 `IDEMPOTENCY_KEY_REUSED` |
+| targets 空 / 重复 | 400 |
+| 某 target 不支持 aspectRatio | 400 |
+| seed 对不支持的 target | 不 400；该 target 请求省略 seed |
+| sync target count>1 | 400 |
 
 #### GET /api/generations/:id
 
 | 属性 | 值 |
 |------|-----|
-| 路径参数 | generation id |
-| 成功响应 | 200 `GenerationView` |
-| 不存在 | 404 `{ error: "Not found" }` |
-
-#### GET /api/providers
-
-| 属性 | 值 |
-|------|-----|
-| 成功响应 | 200 `ProviderInfo[]` |
-
-#### GET /api/images/:id
-
-| 属性 | 值 |
-|------|-----|
-| 路径参数 | image id |
-| 成功响应 | 200 图片二进制（Content-Type 来自 `images.content_type`） |
+| 成功 | 200 GenerationView（含多 jobs） |
 | 不存在 | 404 |
 
-#### POST /api/sessions
-
-| 属性 | 值 |
-|------|-----|
-| 请求体 | `{ title?: string }` |
-| 成功响应 | 201 `{ id, title, createdAt, updatedAt }` |
-
-#### GET /api/sessions/:id
-
-| 属性 | 值 |
-|------|-----|
-| 成功响应 | 200 `{ id, title, createdAt, updatedAt, generations: GenerationView[] }` |
-| 不存在 | 404 |
-| 行为 | 对 pending/running 的嵌套 generation 触发惰性 poll（同 §2.4） |
-
-#### GET /api/health（MVP 建议）
-
-| 属性 | 值 |
-|------|-----|
-| 成功响应 | 200 `{ status: "ok", enabledProviders: string[], db: "ok" }` |
-| 无 provider 启用 | 仍 200，但 `enabledProviders: []`；启动日志应 WARNING |
+其余 sessions / providers / images / health 契约不变（见原文档与 constraints）；providers 响应中的 `supportedAspectRatios` 须为**公开比**（见 providers 文档）。
 
 ---
 
 ## 4. Data Ownership & Responsibility（数据归属与责任）
 
-| 数据 | 创建 | 更新 | 查询 | 责任模块 |
-|------|------|------|------|----------|
-| generation 记录 | job-engine (orchestrator) | job-engine (lifecycle) | job-engine + API 层 | db 存储，job-engine 编排 |
-| generation_job 记录 | job-engine | job-engine (lifecycle) | job-engine | db 存储，job-engine 编排 |
-| image 记录 | job-engine（转存后） | 不可变 | API 层 + job-engine | db 存储，job-engine 创建 |
-| session 记录 | API 层（直接调 db） | API 层 | API 层 | db 存储，job-engine 不感知 session CRUD |
-| session.updated_at | job-engine (touchSession) | API 层 (updateSession) | API 层 | 见 db/data-model §2.1 |
-| 图片文件 | storage（job-engine 触发） | 不可变 | storage | storage 模块 |
-| ProviderImageRef（临时 URL） | providers | - | - | providers 创建，job-engine 消费后立即转存 |
+| 数据 | 创建 | 更新 | 责任 |
+|------|------|------|------|
+| generation | orchestrator | lifecycle / orchestrator 聚合 | db 存，job-engine 编排 |
+| generation_jobs（N 行） | orchestrator | lifecycle 每 job | db 存，job-engine 编排 |
+| images | lifecycle.storeImages | 不可变 | 归属 jobId |
+| session | API | API + touchSession | job-engine 不 CRUD session |
+| request snapshot | orchestrator 每 target 构造 | lifecycle 读取、终态清理 | versioned/validated `NormalizedRequest`，仅供恢复 dispatch，不进入 DTO |
+| result snapshot | lifecycle 收到 completed refs | lifecycle storing、终态/取消清理 | 有界远端 ref 或 opaque `staging:<uuid>`；不存 raw inline data |
+| 能力交集 | — | — | **web-ui**，非本模块 |
 
 ---
 
-## 5. API 路由与代码骨架对齐
+## 5. 与旧契约对齐说明
 
-MVP **唯一**生成入口:
-
-- `POST /api/generations`（`sessionId` 可选）
-
-以下骨架路径**废弃**，编码时不实现:
-
-- `src/app/api/sessions/[id]/gen/` — 早期占位，已由统一端点取代
-
-编码时应创建:
-
-- `src/app/api/generations/route.ts`（POST）
-- `src/app/api/generations/[id]/route.ts`（GET）
-- `src/app/api/sessions/route.ts`（POST）
-- `src/app/api/sessions/[id]/route.ts`（GET）
+| 旧 | 新 |
+|----|----|
+| `provider` + `model` | `targets: [{ provider, model }, ...]` |
+| 1 job | N jobs |
+| 聚合规则按单 job | 多 job 聚合见 constraints §8（部分成功 → generation `completed`） |
+| POST 内直接 provider.submit / 可能 201 completed | commit admission 后立即 `202`；worker/default phase lifecycle 再执行外部副作用 |
+| GET 推进所有 async job | GET 只在 due/lease 可 claim 时辅助推进；worker 默认运行，`JOB_WORKER_ENABLED=false` 显式关闭 |
+| 用 status 充当乐观锁 | 内部 phase + `pollLeaseUntil` CAS；物理 `next_poll_at` 是当前 phase 的 due 时间 |
 
 ---
 
 ## 自检（提交前）
 
-- submit 和 get 两条数据流完整描述，含 sync/async 分支
-- touchSession、createImage 完整字段、NormalizedRequest 显式 pick 已闭合
-- POST 201 status 含 failed；无效 sessionId → 400
-- GET sessions 触发嵌套 poll；图片访问仅 getReadStream
-- 部分转存失败与并发幂等语义已定义
+- 扇出 submit/get 数据流完整；部分失败隔离明确
+- seed / aspectRatio 校验规则与 web-ui 约定一致
+- durable `202`、idempotency、snapshot 与 phase/lease 语义闭合

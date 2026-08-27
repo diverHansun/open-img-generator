@@ -1,43 +1,208 @@
 import type {
   ImageProvider,
   NormalizedRequest,
-  ProviderCapabilities,
   ProviderImageRef,
   SubmitResult,
   PollResult,
   JobHandle,
 } from '../types';
-import { getJson, postJson, putJson, ProviderHttpError, createProviderError } from '../http-client';
-import { falCapabilities } from '../capabilities/fal';
+import {
+  createProviderError,
+  createProviderErrorFromHttpError,
+  getJson,
+  postJson,
+  ProviderHttpError,
+  putJson,
+} from '../http-client';
+import { falModelSpecs, type FalImageProfile } from '../capabilities/fal';
+import {
+  modelCapabilityMap,
+  unsupportedModelSubmitResult,
+} from '../model-spec';
+import {
+  providerEndpointUrl,
+  trustedProviderBaseUrl,
+  trustedProviderExternalId,
+  trustedSameOriginProviderUrl,
+} from '../endpoint-policy';
+import { resolveCredential } from '../../user-config';
+import {
+  classifyProviderDiagnostic,
+  readProviderRequestIdFromResponse,
+} from '../error-diagnostics';
 
-function resolveSize(req: NormalizedRequest): string {
-  if (typeof req.providerOptions?.image_size === 'string') {
-    return req.providerOptions.image_size;
-  }
-  // fal flux/schnell uses enum sizes; ignore pixel width/height and aspectRatio here.
-  return 'square_hd';
+const DEFAULT_FAL_BASE_URL = 'https://queue.fal.run';
+
+function falBaseUrl(): URL {
+  return trustedProviderBaseUrl(process.env.FAL_BASE_URL ?? DEFAULT_FAL_BASE_URL);
 }
 
-function buildRequestBody(req: NormalizedRequest): Record<string, unknown> {
+function queueUrl(model: string): string {
+  return providerEndpointUrl(falBaseUrl(), model.split('/'));
+}
+
+function falHandle(
+  payload: unknown,
+  model: string,
+): JobHandle | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const data = payload as Record<string, unknown>;
+  try {
+    const base = falBaseUrl();
+    const externalId = trustedProviderExternalId(data.request_id);
+    const statusUrl = trustedSameOriginProviderUrl(data.status_url, base.origin);
+    const responseUrl = trustedSameOriginProviderUrl(data.response_url, base.origin);
+    const cancelUrl =
+      data.cancel_url === null || data.cancel_url === undefined
+        ? null
+        : trustedSameOriginProviderUrl(data.cancel_url, base.origin);
+    return {
+      providerId: 'fal',
+      model,
+      externalId,
+      statusUrl,
+      responseUrl,
+      cancelUrl,
+      submittedAt: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function trustedFalHandleUrl(value: unknown): string {
+  return trustedSameOriginProviderUrl(value, falBaseUrl().origin);
+}
+
+type FluxImageProfile = Extract<FalImageProfile, { kind: 'flux-image-size' }>;
+type GptImageProfile = Extract<FalImageProfile, { kind: 'gpt-image-size' }>;
+type BananaImageProfile = Extract<FalImageProfile, { kind: 'banana-aspect-ratio' }>;
+
+function resolveFluxSize(req: NormalizedRequest, profile: FluxImageProfile): string {
+  if (req.aspectRatio && profile.aspectRatioSizes[req.aspectRatio]) {
+    return profile.aspectRatioSizes[req.aspectRatio];
+  }
+
+  return profile.defaultSize;
+}
+
+function buildRequestBody(
+  req: NormalizedRequest,
+  profile: FalImageProfile,
+): Record<string, unknown> {
+  if (profile.kind === 'gpt-image-size') {
+    return buildGptImageRequestBody(req, profile);
+  }
+  if (profile.kind === 'banana-aspect-ratio') {
+    return buildBananaRequestBody(req, profile);
+  }
+
   const body: Record<string, unknown> = {
     prompt: req.prompt,
   };
 
-  if (req.count && req.count > 1) {
+  if (profile.supportsCount && req.count && req.count > 1) {
     body.num_images = req.count;
   }
   if (req.seed !== undefined) {
     body.seed = req.seed;
   }
 
-  body.image_size = resolveSize(req);
+  body.image_size = resolveFluxSize(req, profile);
+
+  if (profile.supportsNegativePrompt && req.negativePrompt) {
+    body.negative_prompt = req.negativePrompt;
+  }
 
   for (const [key, value] of Object.entries(req.providerOptions ?? {})) {
-    if (key !== 'image_size') {
+    if (profile.allowedProviderOptions.includes(key)) {
       body[key] = value;
     }
   }
 
+  return body;
+}
+
+function resolveGptImageSize(req: NormalizedRequest, profile: GptImageProfile): string {
+  if (req.aspectRatio && profile.aspectRatioSizes[req.aspectRatio]) {
+    return profile.aspectRatioSizes[req.aspectRatio];
+  }
+
+  return profile.defaultSize;
+}
+
+function buildGptImageRequestBody(
+  req: NormalizedRequest,
+  profile: GptImageProfile,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    prompt: req.prompt,
+    image_size: resolveGptImageSize(req, profile),
+    num_images: profile.maxCount > 1 ? req.count ?? 1 : 1,
+    quality: profile.defaultQuality,
+    output_format: 'png',
+  };
+
+  if (profile.defaultBackground) body.background = profile.defaultBackground;
+
+  const requestedQuality = req.providerOptions?.quality;
+  if (
+    typeof requestedQuality === 'string' &&
+    profile.qualityValues.includes(requestedQuality)
+  ) {
+    body.quality = requestedQuality;
+  }
+
+  const requestedBackground = req.providerOptions?.background;
+  if (
+    profile.backgroundValues &&
+    typeof requestedBackground === 'string' &&
+    profile.backgroundValues.includes(requestedBackground)
+  ) {
+    body.background = requestedBackground;
+  }
+
+  const requestedOutputFormat = req.providerOptions?.output_format;
+  if (
+    requestedOutputFormat === 'jpeg' ||
+    requestedOutputFormat === 'png' ||
+    requestedOutputFormat === 'webp'
+  ) {
+    body.output_format = requestedOutputFormat;
+  }
+
+  return body;
+}
+
+function buildBananaRequestBody(
+  req: NormalizedRequest,
+  profile: BananaImageProfile,
+): Record<string, unknown> {
+  const requestedResolution = req.providerOptions?.resolution;
+  const outputFormat = req.providerOptions?.output_format;
+  const safetyTolerance = req.providerOptions?.safety_tolerance;
+  const body: Record<string, unknown> = {
+    prompt: req.prompt,
+    num_images: req.count ?? 1,
+    aspect_ratio: req.aspectRatio ?? profile.defaultAspectRatio,
+    output_format:
+      outputFormat === 'jpeg' || outputFormat === 'webp' ? outputFormat : 'png',
+    limit_generations: true,
+  };
+  if (profile.defaultResolution) {
+    body.resolution =
+      typeof requestedResolution === 'string' &&
+      profile.supportedResolutions.includes(requestedResolution)
+        ? requestedResolution
+        : profile.defaultResolution;
+  }
+  if (req.seed !== undefined) body.seed = req.seed;
+  if (
+    typeof safetyTolerance === 'string' &&
+    profile.safetyToleranceValues.includes(safetyTolerance)
+  ) {
+    body.safety_tolerance = safetyTolerance;
+  }
   return body;
 }
 
@@ -58,6 +223,7 @@ function parseImages(payload: unknown): ProviderImageRef[] {
           ? img.contentType
           : 'image/png';
     return {
+      source: 'remote' as const,
       url: String(img.url ?? ''),
       width,
       height,
@@ -67,15 +233,29 @@ function parseImages(payload: unknown): ProviderImageRef[] {
   });
 }
 
+function falErrorType(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const root = payload as Record<string, unknown>;
+  if (typeof root.error_type === 'string') return root.error_type;
+  const detail = root.detail;
+  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
+    return (detail as Record<string, unknown>).type;
+  }
+  if (Array.isArray(detail) && detail[0] && typeof detail[0] === 'object') {
+    return (detail[0] as Record<string, unknown>).type;
+  }
+  return undefined;
+}
+
 export class FalProvider implements ImageProvider {
   id = 'fal' as const;
   displayName = 'fal.ai';
-  capabilities = new Map<string, ProviderCapabilities>(
-    falCapabilities.map((c) => [c.model, c]),
-  );
+  capabilities = modelCapabilityMap(falModelSpecs);
 
   private get apiKey(): string | undefined {
-    return process.env.FAL_KEY;
+    return resolveCredential('FAL_KEY');
   }
 
   private authHeaders(): Record<string, string> {
@@ -84,23 +264,24 @@ export class FalProvider implements ImageProvider {
   }
 
   async submit(req: NormalizedRequest, model: string): Promise<SubmitResult> {
-    const url = `https://queue.fal.run/${model}`;
-    try {
-      const body = buildRequestBody(req);
-      const data = (await postJson(url, body, this.authHeaders())) as Record<
-        string,
-        string
-      >;
+    const spec = falModelSpecs.get(model);
+    if (!spec) return unsupportedModelSubmitResult(this.id);
 
-      const handle: JobHandle = {
-        providerId: 'fal',
-        model,
-        externalId: data.request_id,
-        statusUrl: data.status_url,
-        responseUrl: data.response_url,
-        cancelUrl: data.cancel_url ?? null,
-        submittedAt: new Date().toISOString(),
-      };
+    try {
+      const body = buildRequestBody(req, spec.profile);
+      const data = await postJson(queueUrl(model), body, this.authHeaders());
+      const handle = falHandle(data, model);
+      if (!handle) {
+        return {
+          kind: 'failed',
+          error: createProviderError(
+            500,
+            'Fal returned an invalid task reference',
+            false,
+            { disposition: 'unknown' },
+          ),
+        };
+      }
 
       return { kind: 'async', handle };
     } catch (err) {
@@ -109,9 +290,20 @@ export class FalProvider implements ImageProvider {
   }
 
   async poll(handle: JobHandle): Promise<PollResult> {
+    let statusUrl: string;
+    let responseUrl: string;
+    try {
+      statusUrl = trustedFalHandleUrl(handle.statusUrl);
+      responseUrl = trustedFalHandleUrl(handle.responseUrl);
+    } catch {
+      return {
+        status: 'failed',
+        error: createProviderError(400, 'Fal task endpoint is invalid', false),
+      };
+    }
     try {
       const statusData = (await getJson(
-        handle.statusUrl,
+        statusUrl,
         this.authHeaders(),
         15_000,
       )) as Record<string, unknown>;
@@ -119,6 +311,19 @@ export class FalProvider implements ImageProvider {
 
       if (status === 'IN_QUEUE') return { status: 'pending' };
       if (status === 'IN_PROGRESS') return { status: 'running' };
+      if (status === 'FAILED') {
+        return {
+          status: 'failed',
+          error: createProviderError(422, 'Fal task failed', false, {
+            diagnostic: classifyProviderDiagnostic('fal', {
+              httpStatus: 422,
+              providerCode: falErrorType(statusData),
+              providerRequestId: readProviderRequestIdFromResponse(statusData),
+              upstreamRejected: true,
+            }),
+          }),
+        };
+      }
       if (status !== 'COMPLETED') {
         return {
           status: 'failed',
@@ -126,12 +331,17 @@ export class FalProvider implements ImageProvider {
             500,
             `Unexpected fal status: ${status}`,
             false,
+            {
+              diagnostic: classifyProviderDiagnostic('fal', {
+                httpStatus: 500,
+              }),
+            },
           ),
         };
       }
 
       const responseData = (await getJson(
-        handle.responseUrl,
+        responseUrl,
         this.authHeaders(),
         15_000,
       )) as Record<string, unknown>;
@@ -139,7 +349,9 @@ export class FalProvider implements ImageProvider {
       if (images.length === 0) {
         return {
           status: 'failed',
-          error: createProviderError(500, 'No images in fal response', false),
+          error: createProviderError(500, 'No images in fal response', false, {
+            diagnostic: classifyProviderDiagnostic('fal', { noResult: true }),
+          }),
         };
       }
       return { status: 'completed', images };
@@ -156,8 +368,17 @@ export class FalProvider implements ImageProvider {
       };
     }
 
+    let cancelUrl: string;
     try {
-      await putJson(handle.cancelUrl, this.authHeaders(), 15_000);
+      cancelUrl = trustedFalHandleUrl(handle.cancelUrl);
+    } catch {
+      return {
+        status: 'failed',
+        error: createProviderError(400, 'Fal cancel endpoint is invalid', false),
+      };
+    }
+    try {
+      await putJson(cancelUrl, this.authHeaders());
       return { status: 'cancelled' };
     } catch (err) {
       return { status: 'failed', error: this.mapError(err) };
@@ -170,11 +391,30 @@ export class FalProvider implements ImageProvider {
         typeof err.body === 'object' && err.body && 'detail' in err.body
           ? String((err.body as Record<string, unknown>).detail)
           : err.message;
-      return createProviderError(err.status, message, err.status === 429);
+      const retryableHeader = err.getHeader('x-fal-retryable')?.toLowerCase();
+      return createProviderErrorFromHttpError(err, message, {
+        ...(retryableHeader === 'true' || retryableHeader === 'false'
+          ? { retryable: retryableHeader === 'true' }
+          : {}),
+        diagnostic: classifyProviderDiagnostic('fal', {
+          httpStatus: err.status,
+          providerCode: falErrorType(err.body) ?? err.getHeader('x-fal-error-type'),
+          providerRequestId: readProviderRequestIdFromResponse(err.body, [
+            err.getHeader('x-fal-request-id'),
+            err.getHeader('x-request-id'),
+          ]),
+          transportTimeout: err.status === 0 && err.retryable,
+        }),
+      });
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return createProviderError(0, err.message, true);
+      return createProviderError(0, err.message, true, {
+        disposition: 'unknown',
+        diagnostic: classifyProviderDiagnostic('fal', { transportTimeout: true }),
+      });
     }
-    return createProviderError(0, err instanceof Error ? err.message : String(err), false);
+    return createProviderError(0, err instanceof Error ? err.message : String(err), false, {
+      diagnostic: classifyProviderDiagnostic('fal'),
+    });
   }
 }

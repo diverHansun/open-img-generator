@@ -15,6 +15,7 @@ const now = '2026-07-12T10:00:00.000Z';
 function makeSessionParams(overrides: { id?: string; title?: string } = {}) {
   return {
     id: overrides.id ?? 'session-1',
+    projectId: 'default-project',
     title: overrides.title ?? 'Demo Session',
     createdAt: now,
     updatedAt: now,

@@ -14,7 +14,7 @@
 |------|------|----------|
 | 上游调用方 | job-engine | 传入 NormalizedRequest，接收 SubmitResult / PollResult |
 | 上游调用方 | API 层（经 job-engine 或直接） | 通过 registry 获取 ProviderInfo 列表 |
-| 下游依赖 | 外部厂商 API | fal.ai queue API、ZenMux OpenAI Images API |
+| 下游依赖 | 外部厂商 API | fal.ai queue API、ZenMux、SiliconFlow、智谱、火山方舟 Ark、阿里云 DashScope 图片生成 API |
 | 平级模块 | prompt | job-engine 在调用 providers 前先经 prompt 模块处理 prompt；providers 不直接依赖 prompt |
 
 ### 本文档范围
@@ -36,39 +36,47 @@ API 层
   → registry.listEnabled()
     → 遍历注册的 provider id
     → 检查对应 env key 是否存在
-    → 存在: 读取 capabilities 静态表，组装 ProviderInfo
+    → 存在: 从 Provider 私有 ModelSpec 投影 capabilities，组装 ProviderInfo
     → 不存在: 跳过（静默，不报错）
   → 返回 ProviderInfo[] 给 API 层
 ```
 
-### 2.2 Sync 路径（zenmux / openai/gpt-image-2）
+### 2.2 Sync 路径（zenmux / siliconflow / zhipu / doubao / qwen multimodal-sync / wan2.7-image）
 
 ```
 job-engine
   → 构造 NormalizedRequest（prompt 已由 prompt 模块处理）
-  → registry.getById("zenmux")
-  → provider.submit(req, "openai/gpt-image-2")
+  → registry.getById("zenmux" / "siliconflow" / "zhipu" / "doubao" / "qwen")
+  → provider.submit(req, model)
+    → adapter 在本 Provider ModelSpec 中查找 model；未知模型以 not_started 失败
     → zenmux adapter: NormalizedRequest 翻译为 OpenAI Images API 请求体
       - prompt → prompt
-      - width/height/aspectRatio → size（如 "1024x1024"）
+      - width+height 优先，否则 aspectRatio 经映射表 → size（如 "1:1"→"1024x1024"）
       - count → n
     → http-client: POST https://zenmux.ai/api/v1/images/generations
     → zenmux adapter: 解析响应 data[].url → ProviderImageRef[]
+    → qwen adapter:
+      - Qwen Image 3/2 与 Wan 标准版使用单轮 text content
+      - Qwen sync / Wan standard sync 均解析 output.choices[].message.content[].image
+      - Wan Pro 不进入此路径，继续走下方 async submit/poll
+    → http-client: POST DashScope multimodal-generation/generation
   → 返回 SubmitResult { kind: "sync", images: [...] }
 → job-engine 拿到 images[].url，交给 storage 下载转存
 ```
 
-### 2.3 Async 路径 — Submit（fal / fal-ai/flux/schnell）
+SiliconFlow、智谱与 Doubao 的差异只存在于 adapter 内部：分别解析 `images[].url`、`data[].url` 与 Ark `data[].b64_json`/URL fallback；Doubao 额外支持 `image[]` 参考图。providers 不负责最终持久化，内联图片先交由 job-engine/storage 暂存，远程 URL 则立即下载。
+
+### 2.3 Async 路径 — Submit（fal / Wan Pro / kling）
 
 ```
 job-engine
   → 构造 NormalizedRequest
-  → registry.getById("fal")
-  → provider.submit(req, "fal-ai/flux/schnell")
+  → registry.getById("fal" / "qwen")
+  → provider.submit(req, model)
     → fal adapter: NormalizedRequest 翻译为 fal queue 请求体
       - prompt → prompt
-      - width/height → image_size
-      - seed → seed
+      - width+height 若可推导则用之；否则 aspectRatio 经映射表 → image_size（如 "1:1"→"square_hd"）
+      - seed → seed（若有）
       - count → num_images
     → http-client: POST https://queue.fal.run/fal-ai/flux/schnell
     → fal adapter: 解析响应 request_id / status_url / response_url / cancel_url
@@ -78,35 +86,38 @@ job-engine
 → generation 状态置为 pending
 ```
 
-### 2.4 Async 路径 — Poll（fal，惰性推进）
+Wan Pro 的 DashScope HTTP 请求需要 `X-DashScope-Async: enable`，submit 响应返回 `task_id`；Qwen adapter 将 `/api/v1/tasks/:taskId` 保存为 status/response URL。Qwen 3、Qwen 2 与标准 Wan 2.7 走同步 multimodal endpoint，不进入本流程。Kling 使用独立 base URL 与 `/v1/images/generations/:taskId`，submit 返回 `data.task_id`，后续由详情 GET 或后台 worker 的惰性推进触发 poll。
+
+### 2.4 Async 路径 — Poll（fal / Wan Pro / kling，惰性推进）
 
 ```
 job-engine（在 GET /api/generations/:id 时触发）
   → 从 generation_jobs 读取 provider_handle
-  → registry.getById("fal")
+    → registry.getById("fal" / "qwen" / "kling")
   → provider.poll(handle)
-    → fal adapter: GET handle.statusUrl
+    → fal / Wan Pro adapter: GET handle.statusUrl
     → 解析状态:
       - IN_QUEUE → PollResult { status: "pending" }
       - IN_PROGRESS → PollResult { status: "running" }
       - COMPLETED → GET handle.responseUrl → 解析 images → PollResult { status: "completed", images }
+      - Wan CANCELED / Kling canceled → PollResult { status: "cancelled" }
       - 错误 → PollResult { status: "failed", error }
   → 返回 PollResult 给 job-engine
 → job-engine 根据 status 更新 generation_jobs 状态
 → 若 completed: 将 images[].url 交给 storage 下载转存
 ```
 
-### 2.5 Async 路径 — Cancel（MVP 预留，API 不暴露）
+### 2.5 Async 路径 — Cancel（job-engine API）
 
 ```
 job-engine（后续前端"取消"功能时）
-  → provider.cancel(handle)
-    → fal adapter: PUT handle.cancelUrl
-  → 返回成功/失败
+  → job-engine 先写 cancel_requested_at，停止后续 poll
+  → provider.cancel(handle)（仅 provider 声明时调用；fal 支持）
+  → Kling/Wan 无远程端点时保留 CANCEL_UNSUPPORTED 诊断
 → job-engine 更新 generation_jobs 状态为 cancelled
 ```
 
-MVP 不实现取消 API 端点，但 fal adapter 实现 cancel 方法，接口契约预留。
+API 路由为 `POST /api/generations/:id/cancel`；取消与 submit/poll 竞争时，CAS/取消标记阻止晚到响应恢复任务。
 
 ### 2.6 失败路径（通用）
 
@@ -138,16 +149,16 @@ MVP 不实现取消 API 端点，但 fal adapter 实现 cancel 方法，接口�
 | 输入 | provider id |
 | 输出 | `ImageProvider` 实例 |
 | 同步/异步 | 同步 |
-| 失败 | 抛出 `ProviderNotEnabledError`（该 id 无 env key 或 adapter 未实现） |
+| 失败 | 返回 `undefined`（该 id 无 env key 或 adapter 未实现） |
 
 ### 3.3 ImageProvider.submit(req, model)
 
 | 属性 | 值 |
 |------|-----|
 | 输入 | `NormalizedRequest` + model id 字符串 |
-| 输出 | `SubmitResult` |
-| 同步/异步 | 同步（函数本身同步返回；async 厂商返回的 SubmitResult.kind 为 "async"） |
-| 超时 | adapter 内通过 http-client 设置（建议 30s submit 超时） |
+| 输出 | `Promise<SubmitResult>` |
+| 同步/异步 | 异步函数；async 厂商返回的 SubmitResult.kind 为 "async"，sync 厂商返回 "sync" |
+| 超时 | sync（ZenMux、SiliconFlow、智谱、Doubao、Qwen、Wan 标准版）通过共享 `SYNC_IMAGE_GENERATION_TIMEOUT_MS` 使用默认/最大 180s；async task submit 继续为 30s |
 | 副作用 | 向外部厂商发起 HTTP 请求 |
 
 ### 3.4 ImageProvider.poll(handle)（仅 async provider）
@@ -156,7 +167,7 @@ MVP 不实现取消 API 端点，但 fal adapter 实现 cancel 方法，接口�
 |------|-----|
 | 输入 | `JobHandle` |
 | 输出 | `PollResult` |
-| 同步/异步 | 同步 |
+| 同步/异步 | 异步函数（返回 Promise） |
 | 超时 | 建议 15s poll 超时 |
 | 副作用 | 向外部厂商发起 1-2 次 HTTP 请求（status + 可能的 response） |
 
@@ -165,8 +176,8 @@ MVP 不实现取消 API 端点，但 fal adapter 实现 cancel 方法，接口�
 | 属性 | 值 |
 |------|-----|
 | 输入 | `JobHandle` |
-| 输出 | `void`（成功）或抛出 `ProviderError` |
-| 同步/异步 | 同步 |
+| 输出 | `Promise<PollResult>`（成功为 `status="cancelled"`，失败为 `status="failed"`） |
+| 同步/异步 | 异步函数 |
 | MVP | 实现但不暴露 API |
 
 ### 3.6 ImageProvider.id 与 ImageProvider.capabilities
@@ -174,7 +185,9 @@ MVP 不实现取消 API 端点，但 fal adapter 实现 cancel 方法，接口�
 | 属性 | 值 |
 |------|-----|
 | id | `ProviderId` 只读属性 |
-| capabilities | `(model: string) => ProviderCapabilities | null` |
+| capabilities | `Map<string, ProviderCapabilities>`，按 model id 查询 |
+
+ModelSpec/profile 是 providers 内部实现，不进入该公开接口、HTTP DTO、数据库或 job snapshot。
 
 ---
 
@@ -184,7 +197,7 @@ MVP 不实现取消 API 端点，但 fal adapter 实现 cancel 方法，接口�
 |------|------|------|------|----------|
 | NormalizedRequest | job-engine | 不可变 | 调用结束 | job-engine 创建，providers 只读 |
 | SubmitResult / PollResult | providers (adapter) | 不可变 | 返回后 | providers 创建，job-engine 消费 |
-| JobHandle | providers (fal adapter) | 不可变（句柄本身不变） | job-engine 在任务终结后随 job 记录归档 | providers 创建，job-engine 持久化 |
+| JobHandle | providers (fal / qwen adapter) | 不可变（句柄本身不变） | job-engine 在任务终结后随 job 记录归档 | providers 创建，job-engine 持久化 |
 | ProviderImageRef | providers (adapter) | 不可变 | 厂商 URL 过期 | providers 创建，job-engine 须在过期前交给 storage |
 | ProviderError | providers (adapter) | 不可变 | 返回后 | providers 创建，job-engine 记录到 job |
 | ProviderInfo / Capabilities | providers (静态配置) | 随代码部署 | - | providers 拥有 |

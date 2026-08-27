@@ -6,7 +6,7 @@
 SiliconFlow 是一个聚合多家开源/商业 AI 模型的云服务平台，对外暴露 **OpenAI 兼容** 的 API。核心特点：
 
 1. **API 协议主要是 OpenAI 兼容**（`/v1/chat/completions`、`/v1/images/generations` 等），接入心智负担小。
-2. **聚合大量开源 + 部分商业模型**（FLUX、Stable Diffusion、Kolors、qwen、wan、z-image、Kolors 等）。
+2. **聚合大量开源 + 部分商业模型**（FLUX、Stable Diffusion、Qwen、Wan、Z-Image、ERNIE-Image 等）。
 3. **价格相对低**（官方宣称图像模型相对其他云"省 66%"，需自行核对）。
 4. **同时按 token 与按张计费**：部分图模型按 **token** 计费（这点比较反常，业务层估算需注意）。
 
@@ -61,7 +61,7 @@ API Key 在 [cloud.siliconflow.cn](https://cloud.siliconflow.cn) 控制台创建
 
 ## 与本项目（AI 绘图网站）的对应关系
 
-- **SiliconFlow 是本项目的两大主力 provider 之一**，承担"初级档"主力模型（FLUX schnell、Kolors、qwen-image、z-image-turbo 等）。
+- **SiliconFlow 是本项目的两大主力 provider 之一**，承担"初级档"主力模型（FLUX schnell、Qwen-Image、Z-Image、ERNIE-Image-Turbo 等）。
 - 在 `packages/providers/siliconflow/` 中实现 `SiliconFlowProvider implements ImageProvider`。
 - 协议与 OpenAI 一致，可考虑用 `openai` npm 包传入自定义 `baseURL` 与 `apiKey`（不引入新 SDK）。
 

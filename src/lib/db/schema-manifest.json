@@ -1,0 +1,141 @@
+{
+  "version": 6,
+  "tables": {
+    "projects": ["id", "title", "created_at", "updated_at"],
+    "sessions": ["id", "project_id", "title", "created_at", "updated_at"],
+    "generations": [
+      "id",
+      "session_id",
+      "prompt",
+      "status",
+      "media_kind",
+      "client_request_id",
+      "request_hash",
+      "created_at",
+      "updated_at"
+    ],
+    "generation_jobs": [
+      "id",
+      "generation_id",
+      "provider",
+      "model",
+      "status",
+      "provider_handle",
+      "error",
+      "phase",
+      "request_snapshot",
+      "request_snapshot_version",
+      "result_snapshot",
+      "attempt_count",
+      "retry_started_at",
+      "poll_lease_until",
+      "next_poll_at",
+      "cancel_requested_at",
+      "created_at",
+      "updated_at"
+    ],
+    "images": [
+      "id",
+      "generation_job_id",
+      "index",
+      "source_kind",
+      "storage_path",
+      "remote_url",
+      "remote_expires_at",
+      "content_type",
+      "width",
+      "height",
+      "size_bytes",
+      "created_at",
+      "removed_at",
+      "removal_reason"
+    ],
+    "videos": [
+      "id", "generation_job_id", "index", "storage_path", "content_type",
+      "width", "height", "duration_seconds", "size_bytes", "created_at",
+      "removed_at", "removal_reason"
+    ],
+    "favorites": ["id", "image_id", "created_at"],
+    "model_preferences": ["provider", "model", "enabled", "updated_at"]
+  },
+  "indexes": [
+    {
+      "name": "projects_updated_at_idx",
+      "table": "projects",
+      "columns": ["updated_at"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "sessions_project_updated_at_idx",
+      "table": "sessions",
+      "columns": ["project_id", "updated_at"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "generations_session_created_at_idx",
+      "table": "generations",
+      "columns": ["session_id", "created_at"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "generations_created_at_idx",
+      "table": "generations",
+      "columns": ["created_at"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "generations_client_request_id_unique",
+      "table": "generations",
+      "columns": ["client_request_id"],
+      "unique": true,
+      "partial": true,
+      "where": "client_request_id IS NOT NULL"
+    },
+    {
+      "name": "generation_jobs_generation_idx",
+      "table": "generation_jobs",
+      "columns": ["generation_id"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "generation_jobs_due_idx",
+      "table": "generation_jobs",
+      "columns": ["phase", "next_poll_at", "poll_lease_until", "updated_at", "id"],
+      "unique": false,
+      "partial": false
+    },
+    {
+      "name": "unique_job_index",
+      "table": "images",
+      "columns": ["generation_job_id", "index"],
+      "unique": true,
+      "partial": false
+    },
+    {
+      "name": "favorites_image_unique",
+      "table": "favorites",
+      "columns": ["image_id"],
+      "unique": true,
+      "partial": false
+    },
+    {
+      "name": "unique_video_job_index",
+      "table": "videos",
+      "columns": ["generation_job_id", "index"],
+      "unique": true,
+      "partial": false
+    },
+    {
+      "name": "favorites_created_at_idx",
+      "table": "favorites",
+      "columns": ["created_at"],
+      "unique": false,
+      "partial": false
+    }
+  ]
+}

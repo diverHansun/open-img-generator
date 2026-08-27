@@ -1,0 +1,156 @@
+.page {
+  width: 100%;
+}
+
+.loading {
+  color: var(--color-ink-muted);
+}
+
+.sections {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+  padding: clamp(1rem, 2vw, 1.5rem);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.section h2,
+.section p {
+  margin: 0;
+}
+
+.section h2 {
+  font-size: 1rem;
+}
+
+.section p {
+  max-width: 48rem;
+  color: var(--color-ink-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.sectionHeading > strong {
+  flex: 0 0 auto;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.eyebrow {
+  margin-bottom: var(--space-1) !important;
+  color: var(--color-ink-faint) !important;
+  font-size: 0.6875rem !important;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.retentionControl {
+  display: grid;
+  max-width: 28rem;
+  gap: var(--space-2);
+}
+
+.retentionControl > label {
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.retentionControl > p,
+.never,
+.muted {
+  font-size: 0.75rem !important;
+}
+
+.numberInput {
+  display: grid;
+  grid-template-columns: minmax(7rem, 10rem) auto;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.numberInput span {
+  color: var(--color-ink-muted);
+  font-size: 0.8125rem;
+}
+
+.sectionActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.saved {
+  color: var(--color-success);
+  font-size: 0.8125rem;
+}
+
+.pathValue {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--color-ink-muted);
+  font-size: 0.75rem;
+}
+
+.storageGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.storageGrid > div {
+  display: grid;
+  gap: 0.25rem;
+  padding: var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.storageGrid dt {
+  color: var(--color-ink-muted);
+  font-size: 0.6875rem;
+}
+
+.storageGrid dd {
+  margin: 0;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.licenseLink {
+  width: fit-content;
+  color: var(--color-accent-text);
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+@media (max-width: 720px) {
+  .storageGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 440px) {
+  .sectionHeading {
+    display: grid;
+  }
+
+  .storageGrid {
+    grid-template-columns: 1fr;
+  }
+}

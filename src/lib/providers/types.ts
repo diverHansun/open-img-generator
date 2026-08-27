@@ -1,13 +1,19 @@
+import type { ProviderDiagnostic } from './error-diagnostics';
+
+export type { ProviderDiagnostic, ProviderDiagnosticCategory } from './error-diagnostics';
+
+/** Long enough to respect provider back-pressure without persisting raw headers. */
+export const MAX_PROVIDER_RETRY_AFTER_MS = 15 * 60_000;
+
 export type ProviderId =
   | 'fal'
   | 'zenmux'
   | 'siliconflow'
   | 'zhipu'
   | 'doubao'
-  | 'qwen'
-  | 'kling';
+  | 'qwen';
 
-export type ProviderMode = 'text-to-image' | 'image-to-image';
+export type ProviderMode = 'text-to-image' | 'image-to-image' | 'text-to-video';
 
 export type NormalizedRequest = {
   prompt: string;
@@ -23,12 +29,22 @@ export type NormalizedRequest = {
 };
 
 export type ProviderImageRef = {
+  source?: 'inline' | 'remote';
   url: string;
   width: number | null;
   height: number | null;
   contentType: string;
   index: number;
   revisedPrompt?: string;
+};
+
+export type ProviderVideoRef = {
+  url: string;
+  width: number | null;
+  height: number | null;
+  contentType: 'video/mp4';
+  index: number;
+  durationSeconds: number | null;
 };
 
 export type JobHandle = {
@@ -50,11 +66,31 @@ export type ProviderErrorCode =
   | 'TIMEOUT'
   | 'UNKNOWN';
 
+/**
+ * Whether a provider submit can be safely attempted again.
+ *
+ * This is intentionally separate from `retryable`: a request that may be
+ * transiently failing can still have reached a billable provider endpoint.
+ */
+export type ProviderRequestDisposition =
+  | 'not_started'
+  | 'rejected'
+  | 'unknown';
+
 export type ProviderError = {
   code: ProviderErrorCode;
   message: string;
   retryable: boolean;
   httpStatus?: number;
+  disposition?: ProviderRequestDisposition;
+  /** A bounded, parsed provider Retry-After value. It is never persisted raw. */
+  retryAfterMs?: number;
+  /**
+   * Allowlisted provider metadata for safe support diagnostics. Raw upstream
+   * messages, response bodies, prompt fragments, URLs, and credentials are
+   * intentionally excluded from this shape.
+   */
+  diagnostic?: ProviderDiagnostic;
 };
 
 export type SubmitResult =
@@ -65,7 +101,7 @@ export type SubmitResult =
 export type PollResult =
   | { status: 'pending' }
   | { status: 'running' }
-  | { status: 'completed'; images: ProviderImageRef[] }
+  | { status: 'completed'; images: ProviderImageRef[]; videos?: ProviderVideoRef[] }
   | { status: 'failed'; error: ProviderError }
   | { status: 'cancelled' };
 
@@ -81,6 +117,7 @@ export type ProviderCapabilities = {
   supportsSeed: boolean;
   protocol: 'sync' | 'async';
   defaultSize: string;
+  mediaKind?: 'image' | 'video';
 };
 
 export type ProviderInfo = {
