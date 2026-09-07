@@ -13,7 +13,11 @@ import {
 import { reconcileGenerationSnapshot } from '@/components/generation/generation-view-state';
 import { GenerationStatus } from '@/components/generation/generation-status';
 import { useLocale } from '@/components/i18n/locale-provider';
-import { useWorkspaceNotices } from '@/components/shell/workspace-notices';
+import {
+  favoriteErrorNotice,
+  favoriteSuccessNotice,
+  useWorkspaceNotices,
+} from '@/components/shell/workspace-notices';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -43,7 +47,6 @@ export type GenerationFavoriteChange = {
 type FavoriteMutation = {
   value: boolean;
   pending: boolean;
-  error: string | null;
 };
 
 function patchFavorite(
@@ -120,6 +123,16 @@ export function GenerationDetailDialog({
   const backButtonRef = React.useRef<HTMLButtonElement | null>(null);
   const resultTriggersRef = React.useRef(new Map<string, HTMLButtonElement>());
   const returnImageIdRef = React.useRef<string | null>(null);
+  const mountedRef = React.useRef(false);
+  const openRef = React.useRef(open);
+  openRef.current = open;
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -171,39 +184,46 @@ export function GenerationDetailDialog({
     async (imageId: string, next: boolean) => {
       setFavoriteMutations((current) => ({
         ...current,
-        [imageId]: { value: next, pending: true, error: null },
+        [imageId]: { value: next, pending: true },
       }));
       try {
         const galleryItem = next
           ? await client.addFavoriteWithBrowserFallback(imageId)
           : undefined;
         if (!next) await client.removeFavorite(imageId);
+        if (!mountedRef.current || !openRef.current) return;
         setView((current) =>
           current ? patchFavorite(current, imageId, next) : current,
         );
         setFavoriteMutations((current) => ({
           ...current,
-          [imageId]: { value: next, pending: false, error: null },
+          [imageId]: { value: next, pending: false },
         }));
         onFavoriteChange?.({
           imageId,
           favorited: next,
           galleryItem,
         });
+        showWorkspaceNotice(
+          favoriteSuccessNotice(
+            t(next ? 'dialogs.favoriteAdded' : 'dialogs.favoriteRemoved'),
+          ),
+        );
       } catch {
+        if (!mountedRef.current || !openRef.current) return;
         setFavoriteMutations((current) => ({
           ...current,
           [imageId]: {
             value: !next,
             pending: false,
-            error: t('dialogs.favoriteError'),
           },
         }));
-        showWorkspaceNotice({
-          variant: 'error',
-          title: t('dialogs.favoriteError'),
-          detail: next ? t('dialogs.favoriteStorageError') : undefined,
-        });
+        showWorkspaceNotice(
+          favoriteErrorNotice(
+            t('dialogs.favoriteError'),
+            next ? t('dialogs.favoriteStorageError') : undefined,
+          ),
+        );
       }
     },
     [client, onFavoriteChange, showWorkspaceNotice, t],
@@ -284,11 +304,6 @@ export function GenerationDetailDialog({
               onChange={(next) => void updateFavorite(selectedImage.id, next)}
               className={styles.singleFavorite}
             />
-            {favoriteMutations[selectedImage.id]?.error ? (
-              <p className={styles.imageFavoriteError} role="alert">
-                {favoriteMutations[selectedImage.id]?.error}
-              </p>
-            ) : null}
           </section>
         ) : view ? (
           <div className={styles.detailView}>
@@ -442,11 +457,6 @@ export function GenerationDetailDialog({
                           onChange={(next) => void updateFavorite(image.id, next)}
                           className={styles.resultFavorite}
                         />
-                        {mutation?.error ? (
-                          <span className={styles.resultError} role="alert">
-                            {mutation.error}
-                          </span>
-                        ) : null}
                       </article>
                     );
                   })}

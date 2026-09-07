@@ -121,6 +121,35 @@
   border-radius: var(--radius-md);
   background: var(--color-surface);
   box-shadow: var(--shadow-lg);
+  animation: workspace-notice-life 3s var(--ease-standard) both;
+}
+
+@keyframes workspace-notice-life {
+  0% {
+    opacity: 0;
+    transform: translateY(-0.75rem);
+  }
+
+  12% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  82% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-0.5rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .noticeCard {
+    animation: none;
+  }
 }
 
 .mobileHeader {

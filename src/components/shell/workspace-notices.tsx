@@ -31,6 +31,21 @@ export function dismissWorkspaceNotice(
 
 export type WorkspaceNoticeInput = Omit<WorkspaceNotice, 'id'>;
 
+export function favoriteSuccessNotice(title: string): WorkspaceNoticeInput {
+  return { variant: 'success', title };
+}
+
+export function favoriteErrorNotice(
+  title: string,
+  detail?: string,
+): WorkspaceNoticeInput {
+  return {
+    variant: 'error',
+    title,
+    ...(detail ? { detail } : {}),
+  };
+}
+
 export type WorkspaceNoticeContextValue = Readonly<{
   showWorkspaceNotice: (notice: WorkspaceNoticeInput) => void;
 }>;

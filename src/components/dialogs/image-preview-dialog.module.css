@@ -152,12 +152,6 @@
   overflow-wrap: anywhere;
 }
 
-.inlineError {
-  margin-top: var(--space-4);
-  color: var(--color-danger);
-  font-size: 0.8125rem;
-}
-
 .viewGeneration {
   width: 100%;
   margin-top: auto;

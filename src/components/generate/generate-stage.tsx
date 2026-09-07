@@ -14,7 +14,11 @@ import {
 } from '@/components/generation/job-error';
 import { reconcileGenerationSnapshot } from '@/components/generation/generation-view-state';
 import { useLocale } from '@/components/i18n/locale-provider';
-import { useWorkspaceNotices } from '@/components/shell/workspace-notices';
+import {
+  favoriteErrorNotice,
+  favoriteSuccessNotice,
+  useWorkspaceNotices,
+} from '@/components/shell/workspace-notices';
 import { Button } from '@/components/ui/button';
 import { accessibleExcerpt } from '@/lib/a11y';
 import { workspaceRoute } from '@/lib/routes';
@@ -110,7 +114,6 @@ export function GenerateStage({
   const [favoriteBusy, setFavoriteBusy] = React.useState<Set<string>>(
     () => new Set(),
   );
-  const [favoriteError, setFavoriteError] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [selectedImageId, setSelectedImageId] = React.useState<string | null>(null);
@@ -230,12 +233,18 @@ export function GenerateStage({
       const optimistic = patchFavorite(current, imageId, nextFavorited);
       favoriteOverrides.current.set(imageId, nextFavorited);
       favoritePendingRef.current.add(imageId);
-      setFavoriteError(false);
       setFavoriteBusy((current) => new Set(current).add(imageId));
       commitView(optimistic);
       try {
         if (nextFavorited) await runtime.client.addFavoriteWithBrowserFallback(imageId);
         else await runtime.client.removeFavorite(imageId);
+        if (mounted.current) {
+          showWorkspaceNotice(
+            favoriteSuccessNotice(
+              t(nextFavorited ? 'generate.favoriteAdded' : 'generate.favoriteRemoved'),
+            ),
+          );
+        }
       } catch {
         if (hadPreviousOverride && previousOverride !== undefined) {
           favoriteOverrides.current.set(imageId, previousOverride);
@@ -246,14 +255,12 @@ export function GenerateStage({
           commitView(
             patchFavorite(viewRef.current, imageId, previousFavorited),
           );
-          setFavoriteError(true);
-          showWorkspaceNotice({
-            variant: 'error',
-            title: t('generate.favoriteError'),
-            detail: nextFavorited
-              ? t('generate.favoriteStorageError')
-              : undefined,
-          });
+          showWorkspaceNotice(
+            favoriteErrorNotice(
+              t('generate.favoriteError'),
+              nextFavorited ? t('generate.favoriteStorageError') : undefined,
+            ),
+          );
         }
       } finally {
         favoritePendingRef.current.delete(imageId);
@@ -411,12 +418,6 @@ export function GenerateStage({
               ) : null}
             </div>
           ) : null}
-          {favoriteError ? (
-            <p className={styles.inlineError} role="alert">
-              {t('generate.favoriteError')}
-            </p>
-          ) : null}
-
           <div
             className={styles.imageStage}
             data-count={Math.min(view.images.length + runningJobs.length, 5)}
@@ -542,9 +543,6 @@ export function GenerateStage({
               model={selectedJob?.model}
               favorited={selectedAvailableImage.favorited}
               favoritePending={favoriteBusy.has(selectedAvailableImage.id)}
-              favoriteError={
-                favoriteError ? t('generate.favoriteError') : null
-              }
               downloadUrl={`/api/images/${encodeURIComponent(selectedAvailableImage.id)}/download`}
               deletePending={deleteBusy}
               deleteError={deleteError}

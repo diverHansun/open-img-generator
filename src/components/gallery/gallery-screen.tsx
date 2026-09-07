@@ -11,7 +11,11 @@ import {
 import { ImagePreviewDialog } from '@/components/dialogs/image-preview-dialog';
 import { useLocale } from '@/components/i18n/locale-provider';
 import { PageHeader } from '@/components/shell/page-header';
-import { useWorkspaceNotices } from '@/components/shell/workspace-notices';
+import {
+  favoriteErrorNotice,
+  favoriteSuccessNotice,
+  useWorkspaceNotices,
+} from '@/components/shell/workspace-notices';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { InlineNotice } from '@/components/ui/inline-notice';
@@ -57,7 +61,6 @@ type FilterOptions = {
 type FavoriteMutation = {
   favorited: boolean;
   pending: boolean;
-  error: string | null;
 };
 
 type ActiveDialog =
@@ -386,7 +389,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
     );
     setMutations((current) => ({
       ...current,
-      [item.imageId]: { favorited: next, pending: true, error: null },
+      [item.imageId]: { favorited: next, pending: true },
     }));
     try {
       const updatedItem = next
@@ -396,7 +399,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
       if (!mountedRef.current) return;
       setMutations((current) => ({
         ...current,
-        [item.imageId]: { favorited: next, pending: false, error: null },
+        [item.imageId]: { favorited: next, pending: false },
       }));
       setState((current) =>
         updateSnapshot(current, (currentSnapshot) => ({
@@ -414,10 +417,10 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
         );
       }
       if (next) {
-        setAnnouncement(t('gallery.favoriteAdded'));
+        showWorkspaceNotice(favoriteSuccessNotice(t('gallery.favoriteAdded')));
       } else {
         preserveDialogReturnFocus(item.imageId, removalFallback);
-        setAnnouncement(t('gallery.favoriteRemoved'));
+        showWorkspaceNotice(favoriteSuccessNotice(t('gallery.favoriteRemoved')));
         focusAfterTileRemoval(removalFallback);
       }
     } catch {
@@ -427,10 +430,9 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
         [item.imageId]: {
           favorited: !next,
           pending: false,
-          error: t('gallery.favoriteError'),
         },
       }));
-      setAnnouncement(t('gallery.favoriteError'));
+      showWorkspaceNotice(favoriteErrorNotice(t('gallery.favoriteError')));
     } finally {
       pendingFavoriteIdsRef.current.delete(item.imageId);
       mutationEpochRef.current += 1;
@@ -442,14 +444,14 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
     pendingFavoriteIdsRef.current.add(item.imageId);
     setMutations((current) => ({
       ...current,
-      [item.imageId]: { favorited: true, pending: true, error: null },
+      [item.imageId]: { favorited: true, pending: true },
     }));
     try {
       const updatedItem = await client.addFavoriteWithBrowserFallback(item.imageId);
       if (!mountedRef.current) return;
       setMutations((current) => ({
         ...current,
-        [item.imageId]: { favorited: true, pending: false, error: null },
+        [item.imageId]: { favorited: true, pending: false },
       }));
       setState((current) =>
         updateSnapshot(current, (currentSnapshot) => ({
@@ -464,7 +466,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
           ? { ...current, item: updatedItem }
           : current,
       );
-      setAnnouncement(t('gallery.savedLocal'));
+      showWorkspaceNotice(favoriteSuccessNotice(t('gallery.savedLocal')));
     } catch {
       if (!mountedRef.current) return;
       setMutations((current) => ({
@@ -472,15 +474,11 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
         [item.imageId]: {
           favorited: true,
           pending: false,
-          error: t('gallery.saveLocalError'),
         },
       }));
-      setAnnouncement(t('gallery.saveLocalError'));
-      showWorkspaceNotice({
-        variant: 'error',
-        title: t('gallery.favoriteError'),
-        detail: t('gallery.saveLocalError'),
-      });
+      showWorkspaceNotice(
+        favoriteErrorNotice(t('gallery.favoriteError'), t('gallery.saveLocalError')),
+      );
     } finally {
       pendingFavoriteIdsRef.current.delete(item.imageId);
     }
@@ -498,7 +496,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
     setLoadingMore(false);
     setMutations((current) => ({
       ...current,
-      [change.imageId]: { favorited: change.favorited, pending: false, error: null },
+      [change.imageId]: { favorited: change.favorited, pending: false },
     }));
     setState((current) =>
       updateSnapshot(current, (currentSnapshot) => ({
@@ -510,11 +508,8 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
             : currentSnapshot.items.filter((item) => item.imageId !== change.imageId),
       })),
     );
-    if (change.favorited) {
-      setAnnouncement(t('gallery.favoriteAdded'));
-    } else {
+    if (!change.favorited) {
       preserveDialogReturnFocus(change.imageId, removalFallback);
-      setAnnouncement(t('gallery.favoriteRemoved'));
     }
   }
 
@@ -733,7 +728,6 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
           favoritedAt={activeDialog.item.favoritedAt}
           favorited={mutations[activeDialog.item.imageId]?.favorited ?? true}
           favoritePending={mutations[activeDialog.item.imageId]?.pending}
-          favoriteError={mutations[activeDialog.item.imageId]?.error}
           onFavoriteChange={(next) => void changeFavorite(activeDialog.item, next)}
           onViewGeneration={() =>
             setActiveDialog((current) =>

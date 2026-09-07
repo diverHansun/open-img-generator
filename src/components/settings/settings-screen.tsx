@@ -268,19 +268,20 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
             <h2 id="directory-title">{t('settings.dataDirectory.title')}</h2>
             <p>{t('settings.dataDirectory.description')}</p>
             <code className={styles.pathValue}>{view.localData.storageDirectory}</code>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={!desktopBridge || !desktopInfo || desktopBusy}
-              title={!desktopBridge ? t('settings.dataDirectory.desktopOnly') : undefined}
-              onClick={() =>
-                desktopBridge
-                  ? void runDesktopAction(() => desktopBridge.openDataDirectory())
-                  : undefined
-              }
-            >
-              {t('settings.dataDirectory.open')}
-            </Button>
+            {desktopBridge && desktopInfo ? (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={desktopBusy}
+                onClick={() =>
+                  void runDesktopAction(() => desktopBridge.openDataDirectory())
+                }
+              >
+                {t('settings.dataDirectory.open')}
+              </Button>
+            ) : (
+              <p className={styles.muted}>{t('settings.dataDirectory.desktopOnly')}</p>
+            )}
           </section>
 
           <section className={styles.section} aria-labelledby="export-title">

@@ -153,7 +153,7 @@ job-engine 在 remote 交付时不调用 `downloadAndStore`（见 `lifecycle.uni
 `src/components/settings/settings-screen.tsx` L267–289：
 
 - 有 `desktopInfo`（Electron IPC）时展示 `dataDirectory` 并启用「打开数据目录」；
-- Web：只显示「浏览器不能安全地打开本机应用数据目录」，**不展示逻辑路径**，按钮 disabled。
+- Web：只展示逻辑路径 `images/`，并说明实际目录需由桌面版打开；不呈现无法点击的目录按钮。
 
 `GET /api/settings`（`src/app/api/settings/route.ts`）返回占用字节与 `webCapabilities.canOpenDataDirectory: false`，**不含** `getStorageRoot()`。`getLocalDataSummary()` 内部已经知道该路径，只是不输出。
 

@@ -138,12 +138,6 @@
   margin-top: var(--space-3);
 }
 
-.inlineError {
-  margin: var(--space-3) 0 0;
-  color: var(--color-danger);
-  font-size: 0.78rem;
-}
-
 .submissionNotice {
   display: grid;
   justify-items: start;

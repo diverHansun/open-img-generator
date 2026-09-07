@@ -35,7 +35,6 @@ export function ImagePreviewDialog({
   favoritedAt,
   favorited,
   favoritePending,
-  favoriteError,
   onFavoriteChange,
   onViewGeneration,
   downloadUrl,
@@ -55,7 +54,6 @@ export function ImagePreviewDialog({
   favoritedAt?: string;
   favorited?: boolean;
   favoritePending?: boolean;
-  favoriteError?: string | null;
   onFavoriteChange?: (next: boolean) => void;
   onViewGeneration?: () => void;
   downloadUrl?: string;
@@ -169,9 +167,9 @@ export function ImagePreviewDialog({
             <p>{prompt}</p>
           </section>
 
-          {favoriteError || deleteError ? (
+          {deleteError ? (
             <p className={styles.inlineError} role="alert">
-              {favoriteError ?? deleteError}
+              {deleteError}
             </p>
           ) : null}
 
