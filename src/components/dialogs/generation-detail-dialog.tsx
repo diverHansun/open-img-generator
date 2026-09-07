@@ -174,7 +174,9 @@ export function GenerationDetailDialog({
         [imageId]: { value: next, pending: true, error: null },
       }));
       try {
-        const galleryItem = next ? await client.addFavorite(imageId) : undefined;
+        const galleryItem = next
+          ? await client.addFavoriteWithBrowserFallback(imageId)
+          : undefined;
         if (!next) await client.removeFavorite(imageId);
         setView((current) =>
           current ? patchFavorite(current, imageId, next) : current,

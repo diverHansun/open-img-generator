@@ -34,7 +34,15 @@ export class ApiClientError extends Error {
 }
 
 const MAX_RETRY_AFTER_MS = 5 * 60 * 1_000;
+const MAX_BROWSER_RELAY_IMAGE_BYTES = 25 * 1024 * 1024;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,64}$/;
+const BROWSER_RELAY_STORAGE_CATEGORIES = new Set([
+  'remote_dns_failed',
+  'remote_address_blocked',
+  'proxy_mapping_not_trusted',
+  'remote_download_timeout',
+  'remote_download_failed',
+]);
 
 export type FetchLike = typeof fetch;
 export type ApiRequestOptions = {
@@ -183,6 +191,71 @@ async function requestEmpty(
 ): Promise<void> {
   const response = await fetcher(input, init);
   if (!response.ok) throw await toApiClientError(response);
+}
+
+function favoriteRequest(fetcher: FetchLike, imageId: string): Promise<GalleryItem> {
+  return requestJson<GalleryItem>(
+    fetcher,
+    '/api/favorites',
+    jsonInit('POST', { imageId }),
+  );
+}
+
+function shouldRelayImageFromBrowser(error: unknown): error is ApiClientError {
+  if (!(error instanceof ApiClientError) || error.code !== 'STORAGE_ERROR') {
+    return false;
+  }
+  const category = error.details?.category;
+  return typeof category === 'string' && BROWSER_RELAY_STORAGE_CATEGORIES.has(category);
+}
+
+async function readBrowserImageBytes(response: Response): Promise<Uint8Array> {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isSafeInteger(declaredLength) && declaredLength > MAX_BROWSER_RELAY_IMAGE_BYTES) {
+    await response.body?.cancel();
+    throw new ApiClientError('Image is too large to save locally', 413, 'PAYLOAD_TOO_LARGE', false);
+  }
+  if (!response.body) {
+    throw new ApiClientError('Image bytes are unavailable', 502, 'STORAGE_ERROR', true);
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_BROWSER_RELAY_IMAGE_BYTES) {
+        await reader.cancel();
+        throw new ApiClientError('Image is too large to save locally', 413, 'PAYLOAD_TOO_LARGE', false);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+async function relayBrowserImageBytes(fetcher: FetchLike, imageId: string): Promise<void> {
+  const encodedImageId = encodeURIComponent(imageId);
+  const source = await fetcher(`/api/images/${encodedImageId}`, undefined);
+  if (!source.ok) throw await toApiClientError(source);
+  const bytes = await readBrowserImageBytes(source);
+  const body = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(body).set(bytes);
+  await requestEmpty(fetcher, `/api/images/${encodedImageId}/pin`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body,
+  });
 }
 
 export function createApiClient(fetcher: FetchLike = fetch) {
@@ -376,12 +449,16 @@ export function createApiClient(fetcher: FetchLike = fetch) {
         listUrl('/api/favorites', query),
         requestInitWithSignal(options),
       ),
-    addFavorite: (imageId: string) =>
-      requestJson<GalleryItem>(
-        fetcher,
-        '/api/favorites',
-        jsonInit('POST', { imageId }),
-      ),
+    addFavorite: (imageId: string) => favoriteRequest(fetcher, imageId),
+    addFavoriteWithBrowserFallback: async (imageId: string) => {
+      try {
+        return await favoriteRequest(fetcher, imageId);
+      } catch (error) {
+        if (!shouldRelayImageFromBrowser(error)) throw error;
+        await relayBrowserImageBytes(fetcher, imageId);
+        return favoriteRequest(fetcher, imageId);
+      }
+    },
     removeFavorite: (imageId: string) =>
       requestEmpty(fetcher, `/api/favorites/${encodeURIComponent(imageId)}`, {
         method: 'DELETE',

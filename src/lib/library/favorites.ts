@@ -18,6 +18,7 @@ import { getProject } from './projects';
 import { isKnownProviderId } from '../provider-config/catalog';
 import type { GalleryItem, Page } from './types';
 import { downloadAndStore, removeStoredFile } from '../storage';
+import type { DownloadAndStoreResult } from '../storage';
 
 type Cursor = { createdAt: string; id: string };
 
@@ -152,6 +153,67 @@ export async function addFavorite(
     }
   }
   return getFavoriteByImageId(imageId, client);
+}
+
+/**
+ * Promotes bytes retrieved by the user's browser after the server-side CDN
+ * path failed. It intentionally does not create a favorite: the caller retries
+ * the normal favorite command only after this durable handoff succeeds.
+ */
+export function pinRemoteImage(
+  imageId: string,
+  stored: DownloadAndStoreResult,
+  client: DbClient = db,
+): void {
+  let promotedStoredBytes = false;
+  try {
+    client.transaction((tx) => {
+      promotedStoredBytes = promoteRemoteImageToManaged(imageId, stored, tx);
+      if (!promotedStoredBytes) {
+        const current = getImage(imageId, tx);
+        if (current.sourceKind !== 'managed' || current.storagePath === null) {
+          unavailableImage(imageId, tx);
+        }
+      }
+    }, { behavior: 'immediate' });
+  } catch (error) {
+    try {
+      removeStoredFile(stored.storagePath);
+    } catch {
+      // Orphan cleanup handles a crash or failed compensation.
+    }
+    throw error;
+  }
+  if (!promotedStoredBytes) {
+    try {
+      removeStoredFile(stored.storagePath);
+    } catch {
+      // Orphan cleanup handles a crash or failed compensation.
+    }
+  }
+}
+
+/** Returns whether a browser relay still needs bytes for this image. */
+export function isRemoteImagePinRequired(
+  imageId: string,
+  client: DbClient = db,
+): boolean {
+  const image = getImage(imageId, client);
+  if (
+    image.sourceKind === 'managed' &&
+    image.storagePath !== null &&
+    image.removedAt === null
+  ) {
+    return false;
+  }
+  if (
+    image.sourceKind === 'remote' &&
+    image.remoteUrl !== null &&
+    image.removedAt === null
+  ) {
+    return true;
+  }
+  unavailableImage(imageId, client);
 }
 
 export function getFavoriteByImageId(

@@ -234,7 +234,7 @@ export function GenerateStage({
       setFavoriteBusy((current) => new Set(current).add(imageId));
       commitView(optimistic);
       try {
-        if (nextFavorited) await runtime.client.addFavorite(imageId);
+        if (nextFavorited) await runtime.client.addFavoriteWithBrowserFallback(imageId);
         else await runtime.client.removeFavorite(imageId);
       } catch {
         if (hadPreviousOverride && previousOverride !== undefined) {

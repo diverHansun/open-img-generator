@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import Database from 'better-sqlite3';
 import * as nextEnv from '@next/env';
 
 import {
@@ -10,6 +9,20 @@ import {
   resolveRuntimePaths,
 } from '../src/lib/runtime-paths/core.js';
 import { preflightRuntimePaths } from '../src/lib/runtime-paths/preflight.js';
+
+const supportedNodeMajors = new Set([20, 22, 24]);
+const nodeMajor = Number.parseInt(process.versions.node, 10);
+if (!supportedNodeMajors.has(nodeMajor)) {
+  console.error(
+    `[migrate-db] Unsupported Node.js ${process.versions.node} (ABI ${process.versions.modules}).`,
+  );
+  console.error(
+    '[migrate-db] Use Node.js 20, 22, or 24 LTS (see package.json engines and .nvmrc).',
+  );
+  process.exit(1);
+}
+
+const { default: Database } = await import('better-sqlite3');
 
 const scriptDirectory =
   typeof __dirname === 'string'

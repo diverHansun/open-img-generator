@@ -30,6 +30,7 @@
 | F13 | 存量已收藏仍 remote | integration + Gallery 行为 | 普通 Gallery 加载不发补钉请求；用户点「保存到本地」成功 → managed；链接失效 → 墓碑，favorite 行仍在、显示「原图已删除或丢失」 | 1 |
 | F15 | 条件更新竞态后的孤儿补偿 | unit + integration | 下载成功但 promote/favorite 写库失败 → 新 storagePath 被删除，DB 维持胜出状态 | 1 |
 | F16 | 全局保存提示 | 组件级或手工 | 生成、详情、Gallery 复用顶部队列；成功/错误卡片向下堆叠，均在 3 秒后消失；屏幕阅读器有状态播报 | 1 |
+| F17 | 同次点击浏览器兜底 | client unit + contract | `POST /favorites` 的可回退 CDN 失败后依次 GET 图片、POST octet-stream pin、重试 favorite；任一后续失败则无 favorite | 2 |
 | F14 | 取消收藏 | unit | 只删 favorite，storagePath 仍在 | 1 |
 
 ## 4.3 集成边界

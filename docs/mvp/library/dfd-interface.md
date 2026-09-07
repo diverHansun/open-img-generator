@@ -47,6 +47,8 @@ web-ui ──HTTP──► api routes ──► library ──► db
 3. 历史 remote favorite 在 Gallery 仅由用户点“保存到本地”触发同一条补存路径；列表读取与清理不自动下载。
 4. Gallery 列表 → `library.listFavorites` → join image/job/generation/session/project → GalleryItem[]；原图丢失时返回 `url: null` 与不可用状态，不删除 favorite。
 
+当服务端远程下载以可回退的 CDN 失败结束时，Web client 可在**同一次收藏点击**中请求 `/api/images/:id`；浏览器能读取到字节时以 `application/octet-stream` POST 至 `/api/images/:id/pin`。pin 路由只接受流式二进制，不接受 URL、文件名或客户端 MIME；storage 重用 25 MiB、magic bytes 和原子 rename 边界，library 仅 CAS 提升 remote Image，随后 Web client 重试标准 `addFavorite`。两段都失败才向 UI 交付错误。
+
 ### 2.5 模型启用池
 
 1. Models 页切换启用 → `library.setModelEnabled`

@@ -3,6 +3,8 @@ import { createIntegrationDb, createStorageDir } from '../helpers/integration';
 
 process.env.FAL_KEY = 'test-fal-key';
 process.env.ZENMUX_API_KEY = 'test-zenmux-key';
+const originalDashscopeApiKey = process.env.DASHSCOPE_API_KEY;
+delete process.env.DASHSCOPE_API_KEY;
 const originalWorkerEnabled = process.env.JOB_WORKER_ENABLED;
 process.env.JOB_WORKER_ENABLED = 'false';
 
@@ -33,6 +35,8 @@ describe('quickstart vertical slice', () => {
     global.fetch = originalFetch;
     cleanupDb();
     cleanupStorage();
+    if (originalDashscopeApiKey === undefined) delete process.env.DASHSCOPE_API_KEY;
+    else process.env.DASHSCOPE_API_KEY = originalDashscopeApiKey;
     if (originalWorkerEnabled === undefined) delete process.env.JOB_WORKER_ENABLED;
     else process.env.JOB_WORKER_ENABLED = originalWorkerEnabled;
   });

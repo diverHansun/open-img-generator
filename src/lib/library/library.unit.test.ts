@@ -20,6 +20,7 @@ import {
   listModelPreferences,
   listSessions,
   moveSession,
+  pinRemoteImage,
   upsertModelPreference,
 } from './index';
 
@@ -292,6 +293,25 @@ describe('library domain', () => {
       delivery: 'managed',
     });
     expect(removeStoredFile).toHaveBeenCalledWith('2026/09/second-writer.png');
+  });
+
+  it('promotes browser-relayed bytes without creating a favorite', () => {
+    seedRemoteImage(testDb, 'generation-browser-relay', 'image-browser-relay');
+
+    pinRemoteImage('image-browser-relay', {
+      storagePath: '2026/09/browser-relay.png',
+      contentType: 'image/png',
+      sizeBytes: 1234,
+    }, testDb.db);
+
+    expect(listFavorites({}, testDb.db).items).toEqual([]);
+    expect(testDb.sqlite.prepare(
+      'SELECT source_kind, storage_path, remote_url FROM images WHERE id = ?',
+    ).get('image-browser-relay')).toEqual({
+      source_kind: 'managed',
+      storage_path: '2026/09/browser-relay.png',
+      remote_url: null,
+    });
   });
 
   it('upserts only preferences for currently enabled registry models', () => {

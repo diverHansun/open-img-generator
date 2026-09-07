@@ -35,6 +35,8 @@ job-engine
 
 收藏补存沿用该安全下载和原子落盘路径：`library.addFavorite` 仅在用户新收藏或历史卡片显式“保存到本地”时调用；它在 DB 中把 remote Image CAS 提升为 managed 后才写 favorite。若 DB 步骤失败，library 立即删除本次新文件；进程崩溃残留由 orphan cleanup 回收。
 
+当服务端下载临时 CDN 失败、浏览器仍可取得该图片时，`POST /api/images/:id/pin` 把浏览器回传的 `application/octet-stream` 交给 `storeBrowserImageStream`。该路径不信任客户端的路径和 MIME，仍以流式 25 MiB 上限、PNG/JPEG/WebP magic bytes 与临时文件原子移动验证；成功后 library CAS 提升 Image，失败不改变 favorite。
+
 ### 2.2 读取（API 层图片访问）
 
 ```

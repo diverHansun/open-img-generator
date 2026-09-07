@@ -17,6 +17,7 @@ import {
 } from '../../src/app/api/model-preferences/route';
 import { POST as moveSession } from '../../src/app/api/sessions/[id]/move/route';
 import { GET as listGenerations } from '../../src/app/api/generations/route';
+import { POST as pinImage } from '../../src/app/api/images/[id]/pin/route';
 
 vi.mock('../../src/lib/library', () => ({
   createProject: vi.fn(),
@@ -28,6 +29,8 @@ vi.mock('../../src/lib/library', () => ({
   listSessions: vi.fn(),
   moveSession: vi.fn(),
   addFavorite: vi.fn(),
+  isRemoteImagePinRequired: vi.fn(),
+  pinRemoteImage: vi.fn(),
   removeFavorite: vi.fn(),
   listFavorites: vi.fn(),
   listModelPreferences: vi.fn(),
@@ -35,7 +38,12 @@ vi.mock('../../src/lib/library', () => ({
   listGenerations: vi.fn(),
 }));
 
+vi.mock('../../src/lib/storage', () => ({
+  storeBrowserImageStream: vi.fn(),
+}));
+
 import * as library from '../../src/lib/library';
+import * as storage from '../../src/lib/storage';
 
 const galleryItem = {
   favoriteId: 'favorite-1',
@@ -177,6 +185,81 @@ describe('library API contracts', () => {
       generationId: 'generation-1',
       projectId: 'project-1',
     });
+  });
+
+  it('accepts only browser-relayed octet-stream bytes before pinning a remote image', async () => {
+    vi.mocked(library.isRemoteImagePinRequired).mockReturnValue(true);
+    vi.mocked(storage.storeBrowserImageStream).mockResolvedValue({
+      storagePath: '2026/09/relayed.png',
+      contentType: 'image/png',
+      sizeBytes: 42,
+    });
+    const response = await pinImage(
+      new Request('http://localhost:3000/api/images/image-1/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: new Uint8Array([1, 2, 3]),
+      }),
+      { params: Promise.resolve({ id: 'image-1' }) },
+    );
+
+    expect(response.status).toBe(204);
+    expect(storage.storeBrowserImageStream).toHaveBeenCalledWith(expect.anything());
+    expect(library.pinRemoteImage).toHaveBeenCalledWith(
+      'image-1',
+      { storagePath: '2026/09/relayed.png', contentType: 'image/png', sizeBytes: 42 },
+      expect.anything(),
+    );
+  });
+
+  it('does not rewrite browser bytes when the image was already managed', async () => {
+    vi.mocked(library.isRemoteImagePinRequired).mockReturnValue(false);
+    const response = await pinImage(
+      new Request('http://localhost:3000/api/images/image-1/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: new Uint8Array([1, 2, 3]),
+      }),
+      { params: Promise.resolve({ id: 'image-1' }) },
+    );
+
+    expect(response.status).toBe(204);
+    expect(storage.storeBrowserImageStream).not.toHaveBeenCalled();
+    expect(library.pinRemoteImage).not.toHaveBeenCalled();
+  });
+
+  it('rejects a pin with a non-binary content type before storage or promotion', async () => {
+    const response = await pinImage(
+      new Request('http://localhost:3000/api/images/image-1/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/png' },
+        body: new Uint8Array([1, 2, 3]),
+      }),
+      { params: Promise.resolve({ id: 'image-1' }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(storage.storeBrowserImageStream).not.toHaveBeenCalled();
+    expect(library.pinRemoteImage).not.toHaveBeenCalled();
+  });
+
+  it('does not promote an image when relayed bytes fail storage validation', async () => {
+    vi.mocked(library.isRemoteImagePinRequired).mockReturnValue(true);
+    vi.mocked(storage.storeBrowserImageStream).mockRejectedValue(
+      new ValidationError('Unsupported image format'),
+    );
+
+    const response = await pinImage(
+      new Request('http://localhost:3000/api/images/image-1/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: new Uint8Array([0, 1, 2, 3]),
+      }),
+      { params: Promise.resolve({ id: 'image-1' }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(library.pinRemoteImage).not.toHaveBeenCalled();
   });
 
   it('lists favorites with cursor paging params', async () => {

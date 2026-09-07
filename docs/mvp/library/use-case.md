@@ -53,7 +53,7 @@ library 不参与步骤 3。
 |------|--------|------|
 | 1 | web-ui | 在结果图或 History 详情点收藏 |
 | 2 | library | `addFavorite(imageId)`；远程原图先下载到受管 storage，再提升 Image 为 managed 并写 favorite |
-| 3 | web-ui | 两个持久化步骤都成功后保持红心；任一步失败回滚红心，并在工作区顶部显示 3 秒提示卡片 |
+| 3 | web-ui | 首先请求服务端下载。若服务端因 CDN 下载失败且错误类别允许回退，则同一次点击由浏览器 `GET /api/images/:id` 取回字节，`POST /api/images/:id/pin` 受管落盘后重试收藏；两条路径都失败才回滚红心，并在工作区顶部显示 3 秒提示卡片 |
 | 4 | web-ui | Gallery 页 `listFavorites`；仍是远程且可用的历史收藏显示“保存到本地”，仅点击后补存；原图已删除或丢失时保留收藏并可查看 prompt/model/job 来源 |
 
 取消收藏: `removeFavorite` 仅从 Gallery 移除；受管文件继续遵循既有未收藏图片保留期清理。

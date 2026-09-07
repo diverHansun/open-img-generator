@@ -389,7 +389,9 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
       [item.imageId]: { favorited: next, pending: true, error: null },
     }));
     try {
-      const updatedItem = next ? await client.addFavorite(item.imageId) : null;
+      const updatedItem = next
+        ? await client.addFavoriteWithBrowserFallback(item.imageId)
+        : null;
       if (!next) await client.removeFavorite(item.imageId);
       if (!mountedRef.current) return;
       setMutations((current) => ({
@@ -443,7 +445,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
       [item.imageId]: { favorited: true, pending: true, error: null },
     }));
     try {
-      const updatedItem = await client.addFavorite(item.imageId);
+      const updatedItem = await client.addFavoriteWithBrowserFallback(item.imageId);
       if (!mountedRef.current) return;
       setMutations((current) => ({
         ...current,

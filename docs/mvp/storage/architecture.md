@@ -19,6 +19,8 @@
 
 `data:` 图片先分块解码到私有 `.staging/`，同样校验 25 MiB、声明 MIME 与 magic bytes；DB snapshot 仅能引用 `staging:<uuid>`。ZenMux 与豆包优先使用此路径；URL-only Provider 仍在任务完成后立即下载转存。当前单图 sync adapter 的 encoded JSON 入口固定为 36 MiB，普通 Provider JSON 仍为 2 MiB；未来若放开 sync 多图，必须先重做 encoded 总预算。`.tmp/` 或 `.staging/` 的崩溃残留仍由现有 orphan grace 扫描回收。
 
+浏览器回传兜底不是另一种持久化格式：只有 `STORAGE_ERROR` 的可回退远程下载类别才在同一次收藏点击启用。浏览器最多缓冲 25 MiB，再把 octet-stream 交给服务端；服务端再次以同一上限流式落盘和 magic bytes 校验，故浏览器的 URL/CORS 能力不会扩大服务端 SSRF 或路径写入边界。
+
 ## 并发边界
 
 cleanup 不参与 provider 调用；worker 使用传入的 `DbClient`。测试实例必须成对隔离 `DATABASE_URL` 与 `LOCAL_STORAGE_DIR`，storage ownership 再提供 fail-closed 防线。远程图片收藏先完成受管文件落盘，再由 library 用 SQLite immediate transaction CAS 提升 Image 并写 favorite；任何 DB 失败都补偿本次文件，崩溃残留由 orphan scan 回收。`markImageExpiredIfUnfavorited` 与收藏写入都使用 SQLite immediate transaction；收藏先胜则 cleanup 条件更新为 0，cleanup 先胜则墓碑不可重新收藏。主动单图删除在短事务中移除 favorite 并写 `user_deleted` 墓碑。

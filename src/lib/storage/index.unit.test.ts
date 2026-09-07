@@ -10,6 +10,7 @@ import {
   MAX_IMAGE_BYTES,
   removeStagedImage,
   removeStoredFile,
+  storeBrowserImageStream,
   stageInlineImage,
 } from './index';
 import { NotFoundError, StorageError } from '../errors';
@@ -61,6 +62,43 @@ describe('storage', () => {
     expect(vi.mocked(global.fetch).mock.calls[0]?.[1]).toMatchObject({
       redirect: 'manual',
     });
+  });
+
+  it('stores browser-relayed image bytes through the same bounded magic-checked path', async () => {
+    const result = await storeBrowserImageStream(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(imageBuffer));
+          controller.close();
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      contentType: 'image/png',
+      sizeBytes: imageBuffer.byteLength,
+    });
+    expect(fs.readFileSync(path.join(tempDir, result.storagePath))).toEqual(imageBuffer);
+  });
+
+  it('rejects invalid browser-relayed bytes without creating a stored image', async () => {
+    await expect(storeBrowserImageStream(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+        controller.close();
+      },
+    }))).rejects.toMatchObject({ diagnostic: { category: 'remote_content_invalid' } });
+    expect(fs.readdirSync(tempDir, { recursive: true }).filter((entry) =>
+      typeof entry === 'string' && /\.(png|jpg|webp)$/.test(entry),
+    )).toEqual([]);
+  });
+
+  it('rejects an oversized browser relay while streaming', async () => {
+    await expect(storeBrowserImageStream(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_IMAGE_BYTES + 1));
+      },
+    }))).rejects.toThrow('maximum allowed size');
   });
 
   it('streams and stores an MP4 after validating its ftyp signature', async () => {

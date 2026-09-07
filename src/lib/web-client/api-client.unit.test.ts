@@ -119,6 +119,64 @@ describe('web API client', () => {
     });
   });
 
+  it('relays browser-fetched bytes and retries the favorite in the same click after a server CDN failure', async () => {
+    const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const favorite = {
+      favoriteId: 'favorite-1',
+      imageId: 'image-1',
+      url: '/api/images/image-1',
+      delivery: 'managed',
+      availability: 'available',
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: 'STORAGE_ERROR',
+          message: 'Unable to save the image locally',
+          retryable: true,
+          details: { category: 'remote_download_failed' },
+        },
+      }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(imageBytes, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(favorite), { status: 200 }));
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.addFavoriteWithBrowserFallback('image-1')).resolves.toEqual(favorite);
+    expect(fetcher).toHaveBeenNthCalledWith(2, '/api/images/image-1', undefined);
+    expect(fetcher).toHaveBeenNthCalledWith(3, '/api/images/image-1/pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: expect.any(ArrayBuffer),
+    });
+    expect(fetcher).toHaveBeenNthCalledWith(4, '/api/favorites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageId: 'image-1' }),
+    });
+  });
+
+  it('uses the browser fallback for a non-retryable Fake-IP policy rejection', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: 'STORAGE_ERROR',
+          message: 'Unable to save the image locally',
+          retryable: false,
+          details: { category: 'proxy_mapping_not_trusted' },
+        },
+      }), { status: 422 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ imageId: 'image-fake-ip' }), { status: 200 }));
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.addFavoriteWithBrowserFallback('image-fake-ip')).resolves.toEqual({
+      imageId: 'image-fake-ip',
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
   it('prefers a valid body request ID and parses delta-seconds Retry-After', async () => {
     const fetcher = vi.fn().mockResolvedValue(
       new Response(

@@ -111,8 +111,9 @@ describe('sync generation end-to-end (zenmux)', () => {
       new Request(`http://localhost:3000/api/images/${imageId}`),
       { params: Promise.resolve({ id: imageId }) },
     );
-    expect(imageResponse.status).toBe(302);
-    expect(imageResponse.headers.get('location')).toBe('https://cdn.zenmux.ai/img1.png');
+    expect(imageResponse.status).toBe(200);
+    expect(imageResponse.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await imageResponse.arrayBuffer())).toEqual(imageBuffer);
   });
 
   it('stages ZenMux b64_json without persisting the data URL in SQLite', async () => {

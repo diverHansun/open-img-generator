@@ -4,7 +4,16 @@
 
 ## 快速开始
 
-要求 Node.js 20/22/24 LTS。
+要求 Node.js 20/22/24 LTS；仓库以 Node.js 24 为团队默认版本（`.nvmrc`）。不要使用 Node.js Current 版本运行迁移或测试，因为 SQLite 原生依赖只在受支持的 LTS ABI 上验证。
+
+```bash
+nvm install && nvm use
+node --version    # 应显示 v24.x
+```
+
+macOS 使用 direnv 时，允许 `.envrc` 后会自动优先使用 Homebrew 的 `node@24`。`engine-strict=true` 会阻止在不受支持的版本上安装依赖。
+
+如果曾在其他 Node 主版本下安装过依赖，请先切换到 Node 24，再执行 `npm ci`。这会重新构建 SQLite 等原生依赖，使其 ABI 与当前运行时一致；不要复用由其他主版本生成的 `node_modules`。
 
 ```bash
 cp .env.example .env.local   # Windows PowerShell: Copy-Item .env.example .env.local

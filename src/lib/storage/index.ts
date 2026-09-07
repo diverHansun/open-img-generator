@@ -637,6 +637,42 @@ export async function downloadAndStore(
   }
 }
 
+/**
+ * Persists image bytes relayed by the browser after a server-side CDN fetch
+ * failed. The caller never supplies a filename or MIME type: byte limits,
+ * magic validation and atomic promotion are identical to remote downloads.
+ */
+export async function storeBrowserImageStream(
+  body: ReadableStream<Uint8Array>,
+): Promise<DownloadAndStoreResult> {
+  let sourcePath: string | null = null;
+  try {
+    sourcePath = temporaryPath();
+    const written = await writeResponseToTemporary(new Response(body), sourcePath);
+    const contentType = imageContentTypeFromMagic(written.prefix);
+    if (!contentType) {
+      throw new StorageError('Browser-relayed image binary signature is not supported', {
+        diagnostic: { category: 'remote_content_invalid' },
+      });
+    }
+    return moveTemporaryImage(sourcePath, contentType);
+  } catch (err) {
+    if (sourcePath) removeTemporaryFile(sourcePath);
+    if (err instanceof StorageError) {
+      if (err.diagnostic) throw err;
+      throw new StorageError(err.message, {
+        cause: err.cause,
+        retryable: err.retryable,
+        diagnostic: { category: 'local_write_failed' },
+      });
+    }
+    throw new StorageError('Failed to store browser-relayed image', {
+      cause: err,
+      diagnostic: { category: 'local_write_failed' },
+    });
+  }
+}
+
 function isMp4(prefix: BytePrefix): boolean {
   return prefix.byteLength >= 12 &&
     String.fromCharCode(...prefix.slice(4, 8)) === 'ftyp';
