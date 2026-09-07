@@ -125,7 +125,7 @@ describe('frontend-overhaul read models', () => {
     ).toEqual(['history-0-0']);
   });
 
-  it('filters global favorites by project and provider before cursor pagination', () => {
+  it('filters global favorites by project and provider before cursor pagination', async () => {
     const project = createProject({ title: 'Gallery target' }, testDb.db);
     const session = createSession({ projectId: project.id }, testDb.db);
     seedGeneration(testDb, {
@@ -142,8 +142,8 @@ describe('frontend-overhaul read models', () => {
       imageId: 'target-qwen-image',
       provider: 'qwen',
     });
-    addFavorite('target-fal-image', testDb.db);
-    addFavorite('target-qwen-image', testDb.db);
+    await addFavorite('target-fal-image', testDb.db);
+    await addFavorite('target-qwen-image', testDb.db);
 
     const page = listFavorites(
       { projectId: project.id, provider: 'qwen', sort: 'newest' },

@@ -16,6 +16,7 @@ import {
   restoreImageStorageIfMissing,
 } from './images';
 import { NotFoundError } from '../../errors';
+import * as imageQueries from './images';
 
 const now = '2026-07-12T10:00:00.000Z';
 
@@ -111,6 +112,45 @@ describe('images queries', () => {
     expect(markRemoteImageExpired(image.id, now, db)).toBe(true);
     expect(getImageAvailability(getImage(image.id, db))).toBe('remote_expired');
     expect(listFavoriteImageIds([image.id], db)).toEqual(new Set([image.id]));
+  });
+
+  it('promotes only a live remote image to managed storage', () => {
+    const { db } = createTestDb();
+    seedJob(db);
+    expect(createRemoteImageIfAbsent({
+      id: 'remote-to-promote',
+      jobId: 'job-1',
+      index: 0,
+      remoteUrl: 'https://v3.fal.media/result.png?token=secret',
+      remoteExpiresAt: null,
+      contentType: 'image/png',
+      width: 1024,
+      height: 1024,
+      createdAt: now,
+    }, db)).toBe(true);
+
+    const promote = Reflect.get(imageQueries, 'promoteRemoteImageToManaged');
+    expect(promote).toBeTypeOf('function');
+    expect((promote as (id: string, params: {
+      storagePath: string;
+      contentType: string;
+      sizeBytes: number;
+    }, client: typeof db) => boolean)('remote-to-promote', {
+      storagePath: '2026/09/promoted.png',
+      contentType: 'image/png',
+      sizeBytes: 1234,
+    }, db)).toBe(true);
+
+    expect(getImage('remote-to-promote', db)).toMatchObject({
+      sourceKind: 'managed',
+      storagePath: '2026/09/promoted.png',
+      remoteUrl: null,
+      remoteExpiresAt: null,
+      contentType: 'image/png',
+      sizeBytes: 1234,
+      removedAt: null,
+      removalReason: null,
+    });
   });
 
   it('throws NotFoundError when image not found', () => {

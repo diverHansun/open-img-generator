@@ -60,7 +60,7 @@ describe('frontend-overhaul backend data integration', () => {
     cleanupDb();
   });
 
-  it('keeps summary, History and Gallery reads local and excludes empty sessions', () => {
+  it('keeps summary, History and Gallery reads local and excludes empty sessions', async () => {
     const project = createProject({ title: 'Visual project' }, db);
     createSession({ projectId: project.id, title: 'Empty session' }, db);
     const firstSession = createSession({ projectId: project.id, title: 'First' }, db);
@@ -79,8 +79,8 @@ describe('frontend-overhaul backend data integration', () => {
       createdAt: '2099-07-18T10:00:00.000Z',
       imageId: 'image-qwen',
     });
-    addFavorite('image-fal', db);
-    addFavorite('image-qwen', db);
+    await addFavorite('image-fal', db);
+    await addFavorite('image-qwen', db);
 
     const summary = listProjectSummaries(db).find((item) => item.project.id === project.id)!;
     const history = getProjectHistory({ projectId: project.id }, db);

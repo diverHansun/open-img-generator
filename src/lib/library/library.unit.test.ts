@@ -1,6 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, type TestDb } from '../../../tests/helpers/db';
-import { ConflictError, NotFoundError } from '../errors';
+import { ConflictError, ImageUnavailableError, NotFoundError, StorageError } from '../errors';
+
+vi.mock('../storage', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../storage')>(),
+  downloadAndStore: vi.fn(),
+  removeStoredFile: vi.fn(),
+}));
+
+import { downloadAndStore, removeStoredFile } from '../storage';
 import {
   addFavorite,
   createProject,
@@ -20,6 +28,8 @@ describe('library domain', () => {
 
   beforeEach(() => {
     testDb = createTestDb();
+    vi.mocked(downloadAndStore).mockReset();
+    vi.mocked(removeStoredFile).mockReset();
   });
 
   afterEach(() => {
@@ -152,7 +162,7 @@ describe('library domain', () => {
     );
   });
 
-  it('favorites an image idempotently and returns its complete lineage', () => {
+  it('favorites an image idempotently and returns its complete lineage', async () => {
     seedGeneration(testDb, {
       generationId: 'generation-gallery',
       sessionId: 'default-session',
@@ -160,8 +170,8 @@ describe('library domain', () => {
       imageId: 'image-gallery',
     });
 
-    const first = addFavorite('image-gallery', testDb.db);
-    const second = addFavorite('image-gallery', testDb.db);
+    const first = await addFavorite('image-gallery', testDb.db);
+    const second = await addFavorite('image-gallery', testDb.db);
     expect(second.favoriteId).toBe(first.favoriteId);
     expect(listFavorites({}, testDb.db).items).toEqual([
       expect.objectContaining({
@@ -176,14 +186,14 @@ describe('library domain', () => {
     ]);
   });
 
-  it('lists a missing favorite as a tombstone with no image URL', () => {
+  it('lists a missing favorite as a tombstone with no image URL', async () => {
     seedGeneration(testDb, {
       generationId: 'generation-missing-favorite',
       sessionId: 'default-session',
       createdAt: '2026-07-16T03:00:00.000Z',
       imageId: 'image-missing-favorite',
     });
-    addFavorite('image-missing-favorite', testDb.db);
+    await addFavorite('image-missing-favorite', testDb.db);
     testDb.sqlite
       .prepare(
         `UPDATE images
@@ -200,6 +210,88 @@ describe('library domain', () => {
         removedAt: '2026-07-16T04:00:00.000Z',
       }),
     ]);
+  });
+
+  it('pins a remote image before creating its favorite', async () => {
+    seedRemoteImage(testDb, 'generation-remote-favorite', 'image-remote-favorite');
+    vi.mocked(downloadAndStore).mockResolvedValue({
+      storagePath: '2026/09/remote-favorite.png',
+      contentType: 'image/png',
+      sizeBytes: 1234,
+    });
+
+    const favorite = await addFavorite('image-remote-favorite', testDb.db);
+
+    expect(downloadAndStore).toHaveBeenCalledWith(
+      'https://v3.fal.media/result.png?token=secret',
+    );
+    expect(favorite).toMatchObject({
+      imageId: 'image-remote-favorite',
+      delivery: 'managed',
+      availability: 'available',
+    });
+  });
+
+  it('does not create a favorite when remote storage fails', async () => {
+    seedRemoteImage(testDb, 'generation-remote-failure', 'image-remote-failure');
+    vi.mocked(downloadAndStore).mockRejectedValue(
+      new StorageError('Remote image download was rejected'),
+    );
+
+    await expect(addFavorite('image-remote-failure', testDb.db)).rejects.toBeInstanceOf(
+      StorageError,
+    );
+    expect(listFavorites({}, testDb.db).items).toEqual([]);
+  });
+
+  it('removes newly stored bytes when a remote image expires before promotion', async () => {
+    seedRemoteImage(testDb, 'generation-promotion-race', 'image-promotion-race');
+    vi.mocked(downloadAndStore).mockImplementation(async () => {
+      testDb.sqlite
+        .prepare(
+          `UPDATE images
+           SET remote_url = NULL, remote_expires_at = NULL, removed_at = ?,
+               removal_reason = 'remote_expired'
+           WHERE id = ?`,
+        )
+        .run('2026-09-07T00:00:00.000Z', 'image-promotion-race');
+      return {
+        storagePath: '2026/09/lost-race.png',
+        contentType: 'image/png',
+        sizeBytes: 1234,
+      };
+    });
+
+    await expect(addFavorite('image-promotion-race', testDb.db)).rejects.toBeInstanceOf(
+      ImageUnavailableError,
+    );
+    expect(removeStoredFile).toHaveBeenCalledWith('2026/09/lost-race.png');
+    expect(listFavorites({}, testDb.db).items).toEqual([]);
+  });
+
+  it('removes newly stored bytes when another request already promoted the image', async () => {
+    seedRemoteImage(testDb, 'generation-promotion-won', 'image-promotion-won');
+    vi.mocked(downloadAndStore).mockImplementation(async () => {
+      testDb.sqlite
+        .prepare(
+          `UPDATE images
+           SET source_kind = 'managed', storage_path = '2026/09/first-writer.png',
+               remote_url = NULL, remote_expires_at = NULL
+           WHERE id = ?`,
+        )
+        .run('image-promotion-won');
+      return {
+        storagePath: '2026/09/second-writer.png',
+        contentType: 'image/png',
+        sizeBytes: 1234,
+      };
+    });
+
+    await expect(addFavorite('image-promotion-won', testDb.db)).resolves.toMatchObject({
+      imageId: 'image-promotion-won',
+      delivery: 'managed',
+    });
+    expect(removeStoredFile).toHaveBeenCalledWith('2026/09/second-writer.png');
   });
 
   it('upserts only preferences for currently enabled registry models', () => {
@@ -231,6 +323,27 @@ describe('library domain', () => {
     expect(() => deleteProject(empty.id, testDb.db)).toThrow(NotFoundError);
   });
 });
+
+function seedRemoteImage(testDb: TestDb, generationId: string, imageId: string) {
+  seedGeneration(testDb, {
+    generationId,
+    sessionId: 'default-session',
+    createdAt: '2026-07-16T03:00:00.000Z',
+  });
+  testDb.sqlite
+    .prepare(
+      `INSERT INTO images
+       (id, generation_job_id, "index", source_kind, storage_path, remote_url,
+        remote_expires_at, content_type, width, height, size_bytes, created_at)
+       VALUES (?, ?, 0, 'remote', NULL, ?, NULL, 'image/png', 1024, 1024, NULL, ?)`,
+    )
+    .run(
+      imageId,
+      `job-${generationId}`,
+      'https://v3.fal.media/result.png?token=secret',
+      '2026-07-16T03:00:00.000Z',
+    );
+}
 
 function seedGeneration(
   testDb: TestDb,

@@ -63,6 +63,12 @@ export type RestoreMissingImageParams = {
   sizeBytes: number;
 };
 
+export type PromoteRemoteImageParams = {
+  storagePath: string;
+  contentType: string;
+  sizeBytes: number;
+};
+
 export function getImageAvailability(
   image: Pick<Image, 'storagePath' | 'remoteUrl' | 'removedAt' | 'removalReason'>,
 ): ImageAvailability {
@@ -424,6 +430,27 @@ export function markRemoteImageExpired(
     eq(images.id, id),
     eq(images.sourceKind, 'remote'),
     isNotNull(images.remoteUrl),
+  )).run().changes > 0;
+}
+
+/** Replaces a still-live remote reference with application-owned image bytes. */
+export function promoteRemoteImageToManaged(
+  id: string,
+  params: PromoteRemoteImageParams,
+  client: DbClient = db,
+): boolean {
+  return client.update(images).set({
+    sourceKind: 'managed',
+    storagePath: params.storagePath,
+    remoteUrl: null,
+    remoteExpiresAt: null,
+    contentType: params.contentType,
+    sizeBytes: params.sizeBytes,
+  }).where(and(
+    eq(images.id, id),
+    eq(images.sourceKind, 'remote'),
+    isNotNull(images.remoteUrl),
+    isNull(images.removedAt),
   )).run().changes > 0;
 }
 

@@ -19,6 +19,7 @@ export type GenerationStatus =
 export type ImageAvailability =
   | 'available'
   | 'retention_expired'
+  | 'remote_expired'
   | 'user_deleted'
   | 'storage_missing';
 
@@ -217,6 +218,7 @@ export type AppSettingsView = {
     imageRetentionDays: number | null;
   };
   localData: {
+    storageDirectory: string;
     mediaBytes: number;
     databaseBytes: number;
     logBytes: number;
@@ -258,6 +260,7 @@ export type GalleryItem = {
   favoriteId: string;
   imageId: string;
   url: string | null;
+  delivery: 'managed' | 'remote';
   availability: ImageAvailability;
   removedAt: string | null;
   width: number | null;

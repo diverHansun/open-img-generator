@@ -203,7 +203,7 @@ async function bootstrap(): Promise<void> {
   });
   ipcMain.handle(desktopIpcChannels.openDataDirectory, async (event) => {
     requireTrustedSender(event);
-    const error = await shell.openPath(paths.root);
+    const error = await shell.openPath(paths.images);
     if (error) throw new Error(error);
   });
   ipcMain.handle(desktopIpcChannels.chooseDownloadDirectory, async (event) => {

@@ -5,16 +5,19 @@ import {
   favorites,
   generationJobs,
   generations,
+  getImage,
+  getImageAvailability,
   images,
+  promoteRemoteImageToManaged,
   projects,
   sessions,
   type DbClient,
 } from '../db';
-import { NotFoundError, ValidationError } from '../errors';
+import { ImageUnavailableError, NotFoundError, ValidationError } from '../errors';
 import { getProject } from './projects';
 import { isKnownProviderId } from '../provider-config/catalog';
 import type { GalleryItem, Page } from './types';
-import { getImageAvailability } from '../db';
+import { downloadAndStore, removeStoredFile } from '../storage';
 
 type Cursor = { createdAt: string; id: string };
 
@@ -83,26 +86,71 @@ function toGalleryItem(row: ReturnType<ReturnType<typeof favoriteQuery>['get']>)
   };
 }
 
-export function addFavorite(imageId: string, client: DbClient = db): GalleryItem {
-  client.transaction(
-    (tx) => {
-      const image = tx
-        .select({ id: images.id })
-        .from(images)
-        .where(and(
-          eq(images.id, imageId),
-          isNull(images.removedAt),
-          or(isNotNull(images.storagePath), isNotNull(images.remoteUrl)),
-        ))
-        .get();
-      if (!image) throw new NotFoundError(`Image not found: ${imageId}`);
-      tx.insert(favorites)
-        .values({ id: randomUUID(), imageId, createdAt: new Date().toISOString() })
-        .onConflictDoNothing({ target: favorites.imageId })
-        .run();
-    },
-    { behavior: 'immediate' },
-  );
+function unavailableImage(imageId: string, client: DbClient): never {
+  const image = getImage(imageId, client);
+  const availability = getImageAvailability(image);
+  if (availability !== 'available') throw new ImageUnavailableError(availability);
+  throw new NotFoundError(`Image not found: ${imageId}`);
+}
+
+function insertFavorite(imageId: string, client: DbClient): void {
+  const image = client
+    .select({ id: images.id })
+    .from(images)
+    .where(and(
+      eq(images.id, imageId),
+      eq(images.sourceKind, 'managed'),
+      isNotNull(images.storagePath),
+      isNull(images.removedAt),
+    ))
+    .get();
+  if (!image) unavailableImage(imageId, client);
+  client.insert(favorites)
+    .values({ id: randomUUID(), imageId, createdAt: new Date().toISOString() })
+    .onConflictDoNothing({ target: favorites.imageId })
+    .run();
+}
+
+export async function addFavorite(
+  imageId: string,
+  client: DbClient = db,
+): Promise<GalleryItem> {
+  const image = getImage(imageId, client);
+  if (image.sourceKind === 'managed') {
+    client.transaction((tx) => insertFavorite(imageId, tx), { behavior: 'immediate' });
+    return getFavoriteByImageId(imageId, client);
+  }
+  if (image.remoteUrl === null) unavailableImage(imageId, client);
+
+  const stored = await downloadAndStore(image.remoteUrl);
+  let promotedStoredBytes = false;
+  try {
+    client.transaction((tx) => {
+      const promoted = promoteRemoteImageToManaged(imageId, stored, tx);
+      promotedStoredBytes = promoted;
+      if (!promoted) {
+        const current = getImage(imageId, tx);
+        if (current.sourceKind !== 'managed' || current.storagePath === null) {
+          unavailableImage(imageId, tx);
+        }
+      }
+      insertFavorite(imageId, tx);
+    }, { behavior: 'immediate' });
+  } catch (error) {
+    try {
+      removeStoredFile(stored.storagePath);
+    } catch {
+      // Orphan cleanup handles a crash or failed compensation.
+    }
+    throw error;
+  }
+  if (!promotedStoredBytes) {
+    try {
+      removeStoredFile(stored.storagePath);
+    } catch {
+      // Orphan cleanup handles a crash or failed compensation.
+    }
+  }
   return getFavoriteByImageId(imageId, client);
 }
 

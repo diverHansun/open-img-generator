@@ -15,6 +15,7 @@ import {
   ImageUnavailableError,
   GenerationNotDeletableError,
   OutcomeUnknownDeleteConfirmationRequiredError,
+  StorageError,
 } from '../../lib/errors';
 import { logApiFailure } from '../../lib/observability/safe-logger';
 import {
@@ -77,6 +78,16 @@ function safeSchemaDetails(error: SchemaNotReadyError): SafeErrorDetails {
 }
 
 function classifyApiError(err: unknown): StructuredApiError {
+  if (err instanceof StorageError) {
+    return {
+      code: 'STORAGE_ERROR',
+      message: err.message,
+      safeMessage: 'Unable to save the image locally',
+      retryable: err.retryable,
+      status: err.retryable ? 503 : 422,
+      ...(err.diagnostic ? { details: err.diagnostic } : {}),
+    };
+  }
   if (err instanceof ImageUnavailableError) {
     const code = {
       retention_expired: 'IMAGE_EXPIRED',

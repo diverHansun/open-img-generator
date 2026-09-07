@@ -11,6 +11,7 @@ import {
 import { ImagePreviewDialog } from '@/components/dialogs/image-preview-dialog';
 import { useLocale } from '@/components/i18n/locale-provider';
 import { PageHeader } from '@/components/shell/page-header';
+import { useWorkspaceNotices } from '@/components/shell/workspace-notices';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { InlineNotice } from '@/components/ui/inline-notice';
@@ -99,6 +100,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { t } = useLocale();
+  const { showWorkspaceNotice } = useWorkspaceNotices();
   const parsed = parseGalleryFilters(
     searchParams.get('workspace'),
     searchParams.get('provider'),
@@ -433,6 +435,55 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
     }
   }
 
+  async function saveRemoteFavorite(item: GalleryItem) {
+    if (pendingFavoriteIdsRef.current.has(item.imageId)) return;
+    pendingFavoriteIdsRef.current.add(item.imageId);
+    setMutations((current) => ({
+      ...current,
+      [item.imageId]: { favorited: true, pending: true, error: null },
+    }));
+    try {
+      const updatedItem = await client.addFavorite(item.imageId);
+      if (!mountedRef.current) return;
+      setMutations((current) => ({
+        ...current,
+        [item.imageId]: { favorited: true, pending: false, error: null },
+      }));
+      setState((current) =>
+        updateSnapshot(current, (currentSnapshot) => ({
+          ...currentSnapshot,
+          items: currentSnapshot.items.map((entry) =>
+            entry.imageId === item.imageId ? updatedItem : entry,
+          ),
+        })),
+      );
+      setActiveDialog((current) =>
+        current?.kind === 'preview' && current.item.imageId === item.imageId
+          ? { ...current, item: updatedItem }
+          : current,
+      );
+      setAnnouncement(t('gallery.savedLocal'));
+    } catch {
+      if (!mountedRef.current) return;
+      setMutations((current) => ({
+        ...current,
+        [item.imageId]: {
+          favorited: true,
+          pending: false,
+          error: t('gallery.saveLocalError'),
+        },
+      }));
+      setAnnouncement(t('gallery.saveLocalError'));
+      showWorkspaceNotice({
+        variant: 'error',
+        title: t('gallery.favoriteError'),
+        detail: t('gallery.saveLocalError'),
+      });
+    } finally {
+      pendingFavoriteIdsRef.current.delete(item.imageId);
+    }
+  }
+
   function applyDetailFavorite(change: GenerationFavoriteChange) {
     const removalFallback = change.favorited
       ? null
@@ -635,6 +686,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
                     )
                   }
                   onFavoriteChange={(next) => void changeFavorite(item, next)}
+                  onSaveLocally={() => void saveRemoteFavorite(item)}
                 />
               );
             })}

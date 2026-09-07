@@ -32,7 +32,10 @@
 | L2 | createSession 成功后 listSessions | 仅出现在该 project |
 | L3 | 无法表示 projectId=null 的 session | schema/API 层拒绝 |
 | L4 | listRecentGenerations(limit=10) | 按时间倒序，条数 ≤10 |
-| L5 | addFavorite 两次同一 image | 幂等，仍一条 |
+| L5 | addFavorite 两次同一 managed image | 幂等，仍一条 |
+| L5a | addFavorite remote image | storage 成功、Image 提升为 managed、再创建 favorite |
+| L5b | remote 下载、提升或 favorite 写入失败 | 不创建 favorite；已写的新文件立即补偿或由 orphan cleanup 接管 |
+| L5c | 历史 remote favorite 的补存 | 仅显式命令触发；原图丢失则保留 favorite 且显示不可用状态 |
 | L6 | listFavorites 含 job/generation/session/project 回溯 | 字段齐全 |
 | L7 | setModelEnabled(false) 后 listEnabled | 不含该项 |
 | L8 | moveSession 到另一 project | listSessions 源空、目标有；generation 仍同 sessionId |

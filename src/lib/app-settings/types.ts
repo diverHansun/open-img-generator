@@ -12,6 +12,8 @@ export type StoredAppSettings = Readonly<{
 }>;
 
 export type LocalDataSummary = Readonly<{
+  /** Logical application-managed location, never an absolute path. */
+  storageDirectory: 'images/';
   mediaBytes: number;
   databaseBytes: number;
   logBytes: number;

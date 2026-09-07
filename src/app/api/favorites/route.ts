@@ -34,7 +34,7 @@ export async function POST(request: Request) {
       throw new ValidationError('imageId is required');
     }
     // A repeated favorite is idempotent, so the stable response is 200.
-    return NextResponse.json(addFavorite(body.imageId, db));
+    return NextResponse.json(await addFavorite(body.imageId, db));
   } catch (err) {
     return handleApiError(err, { structured: true });
   }

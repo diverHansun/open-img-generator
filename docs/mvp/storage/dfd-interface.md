@@ -10,7 +10,7 @@
 
 | 方向 | 模块 | 交互内容 |
 |------|------|----------|
-| 上游调用方 | job-engine | downloadAndStore(url) → storagePath |
+| 上游调用方 | job-engine、library favorites | downloadAndStore(url) → storagePath |
 | 上游调用方 | API 层 | getReadStream(storagePath) → 文件流 |
 | 下游依赖 | 远程 URL（厂商 CDN） | HTTP GET 下载 |
 | 下游依赖 | 本地文件系统（v1） | 文件写入/读取 |
@@ -32,6 +32,8 @@ job-engine
   → 返回 { storagePath, contentType, sizeBytes }
 → job-engine 将 storagePath 写入 db image 记录
 ```
+
+收藏补存沿用该安全下载和原子落盘路径：`library.addFavorite` 仅在用户新收藏或历史卡片显式“保存到本地”时调用；它在 DB 中把 remote Image CAS 提升为 managed 后才写 favorite。若 DB 步骤失败，library 立即删除本次新文件；进程崩溃残留由 orphan cleanup 回收。
 
 ### 2.2 读取（API 层图片访问）
 

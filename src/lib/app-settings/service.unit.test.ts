@@ -74,6 +74,7 @@ describe('app settings', () => {
     fs.writeFileSync(path.join(tempDir, 'app.db'), '12');
 
     expect(getLocalDataSummary()).toEqual({
+      storageDirectory: 'images/',
       mediaBytes: 4,
       databaseBytes: 2,
       logBytes: 3,

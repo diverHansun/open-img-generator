@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   IdempotencyKeyReusedError,
   SchemaNotReadyError,
+  StorageError,
   ValidationError,
 } from '../../lib/errors';
 import { handleApiError } from './error-handler';
@@ -64,6 +65,29 @@ describe('API error handler', () => {
         },
       },
     });
+  });
+
+  it('exposes only safe storage diagnostics with their retryability', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const response = handleApiError(
+      new StorageError('private provider URL must not leak', {
+        retryable: true,
+        diagnostic: { category: 'remote_download_failed', hostname: 'cdn.example.test' },
+      }),
+      { structured: true, requestId: 'request-storage-1' },
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'STORAGE_ERROR',
+        message: 'Unable to save the image locally',
+        retryable: true,
+        requestId: 'request-storage-1',
+        details: { category: 'remote_download_failed', hostname: 'cdn.example.test' },
+      },
+    });
+    expect(errorSpy.mock.calls.flat().join(' ')).toContain('STORAGE_ERROR');
   });
 
   it('redacts unexpected errors from both the response and structured log', async () => {

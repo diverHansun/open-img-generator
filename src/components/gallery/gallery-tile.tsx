@@ -5,6 +5,7 @@ import { ImageOff } from 'lucide-react';
 
 import { FavoriteButton } from '@/components/generation/favorite-button';
 import { useLocale } from '@/components/i18n/locale-provider';
+import { Button } from '@/components/ui/button';
 import { accessibleExcerpt } from '@/lib/a11y';
 import { formatRelativeTime } from '@/lib/i18n/format';
 import type { GalleryItem } from '@/lib/web-client';
@@ -18,12 +19,14 @@ export function GalleryTile({
   favoritePending,
   onOpen,
   onFavoriteChange,
+  onSaveLocally,
 }: {
   item: GalleryItem;
   favorited: boolean;
   favoritePending: boolean;
   onOpen: (trigger: HTMLElement) => void;
   onFavoriteChange: (next: boolean) => void;
+  onSaveLocally?: () => void;
 }) {
   const { locale, t } = useLocale();
   const [failed, setFailed] = React.useState(false);
@@ -79,6 +82,17 @@ export function GalleryTile({
             })}
           </small>
         </span>
+        {item.delivery === 'remote' && item.availability === 'available' ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            disabled={favoritePending}
+            onClick={onSaveLocally}
+          >
+            {t('gallery.saveLocal')}
+          </Button>
+        ) : null}
         <FavoriteButton
           favorited={favorited}
           pending={favoritePending}

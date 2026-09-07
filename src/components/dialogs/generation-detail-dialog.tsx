@@ -13,6 +13,7 @@ import {
 import { reconcileGenerationSnapshot } from '@/components/generation/generation-view-state';
 import { GenerationStatus } from '@/components/generation/generation-status';
 import { useLocale } from '@/components/i18n/locale-provider';
+import { useWorkspaceNotices } from '@/components/shell/workspace-notices';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -22,7 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { accessibleExcerpt } from '@/lib/a11y';
 import { formatDateTime } from '@/lib/i18n/format';
-import { imageDownloadUrl, triggerImageDownload } from '@/lib/web-client/image-download';
+import { imageDownloadUrl } from '@/lib/web-client/image-download';
 import {
   ApiClientError,
   getBrowserWebClientRuntime,
@@ -105,6 +106,7 @@ export function GenerationDetailDialog({
     [],
   );
   const { locale, t } = useLocale();
+  const { showWorkspaceNotice } = useWorkspaceNotices();
   const [view, setView] = React.useState<GenerationView | null>(null);
   const [loadError, setLoadError] = React.useState<Error | null>(null);
   const [retryNonce, setRetryNonce] = React.useState(0);
@@ -167,7 +169,6 @@ export function GenerationDetailDialog({
 
   const updateFavorite = React.useCallback(
     async (imageId: string, next: boolean) => {
-      if (next) triggerImageDownload(imageId);
       setFavoriteMutations((current) => ({
         ...current,
         [imageId]: { value: next, pending: true, error: null },
@@ -196,9 +197,14 @@ export function GenerationDetailDialog({
             error: t('dialogs.favoriteError'),
           },
         }));
+        showWorkspaceNotice({
+          variant: 'error',
+          title: t('dialogs.favoriteError'),
+          detail: next ? t('dialogs.favoriteStorageError') : undefined,
+        });
       }
     },
-    [client, onFavoriteChange, t],
+    [client, onFavoriteChange, showWorkspaceNotice, t],
   );
 
   const cancel = React.useCallback(async () => {

@@ -33,6 +33,7 @@ import {
 } from '@/lib/web-client';
 
 import styles from './workspace-shell.module.css';
+import { WorkspaceNoticeProvider } from './workspace-notices';
 
 const navigation: Array<{
   segment: WorkspaceSection;
@@ -215,7 +216,7 @@ export function WorkspaceShell({
           </section>
         ) : workspace ? (
           <WorkspaceContext.Provider value={workspace}>
-            {children}
+            <WorkspaceNoticeProvider>{children}</WorkspaceNoticeProvider>
           </WorkspaceContext.Provider>
         ) : (
           <p className={styles.loading}>{t('workspace.loading')}</p>

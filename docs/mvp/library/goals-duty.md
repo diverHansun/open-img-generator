@@ -35,7 +35,7 @@
 1. **Project 生命周期**: 创建、列出、更新标题、（MVP 可选）软删除或拒绝删除有内容的 Project。
 2. **Session 生命周期（必须挂 Project）**: 在指定 Project 下创建 Session；列出某 Project 的 Sessions；更新标题；支持将会话在 Project 之间移动（迁移 `project_id`）。
 3. **History 查询**: 按 Project / Session 返回结构化生成记录（含 generation 摘要、jobs、images 引用）；支持「最近 N 次 generation」供 Generate 首页（默认 N=10）。
-4. **Favorite（Gallery）**: 对单张 Image 收藏/取消收藏；列出收藏（时间倒序）；提供详情所需的回溯信息（至少 imageId、jobId、generationId、sessionId、projectId、prompt 摘要、provider/model）。
+4. **Favorite（Gallery）**: 对单张 Image 收藏/取消收藏；新收藏必须先把远程原图落入受管 storage，再原子提升 Image 并写入收藏；列出收藏（时间倒序）；提供详情所需的回溯信息（至少 imageId、jobId、generationId、sessionId、projectId、prompt 摘要、provider/model）。历史远程收藏仅在用户主动“保存到本地”时尝试补存；已删除或丢失的原图保留收藏与来源记录。
 5. **模型启用偏好**: 读写「已写入的 (provider, model) 启用行」；**无行 = 默认启用**；仅 `enabled=false` 从工作台池剔除；写入时校验 registry。
 6. **供 API 层调用的领域服务入口**: 对外以清晰函数/用例 API 提供上述能力；不直接处理 HTTP。HTTP 形状以 `api/constraints.md` §14–§15 为准。
 
@@ -43,7 +43,7 @@
 
 ## 3. Non-Duties（非职责）
 
-1. **不执行生成、不推进 job、不转存图片**: 归属 job-engine + storage。
+1. **不执行生成、不推进 job**: 归属 job-engine。Favorite 可调用 storage 取得原图字节，但不处理 provider 生成编排。
 2. **不持有厂商 API key、不决定 provider 是否因 key 启用**: 本轮 env + providers registry；后续 user-config。
 3. **不渲染 UI**: 归属 web-ui；library 只提供数据与命令。
 4. **不做多用户鉴权与租户隔离**。

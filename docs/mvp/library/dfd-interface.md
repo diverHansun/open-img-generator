@@ -42,8 +42,10 @@ web-ui ──HTTP──► api routes ──► library ──► db
 
 ### 2.4 收藏 → Gallery
 
-1. UI 对 imageId 收藏 → `library.addFavorite` → 校验 image 存在 → insert favorite
-2. Gallery 列表 → `library.listFavorites` → join image/job/generation/session/project → GalleryItem[]
+1. UI 对 imageId 收藏 → `library.addFavorite`。受管图片在 immediate transaction 内幂等写 favorite；远程图片先 `storage.downloadAndStore(remoteUrl)`，再在同一 immediate transaction 内 CAS 提升为受管图片并写 favorite。
+2. storage 成功但提升未成功时，若当前图片已由其他请求提升则删除本次多余文件；若已成为墓碑则删除本次文件并返回不可用。下载或任一写入失败都不保留新 favorite。
+3. 历史 remote favorite 在 Gallery 仅由用户点“保存到本地”触发同一条补存路径；列表读取与清理不自动下载。
+4. Gallery 列表 → `library.listFavorites` → join image/job/generation/session/project → GalleryItem[]；原图丢失时返回 `url: null` 与不可用状态，不删除 favorite。
 
 ### 2.5 模型启用池
 

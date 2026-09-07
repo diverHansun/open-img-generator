@@ -14,9 +14,9 @@ import {
 } from '@/components/generation/job-error';
 import { reconcileGenerationSnapshot } from '@/components/generation/generation-view-state';
 import { useLocale } from '@/components/i18n/locale-provider';
+import { useWorkspaceNotices } from '@/components/shell/workspace-notices';
 import { Button } from '@/components/ui/button';
 import { accessibleExcerpt } from '@/lib/a11y';
-import { triggerImageDownload } from '@/lib/web-client/image-download';
 import { workspaceRoute } from '@/lib/routes';
 import {
   areAllJobsTerminal,
@@ -95,6 +95,7 @@ export function GenerateStage({
   onBack,
 }: GenerateStageProps) {
   const { t } = useLocale();
+  const { showWorkspaceNotice } = useWorkspaceNotices();
   const router = useRouter();
   const runtime = React.useMemo(() => getBrowserWebClientRuntime(), []);
   const [view, setView] = React.useState<GenerationView | null>(
@@ -227,7 +228,6 @@ export function GenerateStage({
       const hadPreviousOverride = favoriteOverrides.current.has(imageId);
       const previousOverride = favoriteOverrides.current.get(imageId);
       const optimistic = patchFavorite(current, imageId, nextFavorited);
-      if (nextFavorited) triggerImageDownload(imageId);
       favoriteOverrides.current.set(imageId, nextFavorited);
       favoritePendingRef.current.add(imageId);
       setFavoriteError(false);
@@ -247,6 +247,13 @@ export function GenerateStage({
             patchFavorite(viewRef.current, imageId, previousFavorited),
           );
           setFavoriteError(true);
+          showWorkspaceNotice({
+            variant: 'error',
+            title: t('generate.favoriteError'),
+            detail: nextFavorited
+              ? t('generate.favoriteStorageError')
+              : undefined,
+          });
         }
       } finally {
         favoritePendingRef.current.delete(imageId);
@@ -259,7 +266,7 @@ export function GenerateStage({
         }
       }
     },
-    [commitView, runtime],
+    [commitView, runtime, showWorkspaceNotice, t],
   );
 
   const summary = view ? summarizeGeneration(view) : null;

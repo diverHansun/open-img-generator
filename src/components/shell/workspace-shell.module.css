@@ -104,6 +104,25 @@
   padding: clamp(1.75rem, 3vw, 2.875rem) clamp(1.125rem, 3vw, 3rem) 4rem;
 }
 
+.noticeStack {
+  position: fixed;
+  z-index: 60;
+  top: var(--space-4);
+  left: 50%;
+  display: grid;
+  width: min(30rem, calc(100vw - 2rem));
+  gap: var(--space-2);
+  transform: translateX(-50%);
+}
+
+.noticeCard {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+}
+
 .mobileHeader {
   display: none;
 }
@@ -193,6 +212,10 @@
     background: var(--color-surface);
     background: var(--color-glass);
     backdrop-filter: blur(16px) saturate(108%);
+  }
+
+  .noticeStack {
+    top: calc(3.5rem + var(--space-3));
   }
 
   .mobileHeader strong {

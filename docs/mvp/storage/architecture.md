@@ -21,6 +21,6 @@
 
 ## 并发边界
 
-cleanup 不参与 provider 调用；worker 使用传入的 `DbClient`。测试实例必须成对隔离 `DATABASE_URL` 与 `LOCAL_STORAGE_DIR`，storage ownership 再提供 fail-closed 防线。`markImageExpiredIfUnfavorited` 与收藏写入都使用 SQLite immediate transaction；收藏先胜则 cleanup 条件更新为 0，cleanup 先胜则墓碑不可重新收藏。主动单图删除在短事务中移除 favorite 并写 `user_deleted` 墓碑。
+cleanup 不参与 provider 调用；worker 使用传入的 `DbClient`。测试实例必须成对隔离 `DATABASE_URL` 与 `LOCAL_STORAGE_DIR`，storage ownership 再提供 fail-closed 防线。远程图片收藏先完成受管文件落盘，再由 library 用 SQLite immediate transaction CAS 提升 Image 并写 favorite；任何 DB 失败都补偿本次文件，崩溃残留由 orphan scan 回收。`markImageExpiredIfUnfavorited` 与收藏写入都使用 SQLite immediate transaction；收藏先胜则 cleanup 条件更新为 0，cleanup 先胜则墓碑不可重新收藏。主动单图删除在短事务中移除 favorite 并写 `user_deleted` 墓碑。
 
 所有权认领仅允许空目录，或现有正式媒体集合与当前 DB 的 live image/video 引用完全一致。marker 仅保存协议版本与 canonical DB path 的 SHA-256，不保存绝对路径。清理、所有权、缺失检测和恢复事件通过安全 allowlist logger 写 stderr 与有界 JSONL；原始错误、Prompt、URL 和本机路径不会进入日志。

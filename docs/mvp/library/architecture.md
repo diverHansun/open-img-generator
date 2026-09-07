@@ -22,10 +22,10 @@ library/
 | **projects** | Project 命令与查询 | `db` |
 | **sessions** | Session 命令与查询；校验所属 Project 存在 | `db`、projects（逻辑依赖） |
 | **history** | 组装 History / 首页「最近 N 次」视图 | `db`（generations/jobs/images） |
-| **favorites** | 收藏写与 Gallery 读；回溯拼装 | `db` |
+| **favorites** | 收藏写与 Gallery 读；远程原图在收藏前落本地、失败补偿与回溯拼装 | `db`、`storage` |
 | **model-prefs** | 启用集合持久化；与 registry 做交集过滤（过滤在读路径） | `db`、可选 `providers` registry（只读） |
 
-**依赖方向（允许）**: library → db；library → providers（只读 registry/capabilities，用于校验偏好项仍合法）。
+**依赖方向（允许）**: library → db；library → providers（只读 registry/capabilities，用于校验偏好项仍合法）；`favorites` → storage（仅受管原图落盘与失败补偿）。
 **禁止**: library → job-engine；job-engine → library（避免环）。Session 存在性校验在 job-engine/API 侧调用 db 或 library 的只读校验函数（若共用，放 db/queries 或 library/sessions 只读导出，由 API 编排）。
 
 ---

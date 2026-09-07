@@ -165,7 +165,7 @@ describe('library API contracts', () => {
   });
 
   it('returns an idempotent favorite as 200', async () => {
-    vi.mocked(library.addFavorite).mockReturnValue(galleryItem);
+    vi.mocked(library.addFavorite).mockResolvedValue(galleryItem);
 
     const response = await postFavorite(
       jsonRequest('/api/favorites', { imageId: 'image-1' }),

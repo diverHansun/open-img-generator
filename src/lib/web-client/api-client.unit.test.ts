@@ -25,7 +25,13 @@ describe('web API client', () => {
   it('reads and updates the local settings through the typed client', async () => {
     const payload = {
       settings: { imageRetentionDays: null },
-      localData: { mediaBytes: 4, databaseBytes: 2, logBytes: 3, totalBytes: 9 },
+      localData: {
+        storageDirectory: 'images/',
+        mediaBytes: 4,
+        databaseBytes: 2,
+        logBytes: 3,
+        totalBytes: 9,
+      },
       webCapabilities: { managesDownloadLocation: false, canOpenDataDirectory: false },
       app: { version: '0.1.0', license: 'Apache-2.0' },
     };
@@ -88,6 +94,29 @@ describe('web API client', () => {
         false,
       ),
     );
+  });
+
+  it('preserves the server-approved storage diagnostic for the retry decision', async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'STORAGE_ERROR',
+            message: 'Unable to save the image locally',
+            retryable: true,
+            details: { category: 'remote_download_failed', hostname: 'cdn.example.test' },
+          },
+        }),
+        { status: 503, statusText: 'Service Unavailable' },
+      ),
+    );
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.addFavorite('image-1')).rejects.toMatchObject({
+      code: 'STORAGE_ERROR',
+      retryable: true,
+      details: { category: 'remote_download_failed', hostname: 'cdn.example.test' },
+    });
   });
 
   it('prefers a valid body request ID and parses delta-seconds Retry-After', async () => {

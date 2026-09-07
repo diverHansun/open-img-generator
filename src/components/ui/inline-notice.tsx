@@ -14,16 +14,18 @@ export function InlineNotice({
   title,
   children,
   action,
+  className,
 }: {
   variant?: keyof typeof icons;
   title: string;
   children?: React.ReactNode;
   action?: React.ReactNode;
+  className?: string;
 }) {
   const Icon = icons[variant];
   return (
     <section
-      className={styles.notice}
+      className={[styles.notice, className].filter(Boolean).join(' ')}
       data-variant={variant}
       role={variant === 'error' ? 'alert' : 'status'}
     >

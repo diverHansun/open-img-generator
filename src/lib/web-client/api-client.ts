@@ -26,6 +26,7 @@ export class ApiClientError extends Error {
     readonly retryable = status === 429 || status >= 500,
     readonly requestId?: string,
     readonly retryAfterMs?: number,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = 'ApiClientError';
@@ -124,6 +125,19 @@ function parseRetryAfter(value: string | null): number | undefined {
   return Math.min(milliseconds, MAX_RETRY_AFTER_MS);
 }
 
+function safeErrorDetails(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const details = Object.entries(value as Record<string, unknown>)
+    .filter(([, item]) =>
+      typeof item === 'string' ||
+      typeof item === 'number' ||
+      typeof item === 'boolean' ||
+      (Array.isArray(item) && item.every((entry) => typeof entry === 'string')),
+    )
+    .slice(0, 20);
+  return details.length > 0 ? Object.fromEntries(details) : undefined;
+}
+
 async function toApiClientError(response: Response): Promise<ApiClientError> {
   const payload = (await response.json().catch(() => null)) as
     | { error?: unknown }
@@ -148,6 +162,7 @@ async function toApiClientError(response: Response): Promise<ApiClientError> {
         structured.error.retryable,
         validRequestId(structured.error.requestId) ?? headerRequestId,
         retryAfterMs,
+        safeErrorDetails(structured.error.details),
       );
     }
   }

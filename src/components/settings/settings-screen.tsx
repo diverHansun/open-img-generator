@@ -266,14 +266,8 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
 
           <section className={styles.section} aria-labelledby="directory-title">
             <h2 id="directory-title">{t('settings.dataDirectory.title')}</h2>
-            <p>
-              {desktopInfo
-                ? t('settings.dataDirectory.desktopDescription')
-                : t('settings.dataDirectory.description')}
-            </p>
-            {desktopInfo ? (
-              <code className={styles.pathValue}>{desktopInfo.dataDirectory}</code>
-            ) : null}
+            <p>{t('settings.dataDirectory.description')}</p>
+            <code className={styles.pathValue}>{view.localData.storageDirectory}</code>
             <Button
               type="button"
               variant="secondary"

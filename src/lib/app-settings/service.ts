@@ -108,6 +108,7 @@ export function getLocalDataSummary(): LocalDataSummary {
   const databaseBytesTotal = databaseBytes();
   const logBytes = bytesForDirectory(getLocalLogDirectory());
   return {
+    storageDirectory: 'images/',
     mediaBytes,
     databaseBytes: databaseBytesTotal,
     logBytes,
