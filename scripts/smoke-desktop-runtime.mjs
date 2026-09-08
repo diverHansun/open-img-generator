@@ -167,7 +167,15 @@ try {
     throw new Error(`Authenticated settings failed with ${authorized.status}`);
   }
   const body = await authorized.json();
-  if (body.app?.version !== '0.1.0' || body.localData?.mediaBytes !== 0) {
+  const serializedBody = JSON.stringify(body);
+  if (
+    body.app?.version !== '0.1.0'
+    || body.localData?.storageDirectory !== 'images/'
+    || !Number.isSafeInteger(body.localData?.mediaBytes)
+    || body.localData.mediaBytes < 0
+    || body.webCapabilities?.canOpenDataDirectory !== false
+    || serializedBody.includes(temporaryRoot)
+  ) {
     throw new Error(`Unexpected desktop settings payload: ${JSON.stringify(body)}`);
   }
 

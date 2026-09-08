@@ -41,11 +41,13 @@ function ensureWritableDirectory(directory, resource, options) {
   const fileSystem = fileSystemFrom(options);
   let probePath;
   try {
-    fileSystem.mkdirSync(directory, { recursive: true });
+    const createdDirectory = fileSystem.mkdirSync(directory, { recursive: true });
     if (!fileSystem.statSync(directory).isDirectory()) {
       throw Object.assign(new Error('Path is not a directory'), { code: 'ENOTDIR' });
     }
-    applyPrivateDirectoryPermissions(directory, options);
+    if (createdDirectory !== undefined) {
+      applyPrivateDirectoryPermissions(directory, options);
+    }
     probePath = path.join(directory, `.write-probe-${process.pid}-${randomUUID()}`);
     fileSystem.writeFileSync(probePath, '', { flag: 'wx', mode: 0o600 });
     applyPrivateFilePermissions(probePath, options);

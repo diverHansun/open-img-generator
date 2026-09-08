@@ -64,6 +64,25 @@ describe('runtime path preflight', () => {
     ]);
   });
 
+  it('does not change permissions on pre-existing configured directories', () => {
+    const runtimePaths = paths();
+    const directories = [
+      path.dirname(runtimePaths.databasePath),
+      runtimePaths.storageRoot,
+      runtimePaths.userConfigDirectory,
+      runtimePaths.logDirectory,
+    ];
+    directories.forEach((directory) => fs.mkdirSync(directory, { recursive: true }));
+    const chmodSync = vi.fn(fs.chmodSync);
+
+    expect(preflightRuntimePaths(runtimePaths, {
+      fileSystem: { ...fs, chmodSync },
+    })).toEqual({ warnings: [] });
+    expect(chmodSync.mock.calls.map(([target]) => target)).not.toEqual(
+      expect.arrayContaining(directories),
+    );
+  });
+
   it('requests POSIX private modes but leaves Windows ACL inheritance intact', () => {
     const chmodSync = vi.fn();
     const fileSystem = { chmodSync };

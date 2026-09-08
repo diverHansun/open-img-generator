@@ -22,8 +22,6 @@ if (!supportedNodeMajors.has(nodeMajor)) {
   process.exit(1);
 }
 
-const { default: Database } = await import('better-sqlite3');
-
 const scriptDirectory =
   typeof __dirname === 'string'
     ? __dirname
@@ -78,11 +76,11 @@ const schemaManifest = JSON.parse(
 const requiredVersion = schemaManifest.version;
 const databasePath = runtimePaths.databasePath;
 
-function acquireMigrationLock() {
+function acquireMigrationLock(DatabaseConstructor) {
   if (databasePath === ':memory:') return null;
   const lockPath = `${databasePath}.migrate-lock.sqlite`;
   const timeoutMs = Number(process.env.MIGRATION_LOCK_TIMEOUT_MS ?? 10_000);
-  const lockDatabase = new Database(lockPath, { timeout: timeoutMs });
+  const lockDatabase = new DatabaseConstructor(lockPath, { timeout: timeoutMs });
   try {
     lockDatabase.exec(
       'CREATE TABLE IF NOT EXISTS migration_lock (id INTEGER PRIMARY KEY)',
@@ -107,7 +105,8 @@ function releaseMigrationLock(lockDatabase) {
 }
 
 async function main() {
-  const migrationLock = acquireMigrationLock();
+  const { default: Database } = await import('better-sqlite3');
+  const migrationLock = acquireMigrationLock(Database);
   let sqlite;
 
   try {
