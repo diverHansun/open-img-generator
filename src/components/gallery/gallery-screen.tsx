@@ -13,6 +13,7 @@ import { useLocale } from '@/components/i18n/locale-provider';
 import { PageHeader } from '@/components/shell/page-header';
 import {
   favoriteErrorNotice,
+  favoriteSaveErrorNotice,
   favoriteSuccessNotice,
   useWorkspaceNotices,
 } from '@/components/shell/workspace-notices';
@@ -423,7 +424,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
         showWorkspaceNotice(favoriteSuccessNotice(t('gallery.favoriteRemoved')));
         focusAfterTileRemoval(removalFallback);
       }
-    } catch {
+    } catch (error) {
       if (!mountedRef.current) return;
       setMutations((current) => ({
         ...current,
@@ -432,7 +433,14 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
           pending: false,
         },
       }));
-      showWorkspaceNotice(favoriteErrorNotice(t('gallery.favoriteError')));
+      showWorkspaceNotice(next
+        ? favoriteSaveErrorNotice(error, {
+          generic: t('gallery.favoriteError'),
+          retryable: t('gallery.favoriteError'),
+          storage: t('gallery.saveLocalError'),
+          unavailable: t('gallery.favoriteUnavailable'),
+        })
+        : favoriteErrorNotice(t('gallery.favoriteError')));
     } finally {
       pendingFavoriteIdsRef.current.delete(item.imageId);
       mutationEpochRef.current += 1;
@@ -467,7 +475,7 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
           : current,
       );
       showWorkspaceNotice(favoriteSuccessNotice(t('gallery.savedLocal')));
-    } catch {
+    } catch (error) {
       if (!mountedRef.current) return;
       setMutations((current) => ({
         ...current,
@@ -476,9 +484,12 @@ export function GalleryScreen({ projectId }: { projectId: string }) {
           pending: false,
         },
       }));
-      showWorkspaceNotice(
-        favoriteErrorNotice(t('gallery.favoriteError'), t('gallery.saveLocalError')),
-      );
+      showWorkspaceNotice(favoriteSaveErrorNotice(error, {
+        generic: t('gallery.favoriteError'),
+        retryable: t('gallery.favoriteError'),
+        storage: t('gallery.saveLocalError'),
+        unavailable: t('gallery.favoriteUnavailable'),
+      }));
     } finally {
       pendingFavoriteIdsRef.current.delete(item.imageId);
     }

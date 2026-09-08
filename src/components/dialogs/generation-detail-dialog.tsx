@@ -15,6 +15,7 @@ import { GenerationStatus } from '@/components/generation/generation-status';
 import { useLocale } from '@/components/i18n/locale-provider';
 import {
   favoriteErrorNotice,
+  favoriteSaveErrorNotice,
   favoriteSuccessNotice,
   useWorkspaceNotices,
 } from '@/components/shell/workspace-notices';
@@ -43,6 +44,39 @@ export type GenerationFavoriteChange = {
   favorited: boolean;
   galleryItem?: GalleryItem;
 };
+
+export function settleFavoriteMutation({
+  mounted,
+  open,
+  onSettled,
+}: {
+  mounted: () => boolean;
+  open: () => boolean;
+  onSettled: () => void;
+}): boolean {
+  if (!mounted()) return false;
+  onSettled();
+  return mounted() && open();
+}
+
+export function reconcileCompletedFavoriteChange({
+  mounted,
+  open,
+  onSettled,
+  onFavoriteChange,
+  change,
+}: {
+  mounted: () => boolean;
+  open: () => boolean;
+  onSettled?: () => void;
+  onFavoriteChange?: (change: GenerationFavoriteChange) => void;
+  change: GenerationFavoriteChange;
+}): boolean {
+  if (!mounted()) return false;
+  onSettled?.();
+  onFavoriteChange?.(change);
+  return mounted() && open();
+}
 
 type FavoriteMutation = {
   value: boolean;
@@ -191,39 +225,46 @@ export function GenerationDetailDialog({
           ? await client.addFavoriteWithBrowserFallback(imageId)
           : undefined;
         if (!next) await client.removeFavorite(imageId);
-        if (!mountedRef.current || !openRef.current) return;
+        const shouldUpdateDialog = reconcileCompletedFavoriteChange({
+          mounted: () => mountedRef.current,
+          open: () => openRef.current,
+          onSettled: () => setFavoriteMutations((current) => ({
+            ...current,
+            [imageId]: { value: next, pending: false },
+          })),
+          onFavoriteChange,
+          change: { imageId, favorited: next, galleryItem },
+        });
+        if (!shouldUpdateDialog) return;
         setView((current) =>
           current ? patchFavorite(current, imageId, next) : current,
         );
-        setFavoriteMutations((current) => ({
-          ...current,
-          [imageId]: { value: next, pending: false },
-        }));
-        onFavoriteChange?.({
-          imageId,
-          favorited: next,
-          galleryItem,
-        });
         showWorkspaceNotice(
           favoriteSuccessNotice(
             t(next ? 'dialogs.favoriteAdded' : 'dialogs.favoriteRemoved'),
           ),
         );
-      } catch {
-        if (!mountedRef.current || !openRef.current) return;
-        setFavoriteMutations((current) => ({
-          ...current,
-          [imageId]: {
-            value: !next,
-            pending: false,
-          },
-        }));
-        showWorkspaceNotice(
-          favoriteErrorNotice(
-            t('dialogs.favoriteError'),
-            next ? t('dialogs.favoriteStorageError') : undefined,
-          ),
-        );
+      } catch (error) {
+        const shouldPresentFailure = settleFavoriteMutation({
+          mounted: () => mountedRef.current,
+          open: () => openRef.current,
+          onSettled: () => setFavoriteMutations((current) => ({
+            ...current,
+            [imageId]: {
+              value: !next,
+              pending: false,
+            },
+          })),
+        });
+        if (!shouldPresentFailure) return;
+        showWorkspaceNotice(next
+          ? favoriteSaveErrorNotice(error, {
+            generic: t('dialogs.favoriteError'),
+            retryable: t('dialogs.favoriteError'),
+            storage: t('dialogs.favoriteStorageError'),
+            unavailable: t('dialogs.favoriteUnavailable'),
+          })
+          : favoriteErrorNotice(t('dialogs.favoriteError')));
       }
     },
     [client, onFavoriteChange, showWorkspaceNotice, t],

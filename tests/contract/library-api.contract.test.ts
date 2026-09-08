@@ -223,7 +223,7 @@ describe('library API contracts', () => {
       { params: Promise.resolve({ id: 'image-1' }) },
     );
 
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(200);
     expect(storage.storeBrowserImageStream).not.toHaveBeenCalled();
     expect(library.pinRemoteImage).not.toHaveBeenCalled();
   });

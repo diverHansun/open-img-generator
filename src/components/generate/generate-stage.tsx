@@ -16,6 +16,7 @@ import { reconcileGenerationSnapshot } from '@/components/generation/generation-
 import { useLocale } from '@/components/i18n/locale-provider';
 import {
   favoriteErrorNotice,
+  favoriteSaveErrorNotice,
   favoriteSuccessNotice,
   useWorkspaceNotices,
 } from '@/components/shell/workspace-notices';
@@ -245,7 +246,7 @@ export function GenerateStage({
             ),
           );
         }
-      } catch {
+      } catch (error) {
         if (hadPreviousOverride && previousOverride !== undefined) {
           favoriteOverrides.current.set(imageId, previousOverride);
         } else {
@@ -255,12 +256,14 @@ export function GenerateStage({
           commitView(
             patchFavorite(viewRef.current, imageId, previousFavorited),
           );
-          showWorkspaceNotice(
-            favoriteErrorNotice(
-              t('generate.favoriteError'),
-              nextFavorited ? t('generate.favoriteStorageError') : undefined,
-            ),
-          );
+          showWorkspaceNotice(nextFavorited
+            ? favoriteSaveErrorNotice(error, {
+              generic: t('generate.favoriteError'),
+              retryable: t('generate.favoriteError'),
+              storage: t('generate.favoriteStorageError'),
+              unavailable: t('generate.favoriteUnavailable'),
+            })
+            : favoriteErrorNotice(t('generate.favoriteError')));
         }
       } finally {
         favoritePendingRef.current.delete(imageId);

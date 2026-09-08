@@ -20,7 +20,7 @@ export async function POST(
     }
     if (!request.body) throw new ValidationError('Browser image relay body is required');
     const { id } = await params;
-    if (!isRemoteImagePinRequired(id, db)) return new Response(null, { status: 204 });
+    if (!isRemoteImagePinRequired(id, db)) return new Response(null, { status: 200 });
     const stored = await storeBrowserImageStream(request.body);
     pinRemoteImage(id, stored, db);
     return new Response(null, { status: 204 });

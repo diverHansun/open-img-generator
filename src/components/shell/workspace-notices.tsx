@@ -3,6 +3,7 @@
 import * as React from 'react';
 
 import { InlineNotice } from '@/components/ui/inline-notice';
+import { ApiClientError } from '@/lib/web-client';
 
 import styles from './workspace-shell.module.css';
 
@@ -44,6 +45,38 @@ export function favoriteErrorNotice(
     title,
     ...(detail ? { detail } : {}),
   };
+}
+
+type FavoriteSaveErrorMessages = Readonly<{
+  generic: string;
+  retryable: string;
+  storage: string;
+  unavailable: string;
+}>;
+
+const UNAVAILABLE_IMAGE_CODES = new Set([
+  'REMOTE_IMAGE_EXPIRED',
+  'IMAGE_MISSING',
+  'IMAGE_EXPIRED',
+  'IMAGE_DELETED',
+  'PAYLOAD_TOO_LARGE',
+]);
+
+export function favoriteSaveErrorNotice(
+  error: unknown,
+  messages: FavoriteSaveErrorMessages,
+): WorkspaceNoticeInput {
+  if (error instanceof ApiClientError) {
+    if (error.code === 'STORAGE_ERROR') {
+      return error.retryable || error.details?.category === 'local_write_failed'
+        ? favoriteErrorNotice(messages.retryable, messages.storage)
+        : favoriteErrorNotice(messages.unavailable);
+    }
+    if (error.status === 410 || UNAVAILABLE_IMAGE_CODES.has(error.code)) {
+      return favoriteErrorNotice(messages.unavailable);
+    }
+  }
+  return favoriteErrorNotice(messages.generic);
 }
 
 export type WorkspaceNoticeContextValue = Readonly<{

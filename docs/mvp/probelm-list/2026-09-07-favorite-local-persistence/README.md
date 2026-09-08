@@ -1,6 +1,6 @@
 # 收藏图应用内持久化（remote → managed pin）
 
-> 状态：Improve 1 方案待用户审查；尚未实施
+> 状态：Improve 1 已实施；自动化与 Electron E2E 复检通过
 >
 > 日期：2026-09-07
 >
@@ -16,7 +16,7 @@
 
 | 轮次 | 开启日期 | 触发事件 | 状态 | 文档 |
 |------|----------|----------|------|------|
-| Improve 1 | 2026-09-07 | 首轮规划 | 规划中，待审查 | [improve-1](./improve-1/README.md) |
+| Improve 1 | 2026-09-07 | 首轮规划 | 已实施并复检 | [improve-1](./improve-1/README.md) |
 
 本议题只有一轮。实施若分多次会话，用 improve-1 的 Stage 划分，不预开 `improve-2/`。
 
@@ -50,11 +50,11 @@
 | [02-optimization-plan-and-change-scope.md](./improve-1/02-optimization-plan-and-change-scope.md) | 后续开发会话的执行契约 |
 | 03 | **跳过**：无外部参考项目 |
 | [04-test-and-acceptance.md](./improve-1/04-test-and-acceptance.md) | 测试与验收契约 |
-| 05-implementation-acceptance.md | 本轮实施完成后由验收模式写入 |
+| [05-implementation-acceptance.md](./improve-1/05-implementation-acceptance.md) | 实施结果、自动化与 Electron 验收记录 |
 
-## 实施契约
+## 实施记录
 
-规划会话不改代码。开发者或后续 agent 按 `02` 实施、按 `04` 自测。实施完成后另开验收会话写 `05`。
+实现按 `02` 的两个 Stage 在同一轮完成，并按 `04` 补齐单元、契约、集成、构建、桌面打包与 Electron 手工验收；结果见 `05`。
 
 ## 与既有议题的关系
 

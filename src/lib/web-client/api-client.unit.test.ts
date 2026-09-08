@@ -177,6 +177,46 @@ describe('web API client', () => {
     expect(fetcher).toHaveBeenCalledTimes(4);
   });
 
+  it('uses the browser fallback when storage is retryable even if its category is not allow-listed', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: 'STORAGE_ERROR',
+          message: 'Unable to save the image locally',
+          retryable: true,
+          details: { category: 'remote_http_rejected' },
+        },
+      }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ imageId: 'image-http-5xx' }), { status: 200 }));
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.addFavoriteWithBrowserFallback('image-http-5xx')).resolves.toEqual({
+      imageId: 'image-http-5xx',
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('marks an unavailable browser relay as a non-retryable storage failure', async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        error: {
+          code: 'STORAGE_ERROR',
+          message: 'Unable to save the image locally',
+          retryable: true,
+          details: { category: 'remote_download_failed' },
+        },
+      }), { status: 503 }))
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const client = createApiClient(fetcher as typeof fetch);
+
+    await expect(client.addFavoriteWithBrowserFallback('image-cors')).rejects.toMatchObject({
+      code: 'STORAGE_ERROR',
+      retryable: false,
+    });
+  });
+
   it('prefers a valid body request ID and parses delta-seconds Retry-After', async () => {
     const fetcher = vi.fn().mockResolvedValue(
       new Response(

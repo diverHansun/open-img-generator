@@ -206,7 +206,8 @@ function shouldRelayImageFromBrowser(error: unknown): error is ApiClientError {
     return false;
   }
   const category = error.details?.category;
-  return typeof category === 'string' && BROWSER_RELAY_STORAGE_CATEGORIES.has(category);
+  return error.retryable
+    || (typeof category === 'string' && BROWSER_RELAY_STORAGE_CATEGORIES.has(category));
 }
 
 async function readBrowserImageBytes(response: Response): Promise<Uint8Array> {
@@ -455,7 +456,19 @@ export function createApiClient(fetcher: FetchLike = fetch) {
         return await favoriteRequest(fetcher, imageId);
       } catch (error) {
         if (!shouldRelayImageFromBrowser(error)) throw error;
-        await relayBrowserImageBytes(fetcher, imageId);
+        try {
+          await relayBrowserImageBytes(fetcher, imageId);
+        } catch (relayError) {
+          if (relayError instanceof ApiClientError && relayError.retryable) {
+            throw relayError;
+          }
+          throw new ApiClientError(
+            'The image bytes are no longer available to save',
+            422,
+            'STORAGE_ERROR',
+            false,
+          );
+        }
         return favoriteRequest(fetcher, imageId);
       }
     },
