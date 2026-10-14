@@ -29,7 +29,6 @@ import {
   type GenerateErrorAction,
   type GenerateErrorPresentation,
 } from './generate-error';
-import { GenerateStage } from './generate-stage';
 import {
   buildAvailableModelTargets,
   clampGenerateCount,
@@ -119,7 +118,7 @@ export function GenerateScreen({
   initialGenerationId: string | null;
 }) {
   const runtime = React.useMemo(() => getBrowserWebClientRuntime(), []);
-  const router = useRouter();
+  const nextRouter = useRouter();
   const { t } = useLocale();
   const [loadState, setLoadState] = React.useState<LoadState>({ status: 'loading' });
   const [activeSessionId, setActiveSessionId] = React.useState('');
@@ -212,17 +211,15 @@ export function GenerateScreen({
           loadController.current = null;
         }
       });
-
   }, [projectId, runtime]);
 
   React.useEffect(() => {
-    if (initialGenerationId) return;
     load();
     return () => {
       loadController.current?.abort();
       loadController.current = null;
     };
-  }, [initialGenerationId, load]);
+  }, [load]);
 
   React.useEffect(() => {
     if (previousRouteGeneration.current === initialGenerationId) return;
@@ -235,7 +232,7 @@ export function GenerateScreen({
     if (initialGenerationId) {
       dispatchTask({ type: 'open-stage', generationId: initialGenerationId });
     } else {
-      dispatchTask({ type: 'back-to-compose' });
+      dispatchTask({ type: 'dismiss-stage' });
     }
   }, [initialGenerationId]);
 
@@ -430,7 +427,7 @@ export function GenerateScreen({
         workspaceRoute(projectId, 'generate') +
         '?generation=' +
         encodeURIComponent(response.id);
-      router.replace(href, { scroll: false });
+      nextRouter.replace(href, { scroll: false });
     } catch (cause) {
       if (mounted.current && sequence === submissionSequence.current) {
         setSubmissionError(mapGenerateError(cause, 'submit'));
@@ -446,37 +443,23 @@ export function GenerateScreen({
     aspectRatio,
     controls.canSetNegativePrompt,
     controls.canSetSeed,
+    controls.maxCount,
     countInput,
     negativePrompt,
+    nextRouter,
     projectId,
     prompt,
     readyData,
-    router,
     runtime,
     seed,
     submitting,
     targets,
-    controls.maxCount,
   ]);
 
   const backToCompose = React.useCallback(() => {
-    dispatchTask({ type: 'back-to-compose' });
-    router.replace(workspaceRoute(projectId, 'generate'), { scroll: false });
-  }, [projectId, router]);
-
-  const openCurrentTask = React.useCallback(() => {
-    if (!task.currentGenerationId || submissionInFlight.current) return;
-    dispatchTask({
-      type: 'open-stage',
-      generationId: task.currentGenerationId,
-    });
-    router.replace(
-      workspaceRoute(projectId, 'generate') +
-        '?generation=' +
-        encodeURIComponent(task.currentGenerationId),
-      { scroll: false },
-    );
-  }, [projectId, router, task.currentGenerationId]);
+    dispatchTask({ type: 'dismiss-stage' });
+    nextRouter.replace(workspaceRoute(projectId, 'generate'), { scroll: false });
+  }, [nextRouter, projectId]);
 
   const receiveSnapshot = React.useCallback((snapshot: GenerationView) => {
     dispatchTask({
@@ -490,22 +473,19 @@ export function GenerateScreen({
     (action: GenerateErrorAction) => {
       dispatchGenerateErrorAction(action, {
         'configure-providers': () =>
-          router.push(workspaceRoute(projectId, 'providers')),
+          nextRouter.push(workspaceRoute(projectId, 'providers')),
         'check-history': () =>
-          router.push(workspaceRoute(projectId, 'history')),
+          nextRouter.push(workspaceRoute(projectId, 'history')),
         reload: () => window.location.reload(),
         'back-to-compose': backToCompose,
         wait: () => void submit(),
       });
     },
-    [backToCompose, projectId, router, submit],
+    [backToCompose, nextRouter, projectId, submit],
   );
 
   const handleBootstrapErrorAction = React.useCallback(
     (action: GenerateErrorAction) => {
-      // A bootstrap retry must reload the workspace prerequisites. `submit()`
-      // intentionally no-ops before they are ready, so it cannot be reused
-      // for this branch.
       if (action === 'wait') {
         load();
         return;
@@ -514,19 +494,6 @@ export function GenerateScreen({
     },
     [handleErrorAction, load],
   );
-
-  if (task.view === 'stage' && task.currentGenerationId) {
-    return (
-      <GenerateStage
-        key={task.currentGenerationId}
-        projectId={projectId}
-        generationId={task.currentGenerationId}
-        initialSnapshot={task.snapshot}
-        onSnapshot={receiveSnapshot}
-        onBack={backToCompose}
-      />
-    );
-  }
 
   if (loadState.status === 'loading') {
     return (
@@ -586,6 +553,8 @@ export function GenerateScreen({
       submitting={submitting}
       currentGenerationId={task.currentGenerationId}
       currentSnapshot={task.snapshot}
+      onReceiveSnapshot={receiveSnapshot}
+      onBackToCompose={backToCompose}
       onSessionChange={changeSession}
       onCreateSession={createSession}
       onRenameSession={renameSession}
@@ -630,7 +599,6 @@ export function GenerateScreen({
       }}
       onSubmit={() => void submit()}
       onSubmissionAction={handleErrorAction}
-      onOpenCurrentTask={openCurrentTask}
     />
   );
 }

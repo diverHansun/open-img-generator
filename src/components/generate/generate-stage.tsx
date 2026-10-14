@@ -1,7 +1,16 @@
 'use client';
 
 import * as React from 'react';
-import { ArrowLeft, LoaderCircle, XCircle } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  LayoutGrid,
+  LoaderCircle,
+  Maximize2,
+  Square,
+  XCircle,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 import { ImagePreviewDialog } from '@/components/dialogs/image-preview-dialog';
@@ -118,6 +127,8 @@ export function GenerateStage({
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [selectedImageId, setSelectedImageId] = React.useState<string | null>(null);
+  const [activeImageId, setActiveImageId] = React.useState<string | null>(null);
+  const [viewMode, setViewMode] = React.useState<'single' | 'grid'>('single');
   const [previewReturnFocus, setPreviewReturnFocus] =
     React.useState<HTMLElement | null>(null);
   const favoriteOverrides = React.useRef(new Map<string, boolean>());
@@ -256,14 +267,16 @@ export function GenerateStage({
           commitView(
             patchFavorite(viewRef.current, imageId, previousFavorited),
           );
-          showWorkspaceNotice(nextFavorited
-            ? favoriteSaveErrorNotice(error, {
-              generic: t('generate.favoriteError'),
-              retryable: t('generate.favoriteError'),
-              storage: t('generate.favoriteStorageError'),
-              unavailable: t('generate.favoriteUnavailable'),
-            })
-            : favoriteErrorNotice(t('generate.favoriteError')));
+          showWorkspaceNotice(
+            nextFavorited
+              ? favoriteSaveErrorNotice(error, {
+                  generic: t('generate.favoriteError'),
+                  retryable: t('generate.favoriteError'),
+                  storage: t('generate.favoriteStorageError'),
+                  unavailable: t('generate.favoriteUnavailable'),
+                })
+              : favoriteErrorNotice(t('generate.favoriteError')),
+          );
         }
       } finally {
         favoritePendingRef.current.delete(imageId);
@@ -280,13 +293,44 @@ export function GenerateStage({
   );
 
   const summary = view ? summarizeGeneration(view) : null;
-  const runningJobs = view?.jobs.filter(
-    (job) => job.status === 'pending' || job.status === 'running',
-  ) ?? [];
+  const runningJobs =
+    view?.jobs.filter(
+      (job) => job.status === 'pending' || job.status === 'running',
+    ) ?? [];
+  const availableImages = React.useMemo(
+    () =>
+      (view?.images ?? []).filter(
+        (image): image is typeof image & { url: string } => image.url !== null,
+      ),
+    [view?.images],
+  );
+
+  React.useEffect(() => {
+    if (availableImages.length === 0) {
+      setActiveImageId(null);
+      return;
+    }
+    setActiveImageId((current) =>
+      current && availableImages.some((img) => img.id === current)
+        ? current
+        : availableImages[0]?.id ?? null,
+    );
+  }, [availableImages]);
+
+  const activeImageIndex = availableImages.findIndex(
+    (img) => img.id === activeImageId,
+  );
+  const activeImage =
+    activeImageIndex >= 0 ? availableImages[activeImageIndex] : availableImages[0] ?? null;
+  const activeImageJob = activeImage
+    ? view?.jobs.find((job) => job.id === activeImage.jobId)
+    : undefined;
+
   const selectedImage = view?.images.find((image) => image.id === selectedImageId);
   const selectedAvailableImage = selectedImage?.url
     ? { ...selectedImage, url: selectedImage.url }
     : null;
+
   const deleteSelectedImage = React.useCallback(async () => {
     const image = selectedAvailableImage;
     if (!image || deleteBusy) return;
@@ -320,6 +364,7 @@ export function GenerateStage({
       setDeleteBusy(false);
     }
   }, [commitView, deleteBusy, runtime, selectedAvailableImage, t]);
+
   const selectedJob = selectedImage
     ? view?.jobs.find((job) => job.id === selectedImage.jobId)
     : undefined;
@@ -329,20 +374,23 @@ export function GenerateStage({
     : null;
 
   return (
-    <section className={styles.stage}>
+    <div className={styles.stage}>
       <header className={styles.stageToolbar}>
-        <Button type="button" variant="ghost" onClick={onBack}>
-          <ArrowLeft aria-hidden="true" />
-          {t('generate.backToCompose')}
-        </Button>
-        {summary ? (
-          <div className={styles.stageStatus}>
-            <strong>{t(statusKey(summary.displayStatus))}</strong>
-            <span>
+        <div className={styles.stageStatus}>
+          <span
+            className={styles.statusDot}
+            data-status={summary?.displayStatus ?? 'pending'}
+          />
+          <strong>
+            {summary ? t(statusKey(summary.displayStatus)) : t('generate.stageLoading')}
+          </strong>
+          {summary ? (
+            <span className={styles.stageCount}>
               {t('generate.currentTaskImages', { count: summary.imageCount })}
             </span>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
+
         {summary ? (
           <p className="sr-only" role="status" aria-live="polite">
             {t(statusKey(summary.displayStatus))}.{' '}
@@ -350,30 +398,56 @@ export function GenerateStage({
               running: summary.pending + summary.running,
               completed: summary.completed,
               failed: summary.failed + summary.cancelled,
-            })}. {t('generate.currentTaskImages', { count: summary.imageCount })}
+            })}
+            . {t('generate.currentTaskImages', { count: summary.imageCount })}
           </p>
         ) : null}
-        {view && !areAllJobsTerminal(view) ? (
-          <Button
-            type="button"
-            variant="danger"
-            disabled={cancelling}
-            onClick={() => void cancel()}
-          >
-            {cancelling ? (
-              <LoaderCircle className={styles.spin} aria-hidden="true" />
-            ) : (
-              <XCircle aria-hidden="true" />
-            )}
-            {t(
-              cancelling
-                ? 'generate.cancelling'
-                : 'generate.cancelGeneration',
-            )}
-          </Button>
-        ) : (
-          <span />
-        )}
+
+        <div className={styles.stageActions}>
+          {availableImages.length > 0 ? (
+            <div className={styles.segs} role="group" aria-label={t('generate.viewMode')}>
+              <button
+                type="button"
+                className={viewMode === 'single' ? styles.segOn : styles.segOpt}
+                aria-pressed={viewMode === 'single'}
+                onClick={() => setViewMode('single')}
+              >
+                <Square aria-hidden="true" />
+                <span>{t('generate.inspectView')}</span>
+              </button>
+              <button
+                type="button"
+                className={viewMode === 'grid' ? styles.segOn : styles.segOpt}
+                aria-pressed={viewMode === 'grid'}
+                onClick={() => setViewMode('grid')}
+              >
+                <LayoutGrid aria-hidden="true" />
+                <span>{t('generate.gridView')}</span>
+              </button>
+            </div>
+          ) : null}
+
+          {view && !areAllJobsTerminal(view) ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="danger"
+              disabled={cancelling}
+              onClick={() => void cancel()}
+            >
+              {cancelling ? (
+                <LoaderCircle className={styles.spin} aria-hidden="true" />
+              ) : (
+                <XCircle aria-hidden="true" />
+              )}
+              {t(
+                cancelling
+                  ? 'generate.cancelling'
+                  : 'generate.cancelGeneration',
+              )}
+            </Button>
+          ) : null}
+        </div>
       </header>
 
       {loadError && !view ? (
@@ -398,7 +472,7 @@ export function GenerateStage({
           ) : null}
         </div>
       ) : view ? (
-        <>
+        <div className={styles.stageContent}>
           {loadError ? (
             <div className={styles.submissionNotice} role="alert">
               <p>{t(loadError.messageKey)}</p>
@@ -413,7 +487,7 @@ export function GenerateStage({
                 <Button
                   type="button"
                   size="sm"
-                  variant="ghost"
+                  variant="secondary"
                   onClick={() => handleErrorAction(loadError.action)}
                 >
                   {t(loadErrorActionLabelKey)}
@@ -421,56 +495,188 @@ export function GenerateStage({
               ) : null}
             </div>
           ) : null}
-          <div
-            className={styles.imageStage}
-            data-count={Math.min(view.images.length + runningJobs.length, 5)}
-          >
-            {view.images.map((image) =>
-              image.url === null ? (
-                <div className={styles.jobPlaceholder} key={image.id}>
-                  <XCircle aria-hidden="true" />
-                  <span>{t(`generation.image.${image.availability}`)}</span>
-                </div>
-              ) : (
-              <figure className={styles.stageImage} key={image.id}>
+
+          {viewMode === 'single' && activeImage ? (
+            <div className={styles.singleViewer}>
+              <div className={styles.singleCanvas}>
+                {availableImages.length > 1 ? (
+                  <button
+                    type="button"
+                    className={`${styles.navArrow} ${styles.navPrev}`}
+                    aria-label={t('generate.previousImage')}
+                    onClick={() => {
+                      const prevIndex =
+                        (activeImageIndex - 1 + availableImages.length) %
+                        availableImages.length;
+                      setActiveImageId(availableImages[prevIndex]?.id ?? null);
+                    }}
+                  >
+                    <ChevronLeft aria-hidden="true" />
+                  </button>
+                ) : null}
+
                 <button
                   type="button"
                   className={styles.previewTrigger}
-                  aria-label={t('dialogs.viewImage', { index: image.index + 1 })}
+                  aria-label={t('dialogs.viewImage', { index: activeImage.index + 1 })}
                   onClick={(event) => {
                     setPreviewReturnFocus(event.currentTarget);
-                    setSelectedImageId(image.id);
+                    setSelectedImageId(activeImage.id);
                   }}
                 >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={image.url}
+                    src={activeImage.url}
                     alt={accessiblePrompt}
-                    width={image.width ?? undefined}
-                    height={image.height ?? undefined}
+                    width={activeImage.width ?? undefined}
+                    height={activeImage.height ?? undefined}
                   />
                 </button>
-                <FavoriteButton
-                  className={styles.favoriteButton}
-                  favorited={image.favorited}
-                  pending={favoriteBusy.has(image.id)}
-                  onChange={() => void toggleFavorite(image.id)}
-                />
-              </figure>
-              ),
-            )}
-            {runningJobs.map((job) => (
-              <div className={styles.jobPlaceholder} key={job.id}>
-                <LoaderCircle className={styles.spin} aria-hidden="true" />
-                <span>{t(statusKey(job.status))}</span>
+
+                {availableImages.length > 1 ? (
+                  <button
+                    type="button"
+                    className={`${styles.navArrow} ${styles.navNext}`}
+                    aria-label={t('generate.nextImage')}
+                    onClick={() => {
+                      const nextIndex =
+                        (activeImageIndex + 1) % availableImages.length;
+                      setActiveImageId(availableImages[nextIndex]?.id ?? null);
+                    }}
+                  >
+                    <ChevronRight aria-hidden="true" />
+                  </button>
+                ) : null}
+
+                <div className={styles.singleHud}>
+                  <span className={styles.hudModel}>
+                    {activeImageJob
+                      ? `${activeImageJob.provider} · ${activeImageJob.model}`
+                      : `#${activeImage.index + 1}`}
+                    {availableImages.length > 1 ? (
+                      <em>
+                        {activeImageIndex + 1} / {availableImages.length}
+                      </em>
+                    ) : null}
+                  </span>
+                  <div className={styles.hudActions}>
+                    <FavoriteButton
+                      className={styles.hudBtn}
+                      favorited={activeImage.favorited}
+                      pending={favoriteBusy.has(activeImage.id)}
+                      onChange={() => void toggleFavorite(activeImage.id)}
+                    />
+                    <a
+                      className={styles.hudIconLink}
+                      href={`/api/images/${encodeURIComponent(activeImage.id)}/download`}
+                      download
+                      aria-label={t('dialogs.downloadImage')}
+                      title={t('dialogs.downloadImage')}
+                    >
+                      <Download aria-hidden="true" />
+                    </a>
+                    <button
+                      type="button"
+                      className={styles.hudIconLink}
+                      aria-label={t('dialogs.viewImage', { index: activeImage.index + 1 })}
+                      onClick={(event) => {
+                        setPreviewReturnFocus(event.currentTarget);
+                        setSelectedImageId(activeImage.id);
+                      }}
+                    >
+                      <Maximize2 aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
               </div>
-            ))}
-          </div>
+
+              {availableImages.length > 1 || runningJobs.length > 0 ? (
+                <div className={styles.thumbRail}>
+                  {availableImages.map((image, idx) => (
+                    <button
+                      key={image.id}
+                      type="button"
+                      className={
+                        image.id === activeImage.id
+                          ? styles.thumbItemActive
+                          : styles.thumbItem
+                      }
+                      aria-label={t('dialogs.viewImage', { index: idx + 1 })}
+                      aria-pressed={image.id === activeImage.id}
+                      onClick={() => setActiveImageId(image.id)}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={image.url} alt="" />
+                    </button>
+                  ))}
+                  {runningJobs.map((job) => (
+                    <div className={styles.thumbRunning} key={job.id}>
+                      <LoaderCircle className={styles.spin} aria-hidden="true" />
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div
+              className={styles.imageStage}
+              data-count={Math.min(view.images.length + runningJobs.length, 5)}
+            >
+              {view.images.map((image) => {
+                const job = view.jobs.find((item) => item.id === image.jobId);
+                return image.url === null ? (
+                  <div className={styles.jobPlaceholder} key={image.id}>
+                    <XCircle aria-hidden="true" />
+                    <span>{t(`generation.image.${image.availability}`)}</span>
+                  </div>
+                ) : (
+                  <figure className={styles.stageImage} key={image.id}>
+                    <button
+                      type="button"
+                      className={styles.previewTrigger}
+                      aria-label={t('dialogs.viewImage', { index: image.index + 1 })}
+                      onClick={(event) => {
+                        setPreviewReturnFocus(event.currentTarget);
+                        setSelectedImageId(image.id);
+                      }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={image.url}
+                        alt={accessiblePrompt}
+                        width={image.width ?? undefined}
+                        height={image.height ?? undefined}
+                      />
+                    </button>
+                    <figcaption className={styles.gridCaption}>
+                      <span>{job ? `${job.provider} · ${job.model}` : `#${image.index + 1}`}</span>
+                      <FavoriteButton
+                        className={styles.favoriteButton}
+                        favorited={image.favorited}
+                        pending={favoriteBusy.has(image.id)}
+                        onChange={() => void toggleFavorite(image.id)}
+                      />
+                    </figcaption>
+                  </figure>
+                );
+              })}
+              {runningJobs.map((job) => (
+                <div className={styles.jobPlaceholder} key={job.id}>
+                  <LoaderCircle className={styles.spin} aria-hidden="true" />
+                  <strong>
+                    {job.provider} · {job.model}
+                  </strong>
+                  <span>{t(statusKey(job.status))}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {view.images.length === 0 && runningJobs.length === 0 ? (
             <p className={styles.noImages}>{t('generate.noImagesTerminal')}</p>
           ) : null}
 
-          <details className={styles.jobDetails}>
+          <details className={styles.jobDetails} open={runningJobs.length > 0}>
             <summary>
               <span>
                 <strong>{t('generate.jobsTitle')}</strong>
@@ -496,9 +702,14 @@ export function GenerateStage({
                 const diagnosticReference = getJobErrorDiagnosticReference(visibleError);
                 return (
                   <div className={styles.jobRow} key={job.id}>
-                    <span>
+                    <span className={styles.jobWho}>
+                      <i
+                        className={styles.statusDot}
+                        data-status={job.status}
+                        aria-hidden="true"
+                      />
                       <strong>{job.provider}</strong>
-                      <small>{job.model}</small>
+                      <code>{job.model}</code>
                     </span>
                     <span className={styles.jobResult}>
                       <strong>{t(statusKey(job.status))}</strong>
@@ -508,11 +719,13 @@ export function GenerateStage({
                     </span>
                     {visibleError ? (
                       <p className={styles.jobError}>
-                        {t(getJobErrorMessageKey(
-                          visibleError.code,
-                          visibleError.diagnostic,
-                          visibleError.storageDiagnostic,
-                        ))}
+                        {t(
+                          getJobErrorMessageKey(
+                            visibleError.code,
+                            visibleError.diagnostic,
+                            visibleError.storageDiagnostic,
+                          ),
+                        )}
                         {diagnosticReference ? (
                           <small>
                             {' '}
@@ -554,13 +767,13 @@ export function GenerateStage({
               returnFocus={previewReturnFocus}
             />
           ) : null}
-        </>
+        </div>
       ) : (
         <div className={styles.stageMessage} aria-live="polite">
           <LoaderCircle className={styles.spin} aria-hidden="true" />
           <strong>{t('generate.stageLoading')}</strong>
         </div>
       )}
-    </section>
+    </div>
   );
 }

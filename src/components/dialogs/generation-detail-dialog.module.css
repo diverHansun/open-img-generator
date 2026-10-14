@@ -1,51 +1,48 @@
 .dialog {
   display: block;
-  width: min(94vw, 70rem);
+  width: min(94vw, 62rem);
   max-width: none;
-  max-height: min(90dvh, 54rem);
+  max-height: min(90dvh, 52rem);
   overflow: auto;
   padding: 0;
-  border-color: color-mix(in oklch, var(--color-line) 78%, transparent);
-  background: color-mix(in oklch, var(--color-surface) 96%, transparent);
-  box-shadow:
-    0 1.5rem 4rem color-mix(in oklch, var(--color-ink) 15%, transparent),
-    0 0 2.25rem color-mix(in oklch, var(--color-accent) 6%, transparent);
-  backdrop-filter: blur(18px);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--surface-radius);
+  background: var(--glass-raised);
+  box-shadow: var(--shadow);
 }
 
 .detailView {
-  padding: clamp(1.25rem, 3vw, 2rem);
+  padding: 16px 18px 18px;
 }
 
 .header {
   display: flex;
-  min-height: 2.5rem;
-  align-items: flex-start;
+  min-height: 30px;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
-  padding-right: 2.75rem;
+  gap: 12px;
+  padding-right: 36px;
 }
 
 .titleBlock {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: 10px;
 }
 
 .titleBlock > span {
-  font-size: 1.125rem;
-  font-weight: 680;
-  letter-spacing: -0.02em;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .prompt {
   display: grid;
-  gap: var(--space-4);
-  margin-top: var(--space-4);
-  padding-block: var(--space-5);
-  border-top: 1px solid var(--color-line);
-  border-bottom: 1px solid var(--color-line);
+  gap: 10px;
+  margin-top: 12px;
+  padding: 8px 0 12px;
+  border-bottom: 1px solid var(--line-2);
 }
 
 .prompt > p,
@@ -63,104 +60,116 @@
 
 .prompt > p {
   max-width: 78ch;
-  font-size: 0.9375rem;
-  line-height: 1.7;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.55;
   overflow-wrap: anywhere;
 }
 
 .timestamps {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3) var(--space-6);
+  gap: 6px 18px;
+  padding-top: 4px;
 }
 
 .timestamps > div {
   display: flex;
-  gap: var(--space-2);
+  gap: 6px;
 }
 
 .timestamps dt,
 .timestamps dd {
-  font-size: 0.75rem;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .timestamps dt {
-  color: var(--color-ink-muted);
+  color: var(--muted);
 }
 
 .inlineNotice {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
-  padding: var(--space-2) var(--space-3);
-  border-left: 2px solid var(--color-warning);
-  background: var(--color-surface-subtle);
-  color: var(--color-ink-muted);
-  font-size: 0.8125rem;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, var(--line));
+  border-radius: 8px;
+  background: var(--amber-soft);
+  color: var(--amber);
+  font-size: 12px;
 }
 
 .cancelError {
-  margin-top: var(--space-3);
-  color: var(--color-danger);
-  font-size: 0.8125rem;
+  margin-top: 8px;
+  color: var(--red);
+  font-size: 12px;
 }
 
 .section {
-  margin-top: var(--space-6);
+  margin-top: 14px;
 }
 
 .section h3 {
-  margin-bottom: var(--space-3);
-  font-size: 0.8125rem;
-  font-weight: 680;
-  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .jobList {
-  border-top: 1px solid var(--color-line);
+  border-top: 1px solid var(--line-2);
 }
 
 .jobRow {
   display: grid;
-  grid-template-columns: minmax(13rem, 1fr) 8.5rem 5rem;
-  gap: var(--space-4);
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  gap: 10px;
   align-items: center;
-  min-height: 4rem;
-  padding-block: var(--space-3);
-  border-bottom: 1px solid var(--color-line);
+  min-height: 40px;
+  padding: 6px 12px;
+}
+
+.jobRow + .jobRow {
+  border-top: 1px solid var(--line-2);
 }
 
 .jobIdentity {
-  display: grid;
+  display: flex;
+  align-items: baseline;
   min-width: 0;
-  gap: 2px;
+  gap: 8px;
 }
 
 .jobIdentity strong {
-  font-size: 0.8125rem;
+  font-size: 12.5px;
+  font-weight: 550;
 }
 
 .jobIdentity span {
   overflow: hidden;
-  color: var(--color-ink-muted);
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: var(--code);
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .jobCount {
-  color: var(--color-ink-muted);
-  font-size: 0.75rem;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 .jobError {
   grid-column: 1 / -1;
-  color: var(--color-danger);
-  font-size: 0.75rem;
+  color: var(--red);
+  font-size: 11.5px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -168,20 +177,20 @@
 .jobNotice {
   grid-column: 1 / -1;
   margin: 0;
-  color: var(--color-warning);
-  font-size: 0.75rem;
+  color: var(--amber);
+  font-size: 11.5px;
   line-height: 1.45;
 }
 
 .jobError small {
-  color: var(--color-ink-muted);
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--muted);
+  font-family: var(--code);
 }
 
 .resultGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
-  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
 }
 
 .resultItem {
@@ -194,8 +203,8 @@
   width: 100%;
   overflow: hidden;
   padding: 0;
-  border-radius: var(--radius-md);
-  background: var(--color-surface-subtle);
+  border-radius: 10px;
+  background: var(--pill);
 }
 
 .resultButton img,
@@ -208,104 +217,102 @@
 }
 
 .resultImageError {
-  color: var(--color-ink-faint);
+  color: var(--faint);
 }
 
 .resultImageError svg {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 20px;
+  height: 20px;
 }
 
 .resultFavorite {
   position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
+  top: 6px;
+  right: 6px;
+  background: var(--glass-raised);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .noImages {
-  padding-block: var(--space-5);
-  border-top: 1px solid var(--color-line);
-  border-bottom: 1px solid var(--color-line);
-  color: var(--color-ink-muted);
+  padding: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 .state,
 .loading {
   display: grid;
-  min-height: 23rem;
+  min-height: 18rem;
   align-content: center;
   justify-items: start;
-  gap: var(--space-3);
-  padding: clamp(1.5rem, 4vw, 3rem);
+  gap: 10px;
+  padding: 24px;
 }
 
 .state p {
-  max-width: 42rem;
-  color: var(--color-ink-muted);
+  max-width: 40rem;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .loading span {
-  width: min(32rem, 70vw);
-  height: 0.75rem;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-subtle);
+  width: min(28rem, 70vw);
+  height: 10px;
+  border-radius: 5px;
+  background: var(--pill);
 }
 
 .loading span:first-child {
-  width: min(12rem, 40vw);
-  height: 1.25rem;
-}
-
-.loading span:last-child {
-  width: min(24rem, 60vw);
+  width: min(10rem, 40vw);
+  height: 16px;
 }
 
 .singleImageView {
   position: relative;
   display: grid;
-  min-height: min(86dvh, 48rem);
+  min-height: min(84dvh, 44rem);
   place-items: center;
-  padding: 4rem 1.25rem 1.25rem;
+  padding: 3.5rem 1.25rem 1.25rem;
   background: var(--color-media-backdrop);
 }
 
 .singleImageView > img,
 .singleImageView > .resultImageError {
   max-width: 100%;
-  max-height: calc(86dvh - 6rem);
-  border-radius: var(--radius-md);
+  max-height: calc(84dvh - 5rem);
+  border-radius: 8px;
   object-fit: contain;
 }
 
 .backButton {
   position: absolute;
-  top: var(--space-4);
-  left: var(--space-4);
-  background: color-mix(in oklch, var(--color-surface) 90%, transparent);
-  backdrop-filter: blur(12px);
+  top: 12px;
+  left: 12px;
+  background: var(--glass-raised);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .singleFavorite {
   position: absolute;
-  top: var(--space-4);
-  right: 3.5rem;
+  top: 12px;
+  right: 48px;
+  background: var(--glass-raised);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 .singleDownload {
   position: absolute;
-  right: var(--space-4);
-  bottom: var(--space-4);
-  width: 2.5rem;
+  right: 12px;
+  bottom: 12px;
+  width: 32px;
   padding-inline: 0;
-  background: color-mix(in oklch, var(--color-surface) 90%, transparent);
-  backdrop-filter: blur(12px);
-}
-
-@supports not (backdrop-filter: blur(1px)) {
-  .dialog,
-  .backButton {
-    background: var(--color-surface);
-  }
+  background: var(--glass-raised);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
 }
 
 @media (max-width: 680px) {
@@ -315,16 +322,11 @@
   }
 
   .detailView {
-    padding: var(--space-4);
-  }
-
-  .header {
-    padding-right: 2.5rem;
+    padding: 12px;
   }
 
   .jobRow {
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: var(--space-2) var(--space-3);
   }
 
   .jobCount {

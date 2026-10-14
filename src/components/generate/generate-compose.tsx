@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ArrowRight, Edit3, Plus, Sparkles } from 'lucide-react';
+import { Edit3, Image as ImageIcon, Plus } from 'lucide-react';
 
 import { useLocale } from '@/components/i18n/locale-provider';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import type {
 } from '@/lib/web-client';
 
 import { GenerateInspector } from './generate-inspector';
+import { GenerateStage } from './generate-stage';
 import {
   getGenerateErrorActionLabelKey,
   type GenerateErrorAction,
@@ -42,6 +43,8 @@ export type GenerateComposeProps = {
   submitting: boolean;
   currentGenerationId: string | null;
   currentSnapshot: GenerationView | null;
+  onReceiveSnapshot: (snapshot: GenerationView) => void;
+  onBackToCompose: () => void;
   onSessionChange: (id: string) => void;
   onCreateSession: () => Promise<Session | null>;
   onRenameSession: (id: string, title: string) => Promise<boolean>;
@@ -54,7 +57,6 @@ export type GenerateComposeProps = {
   onClear: () => void;
   onSubmit: () => void;
   onSubmissionAction: (action: GenerateErrorAction) => void;
-  onOpenCurrentTask: () => void;
 };
 
 function sessionTitle(session: Session, fallback: string): string {
@@ -82,6 +84,8 @@ export function GenerateCompose({
   submitting,
   currentGenerationId,
   currentSnapshot,
+  onReceiveSnapshot,
+  onBackToCompose,
   onSessionChange,
   onCreateSession,
   onRenameSession,
@@ -94,7 +98,6 @@ export function GenerateCompose({
   onClear,
   onSubmit,
   onSubmissionAction,
-  onOpenCurrentTask,
 }: GenerateComposeProps) {
   const { t } = useLocale();
   const [editingSession, setEditingSession] = React.useState(false);
@@ -104,6 +107,14 @@ export function GenerateCompose({
   const submissionActionLabelKey = submissionError
     ? getGenerateErrorActionLabelKey(submissionError.action)
     : null;
+
+  const selectedModels = React.useMemo(
+    () =>
+      models.filter((item) =>
+        selectedKeys.has(item.target.provider + ':' + item.target.model),
+      ),
+    [models, selectedKeys],
+  );
 
   const beginRename = React.useCallback(() => {
     if (!activeSession) return;
@@ -125,51 +136,48 @@ export function GenerateCompose({
   }, [activeSessionId, onRenameSession, sessionDraft]);
 
   return (
-    <div className={styles.composeLayout}>
-      <section className={styles.composeMain}>
-        <header className={styles.pageToolbar}>
-          <div className={styles.compactTitle}>
-            <span>{t('generate.eyebrow')}</span>
-            <h1>{t('generate.title')}</h1>
-          </div>
-
-          <div className={styles.sessionTools}>
-            <label className={styles.sessionSelect}>
-              <span className="sr-only">{t('generate.sessionLabel')}</span>
-              <select
-                value={activeSessionId}
-                disabled={sessionBusy || sessions.length === 0}
-                onChange={(event) => onSessionChange(event.target.value)}
-              >
-                {sessions.map((session) => (
-                  <option value={session.id} key={session.id}>
-                    {sessionTitle(session, t('generate.sessionUntitled'))}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              disabled={!activeSession || sessionBusy}
-              aria-label={t('generate.renameSession')}
-              onClick={beginRename}
+    <div className={styles.studioLayout}>
+      <aside className={styles.workbench}>
+        <div className={styles.sessionBar}>
+          <span className={styles.sessionTag}>{t('generate.sessionLabel')}</span>
+          <label className={styles.sessionSelect}>
+            <span className="sr-only">{t('generate.sessionLabel')}</span>
+            <select
+              value={activeSessionId}
+              disabled={sessionBusy || sessions.length === 0}
+              onChange={(event) => {
+                setEditingSession(false);
+                onSessionChange(event.target.value);
+              }}
             >
-              <Edit3 aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              disabled={sessionBusy}
-              aria-label={t('generate.newSession')}
-              onClick={() => void createSession()}
-            >
-              <Plus aria-hidden="true" />
-            </Button>
-          </div>
-        </header>
+              {sessions.map((session) => (
+                <option value={session.id} key={session.id}>
+                  {sessionTitle(session, t('generate.sessionUntitled'))}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className={styles.iconBtn}
+            disabled={!activeSession || sessionBusy}
+            aria-label={t('generate.renameSession')}
+            title={t('generate.renameSession')}
+            onClick={beginRename}
+          >
+            <Edit3 aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={styles.iconBtn}
+            disabled={sessionBusy}
+            aria-label={t('generate.newSession')}
+            title={t('generate.newSession')}
+            onClick={() => void createSession()}
+          >
+            <Plus aria-hidden="true" />
+          </button>
+        </div>
 
         {editingSession ? (
           <div className={styles.sessionEditor}>
@@ -209,18 +217,46 @@ export function GenerateCompose({
           </p>
         ) : null}
 
-        <div className={styles.promptArea}>
-          <label htmlFor="generation-prompt">{t('generate.composeTitle')}</label>
+        <div className={styles.promptCard}>
+          <div className={styles.promptHead}>
+            <label htmlFor="generation-prompt">{t('generate.composeTitle')}</label>
+            <span className={styles.promptCount}>
+              {t('generate.promptCount', { count: prompt.length })}
+            </span>
+          </div>
           <textarea
             id="generation-prompt"
-            rows={7}
+            rows={5}
             value={prompt}
             placeholder={t('generate.promptPlaceholder')}
             onChange={(event) => onPromptChange(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                event.preventDefault();
+                onSubmit();
+              }
+            }}
           />
-          <span className={styles.promptCount}>
-            {t('generate.promptCount', { count: prompt.length })}
-          </span>
+          <div className={styles.promptFoot}>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={submitting || prompt.length === 0}
+              onClick={onClear}
+            >
+              {t('generate.clear')}
+            </Button>
+            <span className={styles.impactNote}>
+              {t('generate.generationImpact', {
+                calls: selectedKeys.size,
+                images: selectedKeys.size * count,
+              })}
+            </span>
+            <Button type="button" size="sm" disabled={submitting} onClick={onSubmit}>
+              {t(submitting ? 'generate.submitting' : 'generate.submit')}
+            </Button>
+          </div>
         </div>
 
         {formError ? (
@@ -250,7 +286,7 @@ export function GenerateCompose({
               <Button
                 type="button"
                 size="sm"
-                variant="ghost"
+                variant="secondary"
                 onClick={() => onSubmissionAction(submissionError.action)}
               >
                 {t(submissionActionLabelKey)}
@@ -259,62 +295,74 @@ export function GenerateCompose({
           </div>
         ) : null}
 
-        <div className={styles.composeActions}>
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={submitting || prompt.length === 0}
-            onClick={onClear}
-          >
-            {t('generate.clear')}
-          </Button>
-          <Button type="button" disabled={submitting} onClick={onSubmit}>
-            <Sparkles aria-hidden="true" />
-            {t(submitting ? 'generate.submitting' : 'generate.submit')}
-          </Button>
-        </div>
+        <GenerateInspector
+          projectId={projectId}
+          hasConfiguredProviders={hasConfiguredProviders}
+          models={models}
+          selectedKeys={selectedKeys}
+          controls={controls}
+          aspectRatio={aspectRatio}
+          count={count}
+          countInput={countInput}
+          seed={seed}
+          negativePrompt={negativePrompt}
+          onToggleModel={onToggleModel}
+          onAspectRatioChange={onAspectRatioChange}
+          onCountChange={onCountChange}
+          onSeedChange={onSeedChange}
+          onNegativePromptChange={onNegativePromptChange}
+        />
+      </aside>
 
+      <section className={styles.stagePane}>
         {currentGenerationId ? (
-          <button
-            type="button"
-            className={styles.currentTask}
-            onClick={onOpenCurrentTask}
-          >
-            <span>
-              <strong>{t('generate.currentTask')}</strong>
-              <small>
-                {currentSnapshot
-                  ? t('generate.currentTaskImages', {
-                      count: currentSnapshot.images.length,
-                    })
-                  : t('generate.currentTaskNoImages')}
-              </small>
-            </span>
-            <span className={styles.currentTaskAction}>
-              {t('generate.currentTaskOpen')}
-              <ArrowRight aria-hidden="true" />
-            </span>
-          </button>
-        ) : null}
+          <GenerateStage
+            key={currentGenerationId}
+            projectId={projectId}
+            generationId={currentGenerationId}
+            initialSnapshot={currentSnapshot}
+            onSnapshot={onReceiveSnapshot}
+            onBack={onBackToCompose}
+          />
+        ) : (
+          <div className={styles.standbyStage}>
+            <div className={styles.standbyBar}>
+              <span className={styles.standbyDot} />
+              <span className={styles.standbyTitle}>{t('generate.currentTask')}</span>
+              <span className={styles.standbyMeta}>
+                {aspectRatio || '1:1'} ·{' '}
+                {t('generate.generationImpact', {
+                  calls: selectedKeys.size,
+                  images: selectedKeys.size * count,
+                })}
+              </span>
+            </div>
+            <div className={styles.standbyBody}>
+              <div
+                className={styles.standbyFrame}
+                data-ratio={aspectRatio || '1:1'}
+              >
+                <ImageIcon aria-hidden="true" />
+                <strong>{t('generate.composeTitle')}</strong>
+                <p>{t('generate.description')}</p>
+                {selectedModels.length > 0 ? (
+                  <div className={styles.standbyChips}>
+                    {selectedModels.map((model) => (
+                      <span
+                        key={model.target.provider + ':' + model.target.model}
+                        className={styles.standbyChip}
+                      >
+                        <b>{model.displayName}</b>
+                        <small>{model.providerName}</small>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
       </section>
-
-      <GenerateInspector
-        projectId={projectId}
-        hasConfiguredProviders={hasConfiguredProviders}
-        models={models}
-        selectedKeys={selectedKeys}
-        controls={controls}
-        aspectRatio={aspectRatio}
-        count={count}
-        countInput={countInput}
-        seed={seed}
-        negativePrompt={negativePrompt}
-        onToggleModel={onToggleModel}
-        onAspectRatioChange={onAspectRatioChange}
-        onCountChange={onCountChange}
-        onSeedChange={onSeedChange}
-        onNegativePromptChange={onNegativePromptChange}
-      />
     </div>
   );
 }

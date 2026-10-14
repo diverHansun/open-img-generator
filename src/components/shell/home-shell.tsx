@@ -17,7 +17,7 @@ export function HomeShell({ children }: { children: React.ReactNode }) {
       <header className={styles.brandBar}>
         <Link className={styles.brand} href="/" aria-label="Open Image Generator">
           <span aria-hidden="true">OI</span>
-          {t('brand.name')}
+          <b>{t('brand.name')}</b>
         </Link>
         <LocaleSwitcher />
       </header>

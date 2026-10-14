@@ -18,17 +18,17 @@ export function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & { closeLabel: string }) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-[var(--color-overlay)] backdrop-blur-[2px]" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/18" />
       <DialogPrimitive.Content
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 grid w-[min(92vw,42rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-[var(--radius-xl)] border border-border bg-[var(--color-glass)] p-6 shadow-[var(--shadow-dialog)] outline-none backdrop-blur-xl',
+          'fixed left-1/2 top-1/2 z-50 grid w-[min(92vw,38rem)] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-[var(--surface-radius)] border border-[var(--glass-edge)] bg-[var(--glass-raised)] p-4 shadow-[var(--shadow)] [backdrop-filter:var(--glass-blur)] [-webkit-backdrop-filter:var(--glass-blur)] outline-none',
           className,
         )}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 grid size-11 place-items-center rounded-md border border-border bg-[var(--color-surface)] text-foreground shadow-[var(--shadow-thumb)] outline-none transition-colors hover:bg-[var(--color-accent-quiet)] focus-visible:ring-2 focus-visible:ring-ring sm:size-9">
-          <X className="size-4" />
+        <DialogPrimitive.Close className="absolute right-3 top-3 grid size-7 place-items-center rounded-[7px] border-0 bg-transparent text-[var(--muted)] outline-none transition-colors hover:bg-[var(--pill)] hover:text-[var(--fg)] focus-visible:outline-2 focus-visible:outline-[var(--fg)]">
+          <X className="size-3.5" />
           <span className="sr-only">{closeLabel}</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
@@ -37,14 +37,14 @@ export function DialogContent({
 }
 
 export const DialogHeader = ({ className, ...props }: React.ComponentProps<'div'>) => (
-  <div className={cn('grid gap-2', className)} {...props} />
+  <div className={cn('grid gap-1', className)} {...props} />
 );
 export const DialogTitle = ({
   className,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Title>) => (
   <DialogPrimitive.Title
-    className={cn('text-lg font-semibold tracking-[-0.015em]', className)}
+    className={cn('text-[14px] font-semibold tracking-[-0.01em] text-[var(--fg)]', className)}
     {...props}
   />
 );
@@ -53,7 +53,7 @@ export const DialogDescription = ({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Description>) => (
   <DialogPrimitive.Description
-    className={cn('text-sm text-muted-foreground', className)}
+    className={cn('text-[12px] text-[var(--muted)]', className)}
     {...props}
   />
 );

@@ -287,7 +287,7 @@ export function SettingsScreen({ projectId }: { projectId: string }) {
           <section className={styles.section} aria-labelledby="export-title">
             <h2 id="export-title">{t('settings.export.title')}</h2>
             <p>{t('settings.export.description')}</p>
-            <Button asChild type="button">
+            <Button asChild type="button" variant="secondary">
               <a href={exportHref}>{t('settings.export.action')}</a>
             </Button>
           </section>

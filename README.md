@@ -11,9 +11,20 @@ nvm install && nvm use
 node --version    # 应显示 v24.x
 ```
 
-macOS 使用 direnv 时，允许 `.envrc` 后会自动优先使用 Homebrew 的 `node@24`。`engine-strict=true` 会阻止在不受支持的版本上安装依赖。
+macOS 也可以使用 Homebrew + direnv，代替上面的 nvm 步骤。安装 `node@24` 并配置好 shell 的 direnv hook 后，项目的 `.envrc` 会仅在本目录中优先使用 Node 24，不改变全局 Node。
 
-如果曾在其他 Node 主版本下安装过依赖，请先切换到 Node 24，再执行 `npm ci`。这会重新构建 SQLite 等原生依赖，使其 ABI 与当前运行时一致；不要复用由其他主版本生成的 `node_modules`。
+```bash
+# 已安装的工具不必重复安装
+brew install node@24 direnv
+# 先审查仓库 .envrc 的内容，再授权该文件
+# 它目前只将 Homebrew node@24/bin 放到 PATH 前面
+direnv allow .
+direnv exec . node --version    # 应显示 v24.x
+```
+
+`direnv: ... .envrc is blocked` 是文件尚未授权（或内容改变后需要重新授权），不是安装失败。授权后，在已启用 hook 的终端重新进入项目目录即可自动加载；已有终端需等下一个提示符执行 hook。脚本、IDE 任务等不加载 shell hook 的环境可显式运行 `direnv exec . npm run build` / `direnv exec . npm run dev`。不要通过禁用 direnv 检查或强制切换全局 Homebrew Node 来解决。
+
+`engine-strict=true` 会阻止在不受支持的版本上安装依赖，但不能替代运行时的版本切换。如果曾在其他 Node 主版本下安装过依赖，请先切换到 Node 24，再执行 `npm ci`。这会重新构建 SQLite 等原生依赖，使其 ABI 与当前运行时一致；不要复用由其他主版本生成的 `node_modules`。若只出现 `better-sqlite3` 的 `NODE_MODULE_VERSION` 错误，也可在确认 Node 24 后执行 `npm rebuild better-sqlite3`，无需删除数据库。
 
 ```bash
 cp .env.example .env.local   # Windows PowerShell: Copy-Item .env.example .env.local

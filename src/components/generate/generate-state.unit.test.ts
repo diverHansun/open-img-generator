@@ -112,6 +112,36 @@ describe('generate state', () => {
     });
   });
 
+  it('dismisses a result without allowing late snapshots to reopen it', () => {
+    const snapshot: GenerationView = {
+      id: 'old', sessionId: 's', projectId: 'p', prompt: 'old prompt',
+      status: 'completed', createdAt: 'now', updatedAt: 'now', jobs: [], images: [],
+    };
+    let state = createInitialGenerateTaskState('old');
+    state = generateTaskReducer(state, {
+      type: 'snapshot-received', generationId: 'old', snapshot,
+    });
+    state = generateTaskReducer(state, { type: 'dismiss-stage' });
+    expect(state).toMatchObject({
+      view: 'compose', currentGenerationId: null, snapshot: null,
+    });
+    expect(generateTaskReducer(state, {
+      type: 'snapshot-received', generationId: 'old', snapshot,
+    })).toBe(state);
+    state = generateTaskReducer(state, { type: 'open-stage', generationId: 'next' });
+    expect(state).toMatchObject({ currentGenerationId: 'next', snapshot: null });
+  });
+
+  it('replaces the result while keeping stale snapshots out of the next run', () => {
+    let state = createInitialGenerateTaskState('old');
+    state = generateTaskReducer(state, { type: 'submit-started', sequence: 1 });
+    expect(state.currentGenerationId).toBe('old');
+    state = generateTaskReducer(state, {
+      type: 'submit-succeeded', sequence: 1, generationId: 'next',
+    });
+    expect(state).toMatchObject({ currentGenerationId: 'next', snapshot: null });
+  });
+
   it('derives partial completion only from terminal mixed jobs', () => {
     const view: GenerationView = {
       id: 'g',
