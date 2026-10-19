@@ -30,14 +30,18 @@
   --ctl-fg: #5c5c66;
   --line: rgba(40, 47, 60, 0.12);
   --line-2: rgba(40, 47, 60, 0.075);
-  --fg: #1c1c21;
+  --fg: #1d1d1f;
   --fg-2: #4b4b53;
   --muted: #6e727c;
   --faint: #b4b4be;
-  --accent: #1c1c21;
-  --accent-hover: #2c2c34;
+  /* Three flat tiers: white surfaces, light-gray fills, graphite actions.
+     Graphite rather than pure ink keeps solid controls from reading as holes. */
+  --accent: #2e2e33;
+  --accent-hover: #434349;
   --accent-soft: #ececf1;
   --accent-fg: #ffffff;
+  --fill: #e9eaee;
+  --fill-hover: #dfe0e5;
   --sel: #ededf2;
   --green: #189a58;
   --green-soft: #e4f6ec;
@@ -58,6 +62,8 @@
     0 24px 64px rgba(20, 28, 42, 0.16), 0 2px 8px rgba(20, 28, 42, 0.05);
   --card-shadow: none;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
 
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Segoe UI", "Noto Sans SC Variable", "Microsoft YaHei UI", system-ui, sans-serif;
@@ -96,7 +102,7 @@
   --muted-foreground: var(--muted);
   --border: var(--line);
   --input: var(--line);
-  --ring: var(--fg);
+  --ring: var(--accent);
   --destructive: var(--red);
   --success: var(--green);
   --warning: var(--amber);
@@ -121,7 +127,7 @@
   --radius-xl: 12px;
   --sidebar-width: 212px;
   --content-max: 1240px;
-  --shadow-halo: 0 0 0 3px rgba(28, 28, 33, 0.1);
+  --shadow-halo: 0 0 0 3px rgba(58, 60, 68, 0.14);
   --shadow-focus: var(--shadow-halo);
   --shadow-dialog: var(--shadow);
   --shadow-thumb: 0 1px 2px rgba(0, 0, 0, 0.16);
@@ -174,7 +180,7 @@
   }
 
   ::selection {
-    background: rgba(28, 28, 33, 0.12);
+    background: rgba(58, 60, 68, 0.16);
     color: var(--fg);
   }
 
@@ -202,8 +208,8 @@
   }
 
   :where(a, button, textarea, input, select, summary):focus-visible {
-    outline: 1.5px solid var(--fg);
-    outline-offset: 1px;
+    outline: 1.5px solid var(--accent);
+    outline-offset: 2px;
   }
 
   img,
@@ -231,9 +237,8 @@
   font-size: 12.5px;
   font-weight: 500;
   white-space: nowrap;
-  transition: background-color 140ms var(--ease), border-color 140ms var(--ease),
-    color 140ms var(--ease), box-shadow 140ms var(--ease),
-    transform 120ms var(--ease), opacity 140ms var(--ease);
+  transition: background-color 160ms var(--ease), border-color 160ms var(--ease),
+    color 160ms var(--ease), transform 160ms var(--ease), opacity 160ms var(--ease);
 }
 
 [data-slot="button"] svg {
@@ -267,9 +272,8 @@
 }
 
 [data-slot="button"][data-variant="primary"] {
-  background: var(--fg);
+  background: var(--accent);
   color: var(--accent-fg);
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
 }
 
 [data-slot="button"][data-variant="primary"]:hover:not(:disabled) {
@@ -277,13 +281,12 @@
 }
 
 [data-slot="button"][data-variant="secondary"] {
-  background: var(--pill);
-  color: var(--fg-2);
+  background: var(--fill);
+  color: var(--fg);
 }
 
 [data-slot="button"][data-variant="secondary"]:hover:not(:disabled) {
-  background: var(--pill-hover);
-  color: var(--fg);
+  background: var(--fill-hover);
 }
 
 [data-slot="button"][data-variant="ghost"] {
@@ -315,7 +318,8 @@
   color: var(--fg);
   font-size: 12.5px;
   outline: none;
-  transition: border-color 120ms var(--ease), box-shadow 120ms var(--ease);
+  transition: border-color 160ms var(--ease), box-shadow 200ms var(--ease),
+    background-color 160ms var(--ease);
 }
 
 [data-slot="input"]::placeholder {
@@ -323,9 +327,9 @@
 }
 
 [data-slot="input"]:focus {
-  border-color: var(--line);
+  border-color: rgba(58, 60, 68, 0.28);
   background: var(--card);
-  box-shadow: 0 0 0 2px rgba(28, 28, 33, 0.1);
+  box-shadow: var(--shadow-halo);
 }
 
 [data-slot="input"]:disabled {
@@ -349,7 +353,7 @@
 }
 
 [data-slot="switch"][data-state="checked"] {
-  background: var(--fg);
+  background: var(--accent);
 }
 
 [data-slot="switch"]:disabled {
@@ -365,7 +369,7 @@
   background: var(--card);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
   pointer-events: none;
-  transition: transform 200ms var(--ease);
+  transition: transform 320ms var(--ease-spring);
 }
 
 [data-slot="switch-thumb"][data-state="checked"] {
@@ -397,8 +401,8 @@ input[type="checkbox"]:hover:not(:disabled) {
 
 input[type="checkbox"]:checked,
 input[type="checkbox"]:indeterminate {
-  background: var(--fg);
-  border-color: var(--fg);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 input[type="checkbox"]::before {
@@ -407,7 +411,7 @@ input[type="checkbox"]::before {
   height: 10px;
   background: currentColor;
   transform: scale(0);
-  transition: transform 120ms var(--ease);
+  transition: transform 240ms var(--ease-spring);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2l2 2L8 3' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
     center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 5.2l2 2L8 3' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
@@ -429,6 +433,43 @@ input[type="checkbox"]:indeterminate::before {
 input[type="checkbox"]:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* Shared entrance motion. Short, opacity-led, and skipped under reduced motion. */
+@keyframes oi-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes oi-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes oi-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.965);
+  }
+}
+
+[data-slot="dialog-overlay"][data-state="open"] {
+  animation: oi-fade 200ms var(--ease) both;
+}
+
+[data-slot="dialog-content"][data-state="open"] {
+  animation: oi-pop 280ms var(--ease-out-expo) both;
+}
+
+[data-slot="dialog-overlay"][data-state="closed"] {
+  animation: oi-fade 140ms var(--ease) reverse both;
+}
+
+[data-slot="dialog-content"][data-state="closed"] {
+  animation: oi-pop 140ms var(--ease) reverse both;
 }
 
 /* Thin overlay-style scrollbars */

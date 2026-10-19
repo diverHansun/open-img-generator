@@ -76,7 +76,7 @@
   width: 45%;
   height: 100%;
   border-radius: inherit;
-  background: var(--fg);
+  background: var(--accent);
   animation: auth-progress 1.1s var(--ease) infinite alternate;
   content: '';
 }

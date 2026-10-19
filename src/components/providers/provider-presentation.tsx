@@ -11,7 +11,11 @@ import type {
 } from '@/lib/web-client';
 
 import styles from './providers.module.css';
-import { getProviderMarkText, getProviderModelCount } from './provider-view';
+import {
+  getProviderLogoSrc,
+  getProviderMarkText,
+  getProviderModelCount,
+} from './provider-view';
 
 function sourceTranslationKey(
   source: CredentialSource,
@@ -44,10 +48,28 @@ export function CredentialSourceLabel({
   );
 }
 
-export function ProviderMark({ displayName }: { displayName: string }) {
+export function ProviderMark({
+  providerId,
+  displayName,
+  size = 'default',
+}: {
+  providerId: string;
+  displayName: string;
+  size?: 'default' | 'sm' | 'lg';
+}) {
+  const logoSrc = getProviderLogoSrc(providerId);
   return (
-    <span className={styles.providerMark} aria-hidden="true">
-      {getProviderMarkText(displayName)}
+    <span
+      className={styles.providerMark}
+      data-size={size}
+      data-logo={logoSrc ? 'true' : undefined}
+      aria-hidden="true"
+    >
+      {logoSrc ? (
+        <img src={logoSrc} alt="" draggable={false} />
+      ) : (
+        getProviderMarkText(displayName)
+      )}
     </span>
   );
 }
@@ -113,7 +135,10 @@ export function ProviderDirectory({
       <ul className={styles.directoryList}>
         {configurations.map((configuration) => (
           <li className={styles.directoryRow} key={configuration.providerId}>
-            <ProviderMark displayName={configuration.displayName} />
+            <ProviderMark
+              providerId={configuration.providerId}
+              displayName={configuration.displayName}
+            />
             <div className={styles.providerWho}>
               <div className={styles.providerTitleLine}>
                 <strong>{configuration.displayName}</strong>

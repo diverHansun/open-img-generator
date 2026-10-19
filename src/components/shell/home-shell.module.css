@@ -1,6 +1,6 @@
 .shell {
   min-height: 100vh;
-  background: var(--bg);
+  background: transparent;
   display: flex;
   flex-direction: column;
 }
@@ -40,7 +40,7 @@
   height: 22px;
   place-items: center;
   border-radius: 6px;
-  background: var(--fg);
+  background: var(--accent);
   color: var(--card);
   font-family: var(--code);
   font-size: 10px;
@@ -62,7 +62,7 @@
   left: 8px;
   padding: 6px 10px;
   border-radius: 6px;
-  background: var(--fg);
+  background: var(--accent);
   color: var(--card);
   font-size: 12px;
   transform: translateY(-160%);

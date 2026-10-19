@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 
 import { useLocale } from '@/components/i18n/locale-provider';
+import { ProviderMark } from '@/components/providers/provider-presentation';
 import { Input } from '@/components/ui/input';
 import { workspaceRoute } from '@/lib/routes';
 import type { GenerationControls, GenerationTarget } from '@/lib/web-client';
@@ -16,10 +17,6 @@ import styles from './generate-screen.module.css';
 
 function targetKey(target: GenerationTarget): string {
   return target.provider + ':' + target.model;
-}
-
-function providerCode(provider: string): string {
-  return provider.slice(0, 2).toUpperCase();
 }
 
 export type GenerateInspectorProps = {
@@ -168,9 +165,11 @@ export function GenerateInspector({
                   className={checked ? styles.modelRowSelected : styles.modelRow}
                   key={key}
                 >
-                  <span className={styles.providerGlyph} aria-hidden="true">
-                    {providerCode(model.target.provider)}
-                  </span>
+                  <ProviderMark
+                    providerId={model.target.provider}
+                    displayName={model.providerName}
+                    size="sm"
+                  />
                   <span className={styles.modelCopy}>
                     <strong>{model.displayName}</strong>
                     <small>{model.providerName}</small>

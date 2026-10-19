@@ -482,18 +482,6 @@
   background: var(--pill-hover);
 }
 
-.providerGlyph {
-  display: inline-grid;
-  width: 22px;
-  height: 22px;
-  flex: none;
-  place-items: center;
-  color: var(--muted);
-  font-family: var(--code);
-  font-size: 9.5px;
-  font-weight: 600;
-}
-
 .modelCopy {
   display: flex;
   flex: 1 1 auto;

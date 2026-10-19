@@ -2,7 +2,7 @@
   --side-w: 204px;
   min-height: 100vh;
   padding-left: var(--side-w);
-  background: var(--bg);
+  background: transparent;
   transition: padding-left 220ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
@@ -149,8 +149,8 @@
   color: var(--fg-2);
   font-size: 13px;
   white-space: nowrap;
-  transition: background-color 120ms var(--ease), color 120ms var(--ease),
-    box-shadow 120ms var(--ease);
+  transition: background-color 160ms var(--ease), color 160ms var(--ease),
+    box-shadow 200ms var(--ease), transform 160ms var(--ease);
 }
 
 .navLink svg {
@@ -162,8 +162,14 @@
   color: var(--fg);
 }
 
+.navLink:active {
+  transform: scale(0.98);
+}
+
+/* The current page is a raised white pill, like a selected segment. */
 .activeLink {
-  background: var(--pill-hover);
+  background: var(--card);
+  box-shadow: var(--seg-edge);
   color: var(--fg);
   font-weight: 550;
 }
@@ -254,6 +260,11 @@
   max-width: 1280px;
   margin-inline: auto;
   padding: 14px 16px 28px;
+}
+
+/* Each page root rises in once when the route changes. */
+.main > * {
+  animation: oi-rise 420ms var(--ease-out-expo) backwards;
 }
 
 .noticeStack {
@@ -372,7 +383,7 @@
   left: 8px;
   padding: 6px 10px;
   border-radius: 6px;
-  background: var(--fg);
+  background: var(--accent);
   color: var(--card);
   font-size: 12px;
   transform: translateY(-160%);
