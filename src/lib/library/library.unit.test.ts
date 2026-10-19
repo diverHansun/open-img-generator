@@ -14,6 +14,7 @@ import {
   createProject,
   createSession,
   deleteProject,
+  deleteSession,
   getProjectHistory,
   listFavorites,
   listGenerations,
@@ -332,6 +333,87 @@ describe('library domain', () => {
         testDb.db,
       ),
     ).toThrow('enabled model');
+  });
+
+  it('keeps a single empty untitled session per project', () => {
+    const project = createProject({ title: 'Drafts' }, testDb.db);
+    const first = createSession({ projectId: project.id }, testDb.db);
+    const again = createSession({ projectId: project.id }, testDb.db);
+    expect(again.id).toBe(first.id);
+    expect(listSessions(project.id, testDb.db)).toHaveLength(1);
+
+    // Generating into the draft makes it permanent, so the next one is new.
+    seedGeneration(testDb, {
+      generationId: 'generation-draft',
+      sessionId: first.id,
+      createdAt: '2026-07-16T01:00:00.000Z',
+    });
+    const next = createSession({ projectId: project.id }, testDb.db);
+    expect(next.id).not.toBe(first.id);
+
+    // A named session is never folded away.
+    const named = createSession({ projectId: project.id, title: 'Named' }, testDb.db);
+    expect(createSession({ projectId: project.id }, testDb.db).id).toBe(next.id);
+    expect(listSessions(project.id, testDb.db).map((item) => item.id).sort()).toEqual(
+      [first.id, next.id, named.id].sort(),
+    );
+  });
+
+  it('folds older empty untitled duplicates into one', () => {
+    const project = createProject({ title: 'Legacy' }, testDb.db);
+    for (const [id, at] of [['a', '2026-07-01'], ['b', '2026-07-02'], ['c', '2026-07-03']]) {
+      testDb.sqlite
+        .prepare(
+          `INSERT INTO sessions (id, project_id, title, created_at, updated_at)
+           VALUES (?, ?, NULL, ?, ?)`,
+        )
+        .run(id, project.id, at, at);
+    }
+    expect(createSession({ projectId: project.id }, testDb.db).id).toBe('c');
+    expect(listSessions(project.id, testDb.db).map((item) => item.id)).toEqual(['c']);
+  });
+
+  it('deletes a session with its generations, images and favorites', async () => {
+    const session = createSession({ projectId: 'default-project', title: 'Gone' }, testDb.db);
+    seedGeneration(testDb, {
+      generationId: 'generation-gone',
+      sessionId: session.id,
+      createdAt: '2026-07-16T01:00:00.000Z',
+      imageId: 'image-gone',
+    });
+    await addFavorite('image-gone', testDb.db);
+
+    expect(deleteSession(session.id, testDb.db)).toEqual({
+      id: session.id,
+      projectId: 'default-project',
+      generationCount: 1,
+      imageCount: 1,
+    });
+    expect(removeStoredFile).toHaveBeenCalledWith('/tmp/image.png');
+    expect(listSessions('default-project', testDb.db).map((item) => item.id)).not.toContain(
+      session.id,
+    );
+    expect(listFavorites({}, testDb.db).items).toEqual([]);
+    expect(
+      testDb.sqlite.prepare('SELECT count(*) AS n FROM generation_jobs').get(),
+    ).toEqual({ n: 0 });
+    expect(() => deleteSession(session.id, testDb.db)).toThrow(NotFoundError);
+  });
+
+  it('refuses to delete a session while a job is still running', () => {
+    const session = createSession({ projectId: 'default-project', title: 'Busy' }, testDb.db);
+    seedGeneration(testDb, {
+      generationId: 'generation-busy',
+      sessionId: session.id,
+      createdAt: '2026-07-16T01:00:00.000Z',
+    });
+    testDb.sqlite
+      .prepare(`UPDATE generation_jobs SET status = 'running' WHERE id = 'job-generation-busy'`)
+      .run();
+    expect(() => deleteSession(session.id, testDb.db)).toThrow(ConflictError);
+    expect(listSessions('default-project', testDb.db).map((item) => item.id)).toContain(
+      session.id,
+    );
   });
 
   it('deletes only empty projects', () => {

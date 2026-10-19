@@ -40,6 +40,7 @@ function render(overrides: Partial<GenerateComposeProps> = {}) {
     onSessionChange: vi.fn(),
     onCreateSession: vi.fn().mockResolvedValue(null),
     onRenameSession: vi.fn().mockResolvedValue(false),
+    onSessionDeleted: vi.fn(),
     onPromptChange: vi.fn(),
     onToggleModel: vi.fn(),
     onAspectRatioChange: vi.fn(),

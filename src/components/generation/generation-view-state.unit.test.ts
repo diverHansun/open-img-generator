@@ -60,3 +60,25 @@ describe('reconcileGenerationSnapshot', () => {
     expect(reconcileGenerationSnapshot(current, incoming)).toBe(incoming);
   });
 });
+
+describe('provisional generation views', () => {
+  it('shows each submitted target as waiting and yields to the first real snapshot', async () => {
+    const { createProvisionalGenerationView, isProvisionalGenerationView, reconcileGenerationSnapshot } =
+      await import('./generation-view-state');
+    const provisional = createProvisionalGenerationView({
+      id: 'g', projectId: 'p', sessionId: 's', prompt: 'Prompt',
+      targets: [{ provider: 'fal', model: 'flux' }, { provider: 'siliconflow', model: 'kolors' }],
+    });
+    expect(isProvisionalGenerationView(provisional)).toBe(true);
+    expect(provisional.jobs.map((job) => job.status)).toEqual(['pending', 'pending']);
+
+    // The stored snapshot has different job ids and an older clock; it still wins.
+    const stored = {
+      ...provisional,
+      updatedAt: '2000-01-01T00:00:00.000Z',
+      jobs: [{ id: 'job-1', provider: 'fal' as const, model: 'flux', status: 'running' as const }],
+    };
+    expect(reconcileGenerationSnapshot(provisional, stored)).toBe(stored);
+    expect(isProvisionalGenerationView(stored)).toBe(false);
+  });
+});

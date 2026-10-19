@@ -80,6 +80,15 @@ export const dialogsZhCN = {
   'dialogs.deleteImageError': '图片删除失败，请重试。',
   'dialogs.retry': '重试',
   'dialogs.close': '关闭',
+  'dialogs.cancelAction': '取消',
+  'dialogs.deleteSessionTitle': '删除 Session「{name}」？',
+  'dialogs.deleteSessionBody': '该 Session 下的全部生成记录、图片和收藏都会被永久删除，应用内的图片文件一并移除；已下载的副本不受影响。此操作无法撤销。',
+  'dialogs.deleteSessionCounts': '将删除 {generations} 次生成、{images} 张图片。',
+  'dialogs.deleteSessionEmpty': '这个 Session 还没有生成记录。',
+  'dialogs.deleteSessionConfirm': '删除 Session',
+  'dialogs.deletingSession': '正在删除',
+  'dialogs.deleteSessionBusy': '该 Session 还有正在生成的任务，请等待完成或取消后再删除。',
+  'dialogs.deleteSessionError': 'Session 暂时无法删除，请重试。',
 } as const;
 
 export const dialogsEn: Record<keyof typeof dialogsZhCN, string> = {
@@ -164,4 +173,13 @@ export const dialogsEn: Record<keyof typeof dialogsZhCN, string> = {
   'dialogs.deleteImageError': 'The image could not be deleted. Try again.',
   'dialogs.retry': 'Retry',
   'dialogs.close': 'Close',
+  'dialogs.cancelAction': 'Cancel',
+  'dialogs.deleteSessionTitle': 'Delete session “{name}”?',
+  'dialogs.deleteSessionBody': 'Every generation, image, and favorite in this session will be permanently deleted, including in-app files. Downloaded copies are not affected. This cannot be undone.',
+  'dialogs.deleteSessionCounts': '{generations} generations and {images} images will be deleted.',
+  'dialogs.deleteSessionEmpty': 'This session has no generations yet.',
+  'dialogs.deleteSessionConfirm': 'Delete session',
+  'dialogs.deletingSession': 'Deleting',
+  'dialogs.deleteSessionBusy': 'This session still has generations in progress. Wait for them to finish or cancel them first.',
+  'dialogs.deleteSessionError': 'The session could not be deleted. Try again.',
 };

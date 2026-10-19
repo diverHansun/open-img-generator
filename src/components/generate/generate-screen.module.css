@@ -97,7 +97,8 @@
   background: var(--pill-hover);
 }
 
-.iconBtn {
+.iconBtn,
+.iconBtnDanger {
   display: inline-flex;
   width: 26px;
   height: 26px;
@@ -114,12 +115,19 @@
   color: var(--fg);
 }
 
-.iconBtn:disabled {
+.iconBtnDanger:hover:not(:disabled) {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.iconBtn:disabled,
+.iconBtnDanger:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
-.iconBtn svg {
+.iconBtn svg,
+.iconBtnDanger svg {
   width: 13.5px;
   height: 13.5px;
 }

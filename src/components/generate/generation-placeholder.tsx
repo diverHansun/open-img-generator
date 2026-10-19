@@ -9,14 +9,17 @@ import { placeholderLight } from './placeholder-light';
 /** Decorative waiting material, not a preview of the provider's diffusion steps. */
 export function GenerationPlaceholder({
   job,
+  lightSeed = job.id,
   compact = false,
 }: {
   job: JobView;
+  /** Kept stable when a provisional job is replaced by the stored one. */
+  lightSeed?: string;
   compact?: boolean;
 }) {
   const { t } = useLocale();
   // Stable between snapshots, but adjacent jobs should not move in lockstep.
-  const light = React.useMemo(() => placeholderLight(job.id), [job.id]);
+  const light = React.useMemo(() => placeholderLight(lightSeed), [lightSeed]);
   const status = t(job.status === 'pending' ? 'generate.status.pending' : 'generate.status.running');
 
   return (

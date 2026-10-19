@@ -102,6 +102,22 @@ function applyFavoriteOverrides(
   return changed ? { ...view, images } : view;
 }
 
+/**
+ * Waiting jobs keyed by generation and target rather than job id, so the
+ * provisional frame and the stored job keep the same element and light.
+ */
+function waitingJobs(view: GenerationView | null) {
+  if (!view) return [];
+  const seen = new Map<string, number>();
+  return view.jobs.flatMap((job) => {
+    const target = `${view.id}:${job.provider}:${job.model}`;
+    const occurrence = seen.get(target) ?? 0;
+    seen.set(target, occurrence + 1);
+    if (job.status !== 'pending' && job.status !== 'running') return [];
+    return [{ job, seed: occurrence ? `${target}:${occurrence}` : target }];
+  });
+}
+
 export function GenerateStage({
   projectId,
   generationId,
@@ -298,10 +314,10 @@ export function GenerateStage({
   );
 
   const summary = view ? summarizeGeneration(view) : null;
-  const runningJobs =
-    view?.jobs.filter(
-      (job) => job.status === 'pending' || job.status === 'running',
-    ) ?? [];
+  const runningJobs = React.useMemo(
+    () => waitingJobs(view),
+    [view],
+  );
   const availableImages = React.useMemo(
     () =>
       (view?.images ?? []).filter(
@@ -651,8 +667,8 @@ export function GenerateStage({
                       <img src={image.url} alt="" />
                     </button>
                   ))}
-                  {runningJobs.map((job) => (
-                    <GenerationPlaceholder key={job.id} job={job} compact />
+                  {runningJobs.map(({ job, seed }) => (
+                    <GenerationPlaceholder key={seed} job={job} lightSeed={seed} compact />
                   ))}
                 </div>
               ) : null}
@@ -660,8 +676,8 @@ export function GenerateStage({
           ) : (
             <div className={styles.imageStage} ref={galleryRef}>
               {/* Newest first: work still in progress leads the gallery. */}
-              {runningJobs.map((job) => (
-                <GenerationPlaceholder key={job.id} job={job} />
+              {runningJobs.map(({ job, seed }) => (
+                <GenerationPlaceholder key={seed} job={job} lightSeed={seed} />
               ))}
               {view.images.map((image) => {
                 const job = view.jobs.find((item) => item.id === image.jobId);

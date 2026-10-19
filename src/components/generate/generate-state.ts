@@ -130,7 +130,12 @@ export type GenerateTaskState = {
 
 export type GenerateTaskAction =
   | { type: 'submit-started'; sequence: number }
-  | { type: 'submit-succeeded'; sequence: number; generationId: string }
+  | {
+      type: 'submit-succeeded';
+      sequence: number;
+      generationId: string;
+      snapshot?: GenerationView | null;
+    }
   | { type: 'open-stage'; generationId: string }
   | { type: 'snapshot-received'; generationId: string; snapshot: GenerationView }
   | { type: 'back-to-compose' }
@@ -160,7 +165,7 @@ export function generateTaskReducer(
         ...state,
         view: 'stage',
         currentGenerationId: action.generationId,
-        snapshot: null,
+        snapshot: action.snapshot ?? null,
       };
     case 'open-stage':
       return {

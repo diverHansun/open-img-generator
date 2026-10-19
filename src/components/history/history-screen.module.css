@@ -28,6 +28,10 @@
   border-top: 1px solid var(--line);
 }
 
+.groupHeader {
+  position: relative;
+}
+
 .groupToggle {
   display: grid;
   width: 100%;
@@ -35,10 +39,50 @@
   grid-template-columns: 14px minmax(140px, 1fr) auto auto;
   gap: 10px;
   align-items: center;
-  padding: 6px 12px;
+  padding: 6px 44px 6px 12px;
   background: transparent;
   text-align: left;
   transition: background-color 140ms var(--ease);
+}
+
+.groupDelete {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  translate: 0 -50%;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 120ms var(--ease), background-color 120ms var(--ease),
+    color 120ms var(--ease);
+}
+
+.groupHeader:hover .groupDelete,
+.groupHeader:focus-within .groupDelete,
+.groupDelete:hover,
+.groupDelete:focus-visible {
+  opacity: 1;
+}
+
+.groupDelete:hover,
+.groupDelete:focus-visible {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.groupDelete svg {
+  width: 13.5px;
+  height: 13.5px;
+}
+
+@media (hover: none) {
+  .groupDelete {
+    opacity: 1;
+  }
 }
 
 .groupToggle:hover,

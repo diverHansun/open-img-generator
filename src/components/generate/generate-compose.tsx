@@ -1,8 +1,12 @@
 'use client';
 
 import * as React from 'react';
-import { Edit3, Image as ImageIcon, Plus } from 'lucide-react';
+import { Edit3, Image as ImageIcon, Plus, Trash2 } from 'lucide-react';
 
+import {
+  DeleteSessionDialog,
+  type DeleteSessionTarget,
+} from '@/components/dialogs/delete-session-dialog';
 import { useLocale } from '@/components/i18n/locale-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,6 +53,7 @@ export type GenerateComposeProps = {
   onSessionChange: (id: string) => void;
   onCreateSession: () => Promise<Session | null>;
   onRenameSession: (id: string, title: string) => Promise<boolean>;
+  onSessionDeleted: (id: string) => void;
   onPromptChange: (value: string) => void;
   onToggleModel: (key: string) => void;
   onAspectRatioChange: (value: string) => void;
@@ -90,6 +95,7 @@ export function GenerateCompose({
   onSessionChange,
   onCreateSession,
   onRenameSession,
+  onSessionDeleted,
   onPromptChange,
   onToggleModel,
   onAspectRatioChange,
@@ -103,6 +109,7 @@ export function GenerateCompose({
   const { t } = useLocale();
   const [editingSession, setEditingSession] = React.useState(false);
   const [sessionDraft, setSessionDraft] = React.useState('');
+  const [deleteTarget, setDeleteTarget] = React.useState<DeleteSessionTarget | null>(null);
   const workbenchId = React.useId();
   const { layoutRef, width, dragging, separatorProps } = useWorkbenchResize();
 
@@ -185,7 +192,35 @@ export function GenerateCompose({
           >
             <Plus aria-hidden="true" />
           </button>
+          <button
+            type="button"
+            className={styles.iconBtnDanger}
+            disabled={!activeSession || sessionBusy}
+            aria-label={t('generate.deleteSession')}
+            title={t('generate.deleteSession')}
+            onClick={() => {
+              if (!activeSession) return;
+              setEditingSession(false);
+              setDeleteTarget({
+                id: activeSession.id,
+                name: sessionTitle(activeSession, t('generate.sessionUntitled')),
+              });
+            }}
+          >
+            <Trash2 aria-hidden="true" />
+          </button>
         </div>
+
+        <DeleteSessionDialog
+          target={deleteTarget}
+          onOpenChange={(open) => {
+            if (!open) setDeleteTarget(null);
+          }}
+          onDeleted={(deleted) => {
+            setDeleteTarget(null);
+            onSessionDeleted(deleted.id);
+          }}
+        />
 
         {editingSession ? (
           <div className={styles.sessionEditor}>
