@@ -47,6 +47,7 @@ import {
   type GenerateErrorPresentation,
 } from './generate-error';
 import { summarizeGeneration } from './generate-state';
+import { GenerationPlaceholder } from './generation-placeholder';
 import styles from './generate-screen.module.css';
 
 export type GenerateStageProps = {
@@ -128,7 +129,11 @@ export function GenerateStage({
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [selectedImageId, setSelectedImageId] = React.useState<string | null>(null);
   const [activeImageId, setActiveImageId] = React.useState<string | null>(null);
-  const [viewMode, setViewMode] = React.useState<'single' | 'grid'>('single');
+  const [viewMode, setViewMode] = React.useState<'single' | 'grid'>('grid');
+  // Focus follows the switch between the gallery and the focused image.
+  const pendingFocus = React.useRef<'single' | 'grid' | null>(null);
+  const singleTriggerRef = React.useRef<HTMLButtonElement>(null);
+  const galleryRef = React.useRef<HTMLDivElement>(null);
   const [previewReturnFocus, setPreviewReturnFocus] =
     React.useState<HTMLElement | null>(null);
   const favoriteOverrides = React.useRef(new Map<string, boolean>());
@@ -326,6 +331,39 @@ export function GenerateStage({
     ? view?.jobs.find((job) => job.id === activeImage.jobId)
     : undefined;
 
+  const focusImage = React.useCallback((imageId: string) => {
+    setActiveImageId(imageId);
+    pendingFocus.current = 'single';
+    setViewMode('single');
+  }, []);
+
+  const showGallery = React.useCallback(() => {
+    pendingFocus.current = 'grid';
+    setViewMode('grid');
+  }, []);
+
+  const stepImage = React.useCallback(
+    (delta: number) => {
+      if (availableImages.length < 2) return;
+      const next =
+        (activeImageIndex + delta + availableImages.length) % availableImages.length;
+      setActiveImageId(availableImages[next]?.id ?? null);
+    },
+    [activeImageIndex, availableImages],
+  );
+
+  React.useEffect(() => {
+    const target = pendingFocus.current;
+    pendingFocus.current = null;
+    if (target === 'single') {
+      singleTriggerRef.current?.focus({ preventScroll: true });
+    } else if (target === 'grid' && activeImageId) {
+      galleryRef.current
+        ?.querySelector<HTMLElement>(`[data-gallery-image="${CSS.escape(activeImageId)}"]`)
+        ?.focus({ preventScroll: true });
+    }
+  }, [activeImageId, viewMode]);
+
   const selectedImage = view?.images.find((image) => image.id === selectedImageId);
   const selectedAvailableImage = selectedImage?.url
     ? { ...selectedImage, url: selectedImage.url }
@@ -377,10 +415,6 @@ export function GenerateStage({
     <div className={styles.stage}>
       <header className={styles.stageToolbar}>
         <div className={styles.stageStatus}>
-          <span
-            className={styles.statusDot}
-            data-status={summary?.displayStatus ?? 'pending'}
-          />
           <strong>
             {summary ? t(statusKey(summary.displayStatus)) : t('generate.stageLoading')}
           </strong>
@@ -410,7 +444,9 @@ export function GenerateStage({
                 type="button"
                 className={viewMode === 'single' ? styles.segOn : styles.segOpt}
                 aria-pressed={viewMode === 'single'}
-                onClick={() => setViewMode('single')}
+                onClick={() => {
+                  if (viewMode !== 'single' && activeImage) focusImage(activeImage.id);
+                }}
               >
                 <Square aria-hidden="true" />
                 <span>{t('generate.inspectView')}</span>
@@ -419,7 +455,9 @@ export function GenerateStage({
                 type="button"
                 className={viewMode === 'grid' ? styles.segOn : styles.segOpt}
                 aria-pressed={viewMode === 'grid'}
-                onClick={() => setViewMode('grid')}
+                onClick={() => {
+                  if (viewMode !== 'grid') showGallery();
+                }}
               >
                 <LayoutGrid aria-hidden="true" />
                 <span>{t('generate.gridView')}</span>
@@ -497,25 +535,33 @@ export function GenerateStage({
           ) : null}
 
           {viewMode === 'single' && activeImage ? (
-            <div className={styles.singleViewer}>
+            <div
+              className={styles.singleViewer}
+              onKeyDown={(event) => {
+                if (event.defaultPrevented || event.altKey || event.metaKey || event.ctrlKey) return;
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  showGallery();
+                } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                  event.preventDefault();
+                  stepImage(event.key === 'ArrowLeft' ? -1 : 1);
+                }
+              }}
+            >
               <div className={styles.singleCanvas}>
                 {availableImages.length > 1 ? (
                   <button
                     type="button"
                     className={`${styles.navArrow} ${styles.navPrev}`}
                     aria-label={t('generate.previousImage')}
-                    onClick={() => {
-                      const prevIndex =
-                        (activeImageIndex - 1 + availableImages.length) %
-                        availableImages.length;
-                      setActiveImageId(availableImages[prevIndex]?.id ?? null);
-                    }}
+                    onClick={() => stepImage(-1)}
                   >
                     <ChevronLeft aria-hidden="true" />
                   </button>
                 ) : null}
 
                 <button
+                  ref={singleTriggerRef}
                   type="button"
                   className={styles.previewTrigger}
                   aria-label={t('dialogs.viewImage', { index: activeImage.index + 1 })}
@@ -538,11 +584,7 @@ export function GenerateStage({
                     type="button"
                     className={`${styles.navArrow} ${styles.navNext}`}
                     aria-label={t('generate.nextImage')}
-                    onClick={() => {
-                      const nextIndex =
-                        (activeImageIndex + 1) % availableImages.length;
-                      setActiveImageId(availableImages[nextIndex]?.id ?? null);
-                    }}
+                    onClick={() => stepImage(1)}
                   >
                     <ChevronRight aria-hidden="true" />
                   </button>
@@ -610,35 +652,38 @@ export function GenerateStage({
                     </button>
                   ))}
                   {runningJobs.map((job) => (
-                    <div className={styles.thumbRunning} key={job.id}>
-                      <LoaderCircle className={styles.spin} aria-hidden="true" />
-                    </div>
+                    <GenerationPlaceholder key={job.id} job={job} compact />
                   ))}
                 </div>
               ) : null}
             </div>
           ) : (
-            <div
-              className={styles.imageStage}
-              data-count={Math.min(view.images.length + runningJobs.length, 5)}
-            >
+            <div className={styles.imageStage} ref={galleryRef}>
+              {/* Newest first: work still in progress leads the gallery. */}
+              {runningJobs.map((job) => (
+                <GenerationPlaceholder key={job.id} job={job} />
+              ))}
               {view.images.map((image) => {
                 const job = view.jobs.find((item) => item.id === image.jobId);
+                const label = job ? `${job.provider} · ${job.model}` : `#${image.index + 1}`;
                 return image.url === null ? (
-                  <div className={styles.jobPlaceholder} key={image.id}>
-                    <XCircle aria-hidden="true" />
-                    <span>{t(`generation.image.${image.availability}`)}</span>
-                  </div>
+                  <figure className={styles.stageImage} key={image.id}>
+                    <div className={styles.jobPlaceholder}>
+                      <XCircle aria-hidden="true" />
+                      <span>{t(`generation.image.${image.availability}`)}</span>
+                    </div>
+                    <figcaption className={styles.gridCaption}>
+                      <span title={label}>{label}</span>
+                    </figcaption>
+                  </figure>
                 ) : (
                   <figure className={styles.stageImage} key={image.id}>
                     <button
                       type="button"
-                      className={styles.previewTrigger}
-                      aria-label={t('dialogs.viewImage', { index: image.index + 1 })}
-                      onClick={(event) => {
-                        setPreviewReturnFocus(event.currentTarget);
-                        setSelectedImageId(image.id);
-                      }}
+                      className={styles.galleryTile}
+                      data-gallery-image={image.id}
+                      aria-label={t('generate.focusImage', { index: image.index + 1 })}
+                      onClick={() => focusImage(image.id)}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
@@ -646,10 +691,11 @@ export function GenerateStage({
                         alt={accessiblePrompt}
                         width={image.width ?? undefined}
                         height={image.height ?? undefined}
+                        loading="lazy"
                       />
                     </button>
                     <figcaption className={styles.gridCaption}>
-                      <span>{job ? `${job.provider} · ${job.model}` : `#${image.index + 1}`}</span>
+                      <span title={label}>{label}</span>
                       <FavoriteButton
                         className={styles.favoriteButton}
                         favorited={image.favorited}
@@ -660,15 +706,6 @@ export function GenerateStage({
                   </figure>
                 );
               })}
-              {runningJobs.map((job) => (
-                <div className={styles.jobPlaceholder} key={job.id}>
-                  <LoaderCircle className={styles.spin} aria-hidden="true" />
-                  <strong>
-                    {job.provider} · {job.model}
-                  </strong>
-                  <span>{t(statusKey(job.status))}</span>
-                </div>
-              ))}
             </div>
           )}
 

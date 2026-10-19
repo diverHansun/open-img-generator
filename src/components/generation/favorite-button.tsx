@@ -1,5 +1,6 @@
 'use client';
 
+import * as React from 'react';
 import { Heart, LoaderCircle } from 'lucide-react';
 
 import { useLocale } from '@/components/i18n/locale-provider';

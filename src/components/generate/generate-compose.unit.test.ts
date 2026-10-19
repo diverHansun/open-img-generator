@@ -93,6 +93,16 @@ describe('unified generation workbench', () => {
     expect(html).not.toMatch(/<button\b[^>]*>[1-4]<\/button>/);
   });
 
+  it('exposes an accessible resizer and no decorative dot in the idle title', () => {
+    const html = render();
+    expect(html).toContain('role="separator"');
+    expect(html).toContain('aria-orientation="vertical"');
+    expect(html).toContain('aria-valuenow="356"');
+    expect(html).toContain('aria-controls=');
+    expect(html).toContain('调整生成区宽度');
+    expect(html).not.toContain('standbyDot');
+  });
+
   it('renders an idle canvas without dropping the editor when a task is dismissed', () => {
     const html = render();
     expect(html).not.toContain('data-test-generation');

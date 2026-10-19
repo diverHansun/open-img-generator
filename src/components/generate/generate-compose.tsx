@@ -14,6 +14,7 @@ import type {
 
 import { GenerateInspector } from './generate-inspector';
 import { GenerateStage } from './generate-stage';
+import { useWorkbenchResize } from './use-workbench-resize';
 import {
   getGenerateErrorActionLabelKey,
   type GenerateErrorAction,
@@ -102,6 +103,8 @@ export function GenerateCompose({
   const { t } = useLocale();
   const [editingSession, setEditingSession] = React.useState(false);
   const [sessionDraft, setSessionDraft] = React.useState('');
+  const workbenchId = React.useId();
+  const { layoutRef, width, dragging, separatorProps } = useWorkbenchResize();
 
   const activeSession = sessions.find((item) => item.id === activeSessionId);
   const submissionActionLabelKey = submissionError
@@ -136,8 +139,13 @@ export function GenerateCompose({
   }, [activeSessionId, onRenameSession, sessionDraft]);
 
   return (
-    <div className={styles.studioLayout}>
-      <aside className={styles.workbench}>
+    <div
+      ref={layoutRef}
+      className={styles.studioLayout}
+      style={{ '--workbench-width': `${width}px` } as React.CSSProperties}
+      data-resizing={dragging || undefined}
+    >
+      <aside id={workbenchId} className={styles.workbench}>
         <div className={styles.sessionBar}>
           <span className={styles.sessionTag}>{t('generate.sessionLabel')}</span>
           <label className={styles.sessionSelect}>
@@ -314,6 +322,16 @@ export function GenerateCompose({
         />
       </aside>
 
+      <div
+        {...separatorProps}
+        className={styles.splitter}
+        aria-controls={workbenchId}
+        aria-label={t('generate.resizeWorkbench')}
+        aria-valuetext={t('generate.workbenchWidth', { width })}
+        aria-description={t('generate.resizeKeyboardHint')}
+        title={t('generate.resizeHint')}
+      />
+
       <section className={styles.stagePane}>
         {currentGenerationId ? (
           <GenerateStage
@@ -327,7 +345,6 @@ export function GenerateCompose({
         ) : (
           <div className={styles.standbyStage}>
             <div className={styles.standbyBar}>
-              <span className={styles.standbyDot} />
               <span className={styles.standbyTitle}>{t('generate.currentTask')}</span>
               <span className={styles.standbyMeta}>
                 {aspectRatio || '1:1'} ·{' '}
