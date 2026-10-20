@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./docs/brand/wordmark-plate.svg" width="560" alt="open-img generator">
+<img src="./assets/brand/wordmark-plate.svg" width="560" alt="open-img generator">
 
 ### Every image model. One local studio.
 
@@ -13,7 +13,7 @@ Works with Qwen, Doubao, Zhipu, SiliconFlow, fal.ai and ZenMux.
 
 <br>
 
-<img src="./docs/images/generate.png" width="900" alt="The Generate page: one prompt sent to Qwen Image 3.0 Pro, Qwen Image 3.0 and Wan 2.7 Image, with the three results in a grid">
+<img src="./assets/screenshots/generate.png" width="900" alt="The Generate page: one prompt sent to Qwen Image 3.0 Pro, Qwen Image 3.0 and Wan 2.7 Image, with the three results in a grid">
 
 </div>
 
@@ -85,8 +85,8 @@ Click the heart on an image to add it to favorites. **Gallery** shows favorites 
 
 <table>
 <tr>
-<td width="50%"><img src="./docs/images/gallery.png" alt="Gallery: favorite images filtered by workspace and provider"></td>
-<td width="50%"><img src="./docs/images/history.png" alt="History: generations with prompt, provider and model, status and thumbnails"></td>
+<td width="50%"><img src="./assets/screenshots/gallery.png" alt="Gallery: favorite images filtered by workspace and provider"></td>
+<td width="50%"><img src="./assets/screenshots/history.png" alt="History: generations with prompt, provider and model, status and thumbnails"></td>
 </tr>
 </table>
 
@@ -94,7 +94,7 @@ Click the heart on an image to add it to favorites. **Gallery** shows favorites 
 
 A workspace groups related work, and each workspace holds sessions of prompts. The home page lists recent workspaces with their session, generation and image counts.
 
-<img src="./docs/images/home.png" width="900" alt="Home: create a workspace or open a recent one">
+<img src="./assets/screenshots/home.png" width="900" alt="Home: create a workspace or open a recent one">
 
 ### Providers and local data
 
@@ -104,8 +104,8 @@ App data is stored under `./data/` by default: the SQLite database, generated im
 
 <table>
 <tr>
-<td width="50%"><img src="./docs/images/providers.png" alt="Providers: six providers with key names, status and model counts"></td>
-<td width="50%"><img src="./docs/images/settings.png" alt="Settings: retention policy, storage usage and workspace export"></td>
+<td width="50%"><img src="./assets/screenshots/providers.png" alt="Providers: six providers with key names, status and model counts"></td>
+<td width="50%"><img src="./assets/screenshots/settings.png" alt="Settings: retention policy, storage usage and workspace export"></td>
 </tr>
 </table>
 

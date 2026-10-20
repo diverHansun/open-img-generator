@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./docs/brand/wordmark-plate.svg" width="560" alt="open-img generator">
+<img src="./assets/brand/wordmark-plate.svg" width="560" alt="open-img generator">
 
 ### 所有生图模型，一个本地工作台
 
@@ -13,7 +13,7 @@
 
 <br>
 
-<img src="./docs/images/generate.png" width="900" alt="生成页：同一条提示词交给 Qwen Image 3.0 Pro、Qwen Image 3.0 和 Wan 2.7 Image，三张结果并排显示">
+<img src="./assets/screenshots/generate.png" width="900" alt="生成页：同一条提示词交给 Qwen Image 3.0 Pro、Qwen Image 3.0 和 Wan 2.7 Image，三张结果并排显示">
 
 </div>
 
@@ -85,8 +85,8 @@ npm run dev
 
 <table>
 <tr>
-<td width="50%"><img src="./docs/images/gallery.png" alt="图库：收藏的图片，可按工作区和服务商筛选"></td>
-<td width="50%"><img src="./docs/images/history.png" alt="历史：每次生成的提示词、服务商和模型、状态与缩略图"></td>
+<td width="50%"><img src="./assets/screenshots/gallery.png" alt="图库：收藏的图片，可按工作区和服务商筛选"></td>
+<td width="50%"><img src="./assets/screenshots/history.png" alt="历史：每次生成的提示词、服务商和模型、状态与缩略图"></td>
 </tr>
 </table>
 
@@ -94,7 +94,7 @@ npm run dev
 
 工作区用来归类相关的工作，每个工作区下面有若干个会话（Session），会话里保存一连串的提示词和生成结果。首页列出最近的工作区，以及各自的会话数、生成次数和图片数。
 
-<img src="./docs/images/home.png" width="900" alt="首页：新建工作区或打开最近的工作区">
+<img src="./assets/screenshots/home.png" width="900" alt="首页：新建工作区或打开最近的工作区">
 
 ### 服务商与本地数据
 
@@ -104,8 +104,8 @@ npm run dev
 
 <table>
 <tr>
-<td width="50%"><img src="./docs/images/providers.png" alt="服务商页面：六家服务商的 Key 名称、配置状态和模型数量"></td>
-<td width="50%"><img src="./docs/images/settings.png" alt="设置页面：保留策略、存储占用和工作区导出"></td>
+<td width="50%"><img src="./assets/screenshots/providers.png" alt="服务商页面：六家服务商的 Key 名称、配置状态和模型数量"></td>
+<td width="50%"><img src="./assets/screenshots/settings.png" alt="设置页面：保留策略、存储占用和工作区导出"></td>
 </tr>
 </table>
 

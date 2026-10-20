@@ -3,7 +3,7 @@ import { useId } from 'react';
 /**
  * The "Develop" logo: a frame whose diagonal lines thicken toward the lower-right
  * corner until they fuse solid, like an image developing. Single ink via currentColor.
- * Master geometry lives in docs/brand/logo-*.svg; keep the two in sync.
+ * Master geometry lives in assets/brand/logo.svg; keep the two in sync.
  */
 export function BrandLogo({ size = 20, className }: { size?: number; className?: string }) {
   const clipId = useId();
