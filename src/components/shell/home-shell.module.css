@@ -34,18 +34,9 @@
   font-weight: 600;
 }
 
-.brand span {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  place-items: center;
-  border-radius: 6px;
-  background: var(--accent);
-  color: var(--card);
-  font-family: var(--code);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
+.brand svg {
+  flex: none;
+  color: var(--fg);
 }
 
 .main {

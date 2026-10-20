@@ -24,6 +24,7 @@ module.exports = {
   ],
   mac: {
     category: 'public.app-category.graphics-design',
+    icon: path.resolve(__dirname, 'electron', 'assets', 'icon.icns'),
     identity: signingEnabled ? undefined : null,
     hardenedRuntime: signingEnabled,
     notarize: signingEnabled,
