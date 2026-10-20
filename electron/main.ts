@@ -17,6 +17,7 @@ import {
   desktopIpcChannels,
   type DesktopRuntimeInfo,
 } from '../src/lib/desktop-bridge';
+import { rotateLogFileIfNeeded } from '../src/lib/observability/log-rotation';
 import { isAllowedExternalUrl } from './security/external-links';
 import { resolveCredentialProtection } from './security/credential-secret';
 import {
@@ -37,6 +38,8 @@ import {
 const APP_NAME = 'open image generator';
 const AUTH_COOKIE_NAME = 'open_image_generator_auth';
 const START_PATH = '/';
+const DESKTOP_LOG_MAX_BYTES = 5 * 1024 * 1024;
+const DESKTOP_LOG_ROTATIONS = 2;
 
 let mainWindow: BrowserWindow | null = null;
 let localServer: RunningLocalServer | null = null;
@@ -56,6 +59,10 @@ if (!hasSingleInstanceLock) app.quit();
 function appendDesktopLog(logFile: string, message: string): void {
   const line = `${new Date().toISOString()} ${message}\n`;
   try {
+    rotateLogFileIfNeeded(logFile, Buffer.byteLength(line), {
+      maxBytes: DESKTOP_LOG_MAX_BYTES,
+      rotations: DESKTOP_LOG_ROTATIONS,
+    });
     fs.appendFileSync(logFile, line, { encoding: 'utf8', mode: 0o600 });
   } catch {
     // Logging must never prevent startup or shutdown.
