@@ -29,7 +29,7 @@ module.exports = {
     hardenedRuntime: signingEnabled,
     notarize: signingEnabled,
     target: ['dmg'],
-    artifactName: '${productName}-${version}-${arch}.${ext}',
+    artifactName: 'open-img-generator-${version}-${arch}.${ext}',
   },
   dmg: {
     sign: false,
