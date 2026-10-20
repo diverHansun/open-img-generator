@@ -56,6 +56,8 @@ Open [http://localhost:3000](http://localhost:3000) and create a workspace. `npm
 
 <sub>If you installed dependencies under another Node major version, switch to Node 24 and run `npm ci` again so SQLite is rebuilt. If the only error is a `better-sqlite3` `NODE_MODULE_VERSION` mismatch, `npm rebuild better-sqlite3` is enough, and your database is kept.</sub>
 
+<sub>The project uses npm only (`package-lock.json`). Dependency install scripts run only when listed in `allowScripts` in `package.json`; after adding a dependency that needs one, review it and run `npm install-scripts approve <pkg>`.</sub>
+
 ## Supported providers
 
 A provider is enabled when its key is set. Providers without a key are skipped without an error. Restart the dev server after you edit `.env.local`.

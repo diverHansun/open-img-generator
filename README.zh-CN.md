@@ -56,6 +56,8 @@ npm run dev
 
 <sub>如果之前在其他 Node 主版本下安装过依赖，请切换到 Node 24 后重新运行 `npm ci`，让 SQLite 重新编译。如果只报了 `better-sqlite3` 的 `NODE_MODULE_VERSION` 不匹配，运行 `npm rebuild better-sqlite3` 即可，数据库不受影响。</sub>
 
+<sub>项目只用 npm（`package-lock.json`）。依赖的安装脚本只有列在 `package.json` 的 `allowScripts` 里才会执行；新增需要安装脚本的依赖时，先检查脚本内容，再运行 `npm install-scripts approve <包名>`。</sub>
+
 ## 支持的服务商
 
 填了 Key 的服务商会自动启用，没填的直接跳过，不会报错。修改 `.env.local` 后需要重启开发服务。
