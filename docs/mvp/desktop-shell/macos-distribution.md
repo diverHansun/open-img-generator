@@ -23,14 +23,17 @@ Apple Silicon 机器选择 arm64，Intel 机器选择 x64。打开 DMG 后把 Ap
 桌面数据默认位于：
 
 ```text
-~/Library/Application Support/open image generator/
-  app.db
-  images/
-  config/
-  logs/desktop.log
+~/Library/Application Support/open-img-generator/
+  data/               # 业务数据，结构与 web 端仓库 data/ 一致；备份只需这一个目录
+    app.db
+    images/
+    config/
+    logs/desktop.log
+  browser/            # Chromium 会话数据（Cookies、Local Storage、HTTP/GPU 缓存等），可重建
+  Singleton* 等        # Chromium 必须放在根目录的少量文件
 ```
 
-开发模式使用 `open image generator Development`，不会和安装版共用业务数据。安装版的新用户目录从空数据库开始，不自动迁移仓库 `data/` 或浏览器开发数据。
+开发模式使用 `open-img-generator-dev`，不会和安装版共用业务数据：数据库迁移只能向前，且凭据主密钥绑定当前运行的程序。开发模式的 `next dev` 使用独立的 `.next-desktop/`，可与 web 端 `npm run dev` 同时运行。安装版的新用户目录从空数据库开始，不自动迁移仓库 `data/` 或浏览器开发数据。
 
 ## 2. 申请 Developer ID
 

@@ -6,6 +6,7 @@ node_modules/
 # next.js
 .next/
 .next-build/
+.next-desktop/
 .next-smoke-*/
 out/
 build/

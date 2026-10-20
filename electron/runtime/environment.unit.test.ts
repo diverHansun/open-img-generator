@@ -9,15 +9,15 @@ import {
 } from './environment';
 
 describe('desktop runtime environment', () => {
-  it('maps every mutable runtime path below the user data root', () => {
+  it('maps every mutable runtime path into the data folder below user data', () => {
     const paths = createDesktopDataPaths('/tmp/open-image-generator-user');
 
     expect(paths).toEqual({
-      root: path.resolve('/tmp/open-image-generator-user'),
-      database: path.resolve('/tmp/open-image-generator-user/app.db'),
-      images: path.resolve('/tmp/open-image-generator-user/images'),
-      config: path.resolve('/tmp/open-image-generator-user/config'),
-      logs: path.resolve('/tmp/open-image-generator-user/logs'),
+      root: path.resolve('/tmp/open-image-generator-user/data'),
+      database: path.resolve('/tmp/open-image-generator-user/data/app.db'),
+      images: path.resolve('/tmp/open-image-generator-user/data/images'),
+      config: path.resolve('/tmp/open-image-generator-user/data/config'),
+      logs: path.resolve('/tmp/open-image-generator-user/data/logs'),
     });
   });
 
@@ -27,6 +27,7 @@ describe('desktop runtime environment', () => {
       baseEnvironment: Object.fromEntries([
         ...providerMetadata.map((provider) => [provider.credentialName, 'must-not-leak']),
         ['PATH', '/usr/bin'],
+        ['DESKTOP_DEV_RUNTIME', '1'],
       ]),
       paths,
       port: 43123,
@@ -52,6 +53,7 @@ describe('desktop runtime environment', () => {
     for (const provider of providerMetadata) {
       expect(environment[provider.credentialName]).toBe('');
     }
+    expect(environment.DESKTOP_DEV_RUNTIME).toBeUndefined();
   });
 
   it('does not pass a master secret in session-memory mode', () => {
@@ -67,5 +69,6 @@ describe('desktop runtime environment', () => {
     expect(environment.USER_CONFIG_ENCRYPTION_KEY).toBeUndefined();
     expect(environment.USER_CONFIG_STORAGE_MODE).toBe('session-memory');
     expect(environment.NODE_ENV).toBe('development');
+    expect(environment.DESKTOP_DEV_RUNTIME).toBe('1');
   });
 });

@@ -45,13 +45,18 @@ let mainWindow: BrowserWindow | null = null;
 let localServer: RunningLocalServer | null = null;
 let quitting = false;
 
+// On-disk folder names stay space-free and independent of the display name.
+// Development and the installed app never share data (schema migrations only
+// move forward and the credential key is bound to the running binary).
+const DATA_DIRECTORY_NAME = app.isPackaged
+  ? 'open-img-generator'
+  : 'open-img-generator-dev';
+
 app.setName(APP_NAME);
-if (!app.isPackaged) {
-  app.setPath(
-    'userData',
-    path.join(app.getPath('appData'), `${APP_NAME} Development`),
-  );
-}
+app.setPath('userData', path.join(app.getPath('appData'), DATA_DIRECTORY_NAME));
+// Chromium profile files (cookies, local storage, HTTP and GPU caches) go in
+// their own subfolder, away from the business `data/` folder.
+app.setPath('sessionData', path.join(app.getPath('userData'), 'browser'));
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
