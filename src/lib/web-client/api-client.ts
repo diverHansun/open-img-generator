@@ -12,6 +12,7 @@ import type {
   ProviderId,
   ProviderInfo,
   Session,
+  DeletedSession,
   GenerationSummary,
   SubmitGenerationRequest,
   SubmitGenerationResponse,
@@ -415,6 +416,12 @@ export function createApiClient(fetcher: FetchLike = fetch) {
         fetcher,
         `/api/sessions/${encodeURIComponent(id)}`,
         jsonInit('PATCH', { title }),
+      ),
+    deleteSession: (id: string) =>
+      requestJson<DeletedSession>(
+        fetcher,
+        `/api/sessions/${encodeURIComponent(id)}`,
+        { method: 'DELETE' },
       ),
     moveSession: (id: string, toProjectId: string) =>
       requestJson<Session>(

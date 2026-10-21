@@ -41,6 +41,45 @@ function losesStoredProgress(current: GenerationView, incoming: GenerationView) 
   return current.images.some((image) => !incomingImageIds.has(image.id));
 }
 
+// Views drawn from a just-admitted submission, before the first server snapshot.
+const provisionalViews = new WeakSet<GenerationView>();
+
+/**
+ * Shows the submitted targets as waiting jobs right away, so the stage never
+ * sits on a loading message while the first poll is in flight.
+ */
+export function createProvisionalGenerationView(input: {
+  id: string;
+  projectId: string;
+  sessionId: string;
+  prompt: string;
+  targets: ReadonlyArray<{ provider: GenerationView['jobs'][number]['provider']; model: string }>;
+}): GenerationView {
+  const now = new Date().toISOString();
+  const view: GenerationView = {
+    id: input.id,
+    projectId: input.projectId,
+    sessionId: input.sessionId,
+    prompt: input.prompt,
+    status: 'pending',
+    createdAt: now,
+    updatedAt: now,
+    jobs: input.targets.map((target, index) => ({
+      id: `provisional:${input.id}:${index}`,
+      provider: target.provider,
+      model: target.model,
+      status: 'pending',
+    })),
+    images: [],
+  };
+  provisionalViews.add(view);
+  return view;
+}
+
+export function isProvisionalGenerationView(view: GenerationView | null): boolean {
+  return view !== null && provisionalViews.has(view);
+}
+
 /**
  * Generation state is monotonic. Ignore an older response, or an equal/newer
  * response that would move a terminal job backwards or drop an emitted image.
@@ -52,6 +91,8 @@ export function reconcileGenerationSnapshot(
   if (!current || current.id !== incoming.id || current.projectId !== incoming.projectId) {
     return incoming;
   }
+  // Any real snapshot replaces the local stand-in, whatever its timestamps.
+  if (provisionalViews.has(current)) return incoming;
   if (compareUpdatedAt(incoming.updatedAt, current.updatedAt) < 0) return current;
   if (losesStoredProgress(current, incoming)) return current;
   return incoming;

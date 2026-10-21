@@ -14,7 +14,6 @@ export function LocaleSwitcher() {
       >
         中文
       </button>
-      <span aria-hidden="true">/</span>
       <button type="button" aria-pressed={locale === 'en'} onClick={() => setLocale('en')}>
         EN
       </button>

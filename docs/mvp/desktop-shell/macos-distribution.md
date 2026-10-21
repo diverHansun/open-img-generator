@@ -1,6 +1,6 @@
 # macOS 本机试装、签名与公证
 
-> 当前 `v0.1.0` MVP 默认生成未签名的 arm64/x64 独立 DMG，只用于开发者本机验证。对外发送前再启用本页后半部分的 Developer ID 流程。
+> 当前 `v0.2.0` 默认生成未签名的 arm64/x64 独立 DMG，只用于开发者本机验证。对外发送前再启用本页后半部分的 Developer ID 流程。
 
 ## 1. 本机生成与试装
 
@@ -15,22 +15,25 @@ npm run desktop:package:mac:x64
 
 输出位置：
 
-- `dist/desktop/open image generator-0.1.0-arm64.dmg`
-- `dist/desktop/open image generator-0.1.0-x64.dmg`
+- `dist/desktop/open-img-generator-0.2.0-arm64.dmg`
+- `dist/desktop/open-img-generator-0.2.0-x64.dmg`
 
 Apple Silicon 机器选择 arm64，Intel 机器选择 x64。打开 DMG 后把 App 拖到 `/Applications`。未签名包会被 Gatekeeper 提醒；仅在确认产物来自自己的构建后，可在 Finder 中按住 Control 点击 App，选择“打开”并再次确认。不要把这条绕过方式当作公开发布方案。
 
 桌面数据默认位于：
 
 ```text
-~/Library/Application Support/open image generator/
-  app.db
-  images/
-  config/
-  logs/desktop.log
+~/Library/Application Support/open-img-generator/
+  data/               # 业务数据，结构与 web 端仓库 data/ 一致；备份只需这一个目录
+    app.db
+    images/
+    config/
+    logs/desktop.log
+  browser/            # Chromium 会话数据（Cookies、Local Storage、HTTP/GPU 缓存等），可重建
+  Singleton* 等        # Chromium 必须放在根目录的少量文件
 ```
 
-开发模式使用 `open image generator Development`，不会和安装版共用业务数据。安装版的新用户目录从空数据库开始，不自动迁移仓库 `data/` 或浏览器开发数据。
+开发模式使用 `open-img-generator-dev`，不会和安装版共用业务数据：数据库迁移只能向前，且凭据主密钥绑定当前运行的程序。开发模式的 `next dev` 使用独立的 `.next-desktop/`，可与 web 端 `npm run dev` 同时运行。安装版的新用户目录从空数据库开始，不自动迁移仓库 `data/` 或浏览器开发数据。
 
 ## 2. 申请 Developer ID
 
@@ -69,7 +72,7 @@ codesign --verify --deep --strict --verbose=2 \
 spctl --assess --verbose --type exec \
   'dist/desktop/mac-arm64/open image generator.app'
 xcrun stapler validate \
-  'dist/desktop/open image generator-0.1.0-arm64.dmg'
+  'dist/desktop/open-img-generator-0.2.0-arm64.dmg'
 ```
 
 然后在一台没有开发 Keychain、没有仓库环境变量的干净 Mac 用户账户上完成：首次启动、Keychain 保存与重启恢复 API Key、生成图片、下载目录、项目导出、打开数据目录、退出后无残留本机服务。x64 包还必须在真实 Intel Mac 或等价 CI 上完成启动验收。

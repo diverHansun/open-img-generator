@@ -194,6 +194,13 @@ export type Session = {
   updatedAt: string;
 };
 
+export type DeletedSession = {
+  id: string;
+  projectId: string;
+  generationCount: number;
+  imageCount: number;
+};
+
 export type GenerationSummary = Omit<
   GenerationView,
   'projectId' | 'jobs' | 'images'

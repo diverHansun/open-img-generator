@@ -130,10 +130,16 @@ export type GenerateTaskState = {
 
 export type GenerateTaskAction =
   | { type: 'submit-started'; sequence: number }
-  | { type: 'submit-succeeded'; sequence: number; generationId: string }
+  | {
+      type: 'submit-succeeded';
+      sequence: number;
+      generationId: string;
+      snapshot?: GenerationView | null;
+    }
   | { type: 'open-stage'; generationId: string }
   | { type: 'snapshot-received'; generationId: string; snapshot: GenerationView }
-  | { type: 'back-to-compose' };
+  | { type: 'back-to-compose' }
+  | { type: 'dismiss-stage' };
 
 export function createInitialGenerateTaskState(
   generationId?: string | null,
@@ -159,7 +165,7 @@ export function generateTaskReducer(
         ...state,
         view: 'stage',
         currentGenerationId: action.generationId,
-        snapshot: null,
+        snapshot: action.snapshot ?? null,
       };
     case 'open-stage':
       return {
@@ -176,6 +182,9 @@ export function generateTaskReducer(
       return { ...state, snapshot: action.snapshot };
     case 'back-to-compose':
       return { ...state, view: 'compose' };
+    case 'dismiss-stage':
+      // The editor stays mounted; only the result canvas and its subscription close.
+      return { ...state, view: 'compose', currentGenerationId: null, snapshot: null };
   }
 }
 

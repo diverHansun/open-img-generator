@@ -9,6 +9,9 @@ import electronPath from 'electron';
 import { providerMetadataData } from '../src/lib/provider-config/provider-metadata-data.js';
 
 const projectRoot = path.resolve(import.meta.dirname, '..');
+const expectedVersion = JSON.parse(
+  fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'),
+).version;
 const arch = process.argv[2] ?? process.arch;
 const electronExecutable =
   process.env.DESKTOP_ELECTRON_EXECUTABLE || electronPath;
@@ -169,7 +172,7 @@ try {
   const body = await authorized.json();
   const serializedBody = JSON.stringify(body);
   if (
-    body.app?.version !== '0.1.0'
+    body.app?.version !== expectedVersion
     || body.localData?.storageDirectory !== 'images/'
     || !Number.isSafeInteger(body.localData?.mediaBytes)
     || body.localData.mediaBytes < 0

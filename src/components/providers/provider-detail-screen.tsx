@@ -255,7 +255,11 @@ export function ProviderDetailScreen({
       {configuration ? (
         <>
           <div className={styles.detailHeader}>
-            <ProviderMark displayName={configuration.displayName} />
+            <ProviderMark
+              providerId={configuration.providerId}
+              displayName={configuration.displayName}
+              size="lg"
+            />
             <PageHeader
               eyebrow={t('providerDetail.eyebrow')}
               title={configuration.displayName}

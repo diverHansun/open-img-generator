@@ -4,6 +4,7 @@ import type { ProviderConfiguration } from '@/lib/web-client';
 
 import {
   findProviderConfiguration,
+  getProviderLogoSrc,
   getProviderMarkText,
   getProviderModelCount,
 } from './provider-view';
@@ -50,5 +51,11 @@ describe('provider view helpers', () => {
   it('builds a compact neutral mark from the display name', () => {
     expect(getProviderMarkText('Silicon Flow')).toBe('SF');
     expect(getProviderMarkText('Qwen')).toBe('QW');
+  });
+
+  it('resolves bundled logos by exact provider id and falls back otherwise', () => {
+    expect(getProviderLogoSrc('qwen')).toBe('/assets/providers/qwen.svg');
+    expect(getProviderLogoSrc('fal')).toBe('/assets/providers/fal.svg');
+    expect(getProviderLogoSrc('unknown')).toBeUndefined();
   });
 });

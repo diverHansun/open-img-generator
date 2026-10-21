@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { LocaleSwitcher } from '@/components/i18n/locale-switcher';
 import { useLocale } from '@/components/i18n/locale-provider';
 
+import { BrandLogo } from './brand-logo';
 import styles from './home-shell.module.css';
 
 export function HomeShell({ children }: { children: React.ReactNode }) {
@@ -16,8 +17,8 @@ export function HomeShell({ children }: { children: React.ReactNode }) {
       </a>
       <header className={styles.brandBar}>
         <Link className={styles.brand} href="/" aria-label="Open Image Generator">
-          <span aria-hidden="true">OI</span>
-          {t('brand.name')}
+          <BrandLogo size={20} />
+          <b>{t('brand.name')}</b>
         </Link>
         <LocaleSwitcher />
       </header>

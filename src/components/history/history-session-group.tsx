@@ -35,6 +35,7 @@ export function HistorySessionGroup({
   onLoadMore,
   onOpenDetail,
   onDelete,
+  onDeleteSession,
 }: {
   group: HistoryGroup;
   expanded: boolean;
@@ -43,6 +44,7 @@ export function HistorySessionGroup({
   onLoadMore: () => void;
   onOpenDetail: (generationId: string, trigger: HTMLElement) => void;
   onDelete: (generationId: string) => void;
+  onDeleteSession: () => void;
 }) {
   const { locale, t } = useLocale();
   const loadMoreSentinel = React.useRef<HTMLDivElement>(null);
@@ -76,6 +78,7 @@ export function HistorySessionGroup({
 
   return (
     <section className={styles.group}>
+      <div className={styles.groupHeader}>
       <button
         id={triggerId}
         type="button"
@@ -107,6 +110,16 @@ export function HistorySessionGroup({
           {formatRelativeTime(group.lastGenerationAt, locale)}
         </time>
       </button>
+      <button
+        type="button"
+        className={styles.groupDelete}
+        aria-label={t('history.deleteSession', { name: sessionName })}
+        title={t('history.deleteSession', { name: sessionName })}
+        onClick={onDeleteSession}
+      >
+        <Trash2 aria-hidden="true" />
+      </button>
+      </div>
 
       {expanded ? (
         <div

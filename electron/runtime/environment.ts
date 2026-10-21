@@ -11,8 +11,10 @@ export type DesktopDataPaths = {
   logs: string;
 };
 
-export function createDesktopDataPaths(root: string): DesktopDataPaths {
-  const resolvedRoot = path.resolve(root);
+// Business data lives in its own `data/` folder (same layout as the web
+// runtime's repository `data/`), separate from Chromium's files in userData.
+export function createDesktopDataPaths(userDataRoot: string): DesktopDataPaths {
+  const resolvedRoot = path.join(path.resolve(userDataRoot), 'data');
   return {
     root: resolvedRoot,
     database: path.join(resolvedRoot, 'app.db'),
@@ -44,6 +46,11 @@ export function createDesktopRuntimeEnvironment(input: {
     USER_CONFIG_STORAGE_MODE: input.credentialStorageMode,
     NEXT_TELEMETRY_DISABLED: '1',
   };
+
+  // `next dev` from the desktop shell gets its own build folder so it never
+  // races a web `npm run dev` over the shared `.next/`.
+  if (input.development) environment.DESKTOP_DEV_RUNTIME = '1';
+  else delete environment.DESKTOP_DEV_RUNTIME;
 
   if (input.credentialStorageMode === 'encrypted-file') {
     environment.USER_CONFIG_ENCRYPTION_KEY = input.credentialMasterSecret;

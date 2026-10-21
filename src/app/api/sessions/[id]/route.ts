@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '../../../../lib/db';
 import {
+  deleteSession,
   getSession,
   listGenerations,
   updateSession,
@@ -35,6 +36,18 @@ export async function PATCH(
     const { id } = await params;
     const body = await readJsonObject(request);
     return NextResponse.json(updateSession(id, { title: body.title }, db));
+  } catch (err) {
+    return handleApiError(err);
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    return NextResponse.json(deleteSession(id, db));
   } catch (err) {
     return handleApiError(err);
   }

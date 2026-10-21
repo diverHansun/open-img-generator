@@ -1,16 +1,20 @@
 .button {
-  width: 2.25rem;
-  height: 2.25rem;
-  flex: 0 0 auto;
-  border: 1px solid color-mix(in oklch, var(--color-line) 88%, transparent);
-  background: color-mix(in oklch, var(--color-surface) 88%, transparent);
-  color: var(--color-ink-muted);
-  backdrop-filter: blur(12px);
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
 }
 
-.button:hover,
+.button:hover {
+  background: var(--pill);
+  color: var(--fg);
+}
+
 .button[aria-pressed='true'] {
-  color: var(--color-accent-strong);
+  color: var(--amber);
 }
 
 .button svg[data-filled] {
@@ -29,19 +33,13 @@
 
 @media (hover: none) {
   .button {
-    width: 2.75rem;
-    height: 2.75rem;
+    width: 30px;
+    height: 30px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .spinner {
     animation: none;
-  }
-}
-
-@supports not (backdrop-filter: blur(1px)) {
-  .button {
-    background: var(--color-surface);
   }
 }

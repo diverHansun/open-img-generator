@@ -13,9 +13,11 @@ export function PageHeader({
 }) {
   return (
     <header className={styles.header}>
-      <div>
-        {eyebrow ? <p className={styles.eyebrow}>{eyebrow}</p> : null}
-        <h1>{title}</h1>
+      <div className={styles.copy}>
+        <div className={styles.titleRow}>
+          <h1>{title}</h1>
+          {eyebrow ? <span className={styles.eyebrow}>{eyebrow}</span> : null}
+        </div>
         {description ? <p className={styles.description}>{description}</p> : null}
       </div>
       {actions ? <div className={styles.actions}>{actions}</div> : null}

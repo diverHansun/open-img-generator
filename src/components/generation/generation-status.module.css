@@ -2,43 +2,43 @@
   display: inline-flex;
   min-width: 0;
   align-items: center;
-  gap: 0.4rem;
-  color: var(--color-ink-muted);
-  font-size: 0.8125rem;
-  font-weight: 620;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1.25;
 }
 
 .status svg {
-  width: 0.875rem;
-  height: 0.875rem;
-  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  flex: none;
   stroke-width: 2;
 }
 
 .status[data-status='completed'] {
-  color: var(--color-success);
+  color: var(--green);
 }
 
 .status[data-status='pending'],
 .status[data-status='running'] {
-  color: var(--color-warning);
+  color: var(--amber);
 }
 
 .status[data-status='failed'] {
-  color: var(--color-danger);
+  color: var(--red);
 }
 
 .status[data-status='partial'] {
-  color: var(--color-ink);
+  color: var(--amber);
 }
 
 .status[data-compact] {
-  font-size: 0.75rem;
+  font-size: 11.5px;
 }
 
 .runningIcon {
-  animation: status-spin 1.1s linear infinite;
+  animation: status-spin 1s linear infinite;
 }
 
 @keyframes status-spin {

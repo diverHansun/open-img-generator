@@ -72,13 +72,13 @@ export function Pagination({
             aria-current={item === currentPage ? 'page' : undefined}
             aria-label={pageLabel(item)}
             onClick={() => onPageChange(item)}
-            className="min-w-9 px-2"
+            className="min-w-7 px-2 tabular-nums"
           >
             {item}
           </Button>
         ) : (
-          <span key={item} className="grid size-9 place-items-center text-muted-foreground">
-            <MoreHorizontal aria-hidden="true" className="size-4" />
+          <span key={item} className="grid size-7 place-items-center text-[var(--muted)]">
+            <MoreHorizontal aria-hidden="true" className="size-3.5" />
             <span className="sr-only">…</span>
           </span>
         ),

@@ -16,17 +16,17 @@ export function EmptyState({
   return (
     <section
       className={cn(
-        'grid min-h-48 content-center justify-items-start gap-3 border-y border-border py-10',
+        'flex flex-col items-center justify-center gap-1.5 px-5 py-12 text-center',
         className,
       )}
     >
-      <h2 className="m-0 text-lg font-semibold text-foreground">{title}</h2>
+      <h2 className="m-0 text-[13px] font-medium text-[var(--fg)]">{title}</h2>
       {description ? (
-        <p className="m-0 max-w-xl text-sm leading-6 text-muted-foreground">
+        <p className="m-0 max-w-md text-[12px] leading-[1.45] text-[var(--muted)]">
           {description}
         </p>
       ) : null}
-      {action ? <div className="mt-1">{action}</div> : null}
+      {action ? <div className="mt-2">{action}</div> : null}
     </section>
   );
 }

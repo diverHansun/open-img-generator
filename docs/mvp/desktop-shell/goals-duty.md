@@ -15,7 +15,7 @@
 ## 2. Duties
 
 1. 在 Electron 生命周期内启动、健康检查并关闭现有本机 Next 服务，并将单一应用窗口连接到该受控本机服务。
-2. 为已有运行时配置应用专属的数据根目录：`~/Library/Application Support/open image generator/`，使 SQLite、图片、设置、日志和凭据各自落在该目录的受控子路径。
+2. 为已有运行时配置应用专属的数据根目录：`~/Library/Application Support/open-img-generator/data/`，使 SQLite、图片、设置、日志和凭据各自落在该目录的受控子路径。
 3. 提供严格受限的桌面原生能力边界，包括打开经校验的 Provider API Key 申请 HTTPS 链接，以及未来设置页所需的受控本机目录操作入口。
 4. 使用 macOS Keychain 保护凭据加密所需的本地秘密；若 Keychain 暂时不可用，向用户说明原因并只允许本次会话内存中的 API Key 使用。
 5. 提供开发启动、打包和基础验证路径，生成 Apple Silicon (`arm64`) 与 Intel (`x64`) 两个独立的 macOS `.dmg` 安装包。

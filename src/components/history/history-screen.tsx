@@ -4,6 +4,10 @@ import * as React from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
+import {
+  DeleteSessionDialog,
+  type DeleteSessionTarget,
+} from '@/components/dialogs/delete-session-dialog';
 import { GenerationDetailDialog } from '@/components/dialogs/generation-detail-dialog';
 import { useLocale } from '@/components/i18n/locale-provider';
 import { PageHeader } from '@/components/shell/page-header';
@@ -75,6 +79,8 @@ export function HistoryScreen({ projectId }: { projectId: string }) {
   >({});
   const [detail, setDetail] = React.useState<ActiveDetail | null>(null);
   const [announcement, setAnnouncement] = React.useState('');
+  const [sessionToDelete, setSessionToDelete] =
+    React.useState<DeleteSessionTarget | null>(null);
 
   const loadHistory = React.useCallback(
     async (background: boolean) => {
@@ -312,6 +318,16 @@ export function HistoryScreen({ projectId }: { projectId: string }) {
                   })
                 }
                 onLoadMore={() => void loadMore(group.session.id)}
+                onDeleteSession={() =>
+                  setSessionToDelete({
+                    id: group.session.id,
+                    name: group.session.title?.trim() || t('history.untitledSession'),
+                    counts: {
+                      generations: group.generationCount,
+                      images: group.imageCount,
+                    },
+                  })
+                }
                 onOpenDetail={(generationId, returnFocus) =>
                   setDetail({ generationId, returnFocus })
                 }
@@ -335,6 +351,18 @@ export function HistoryScreen({ projectId }: { projectId: string }) {
       <p className="sr-only" aria-live="polite">
         {announcement}
       </p>
+
+      <DeleteSessionDialog
+        target={sessionToDelete}
+        onOpenChange={(open) => {
+          if (!open) setSessionToDelete(null);
+        }}
+        onDeleted={() => {
+          setSessionToDelete(null);
+          setAnnouncement(t('history.deleteSessionSuccess'));
+          void loadHistory(false);
+        }}
+      />
 
       {detail ? (
         <GenerationDetailDialog

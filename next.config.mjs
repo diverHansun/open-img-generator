@@ -6,7 +6,9 @@ const distDir = hasSafeSmokeDistDir
   ? smokeDistDir
   : process.env.NODE_ENV === 'production'
     ? '.next-build'
-    : undefined;
+    : process.env.DESKTOP_DEV_RUNTIME === '1'
+      ? '.next-desktop'
+      : undefined;
 
 const nextConfig = {
   output: 'standalone',

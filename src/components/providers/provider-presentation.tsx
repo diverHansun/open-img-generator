@@ -11,7 +11,11 @@ import type {
 } from '@/lib/web-client';
 
 import styles from './providers.module.css';
-import { getProviderMarkText, getProviderModelCount } from './provider-view';
+import {
+  getProviderLogoSrc,
+  getProviderMarkText,
+  getProviderModelCount,
+} from './provider-view';
 
 function sourceTranslationKey(
   source: CredentialSource,
@@ -44,10 +48,28 @@ export function CredentialSourceLabel({
   );
 }
 
-export function ProviderMark({ displayName }: { displayName: string }) {
+export function ProviderMark({
+  providerId,
+  displayName,
+  size = 'default',
+}: {
+  providerId: string;
+  displayName: string;
+  size?: 'default' | 'sm' | 'lg';
+}) {
+  const logoSrc = getProviderLogoSrc(providerId);
   return (
-    <span className={styles.providerMark} aria-hidden="true">
-      {getProviderMarkText(displayName)}
+    <span
+      className={styles.providerMark}
+      data-size={size}
+      data-logo={logoSrc ? 'true' : undefined}
+      aria-hidden="true"
+    >
+      {logoSrc ? (
+        <img src={logoSrc} alt="" draggable={false} />
+      ) : (
+        getProviderMarkText(displayName)
+      )}
     </span>
   );
 }
@@ -84,17 +106,17 @@ function ProviderModelSummary({
   const { t } = useLocale();
   const count = getProviderModelCount(configuration);
   return (
-    <div className={styles.modelSummary}>
-      <span>
+    <span className={styles.modelSummary}>
+      <b>
         {count.configured
           ? t('provider.modelCount.configured', {
               enabled: count.enabled,
               total: count.total,
             })
           : t('provider.modelCount.unconfigured', { total: count.total })}
-      </span>
+      </b>
       {!count.configured ? <small>{t('provider.modelsNeedCredential')}</small> : null}
-    </div>
+    </span>
   );
 }
 
@@ -110,26 +132,31 @@ export function ProviderDirectory({
   const { t } = useLocale();
   return (
     <div className={styles.directory} aria-busy={busy}>
-      <div className={styles.directoryHeader} aria-hidden="true">
-        <span>{t('providers.column.provider')}</span>
-        <span>{t('providers.column.credential')}</span>
-        <span>{t('providers.column.configuration')}</span>
-        <span>{t('providers.column.models')}</span>
-        <span>{t('providers.column.actions')}</span>
-      </div>
       <ul className={styles.directoryList}>
         {configurations.map((configuration) => (
           <li className={styles.directoryRow} key={configuration.providerId}>
-            <div className={styles.providerIdentity}>
-              <ProviderMark displayName={configuration.displayName} />
-              <strong>{configuration.displayName}</strong>
-            </div>
-            <code className={styles.credentialName}>{configuration.credentialName}</code>
-            <CredentialSourceLabel
-              source={configuration.source}
-              credentialStorageMode={configuration.credentialStorageMode}
+            <ProviderMark
+              providerId={configuration.providerId}
+              displayName={configuration.displayName}
             />
-            <ProviderModelSummary configuration={configuration} />
+            <div className={styles.providerWho}>
+              <div className={styles.providerTitleLine}>
+                <strong>{configuration.displayName}</strong>
+                <code className={styles.credentialName}>
+                  {configuration.credentialName}
+                </code>
+              </div>
+              <div className={styles.providerSubLine}>
+                <CredentialSourceLabel
+                  source={configuration.source}
+                  credentialStorageMode={configuration.credentialStorageMode}
+                />
+                <span className={styles.sep} aria-hidden="true">
+                  ·
+                </span>
+                <ProviderModelSummary configuration={configuration} />
+              </div>
+            </div>
             <div className={styles.rowActions}>
               <ProviderApplicationLink configuration={configuration} compact />
               <Link

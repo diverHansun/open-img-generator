@@ -1,6 +1,6 @@
 # Release and versioning
 
-The MVP remains **v0.1.0**. `package.json` is the single source of truth for the application version: the Web About page reads it directly, and `scripts/build-electron.mjs` copies the same value into the isolated Electron packaging entry. The DMG filename and desktop About version therefore advance with the same release edit.
+The current release is **v0.2.0**. `package.json` is the single source of truth for the application version: the Web About page reads it directly, and `scripts/build-electron.mjs` copies the same value into the isolated Electron packaging entry. The DMG filename and desktop About version therefore advance with the same release edit.
 
 ## Version policy
 

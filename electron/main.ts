@@ -17,6 +17,7 @@ import {
   desktopIpcChannels,
   type DesktopRuntimeInfo,
 } from '../src/lib/desktop-bridge';
+import { rotateLogFileIfNeeded } from '../src/lib/observability/log-rotation';
 import { isAllowedExternalUrl } from './security/external-links';
 import { resolveCredentialProtection } from './security/credential-secret';
 import {
@@ -37,18 +38,25 @@ import {
 const APP_NAME = 'open image generator';
 const AUTH_COOKIE_NAME = 'open_image_generator_auth';
 const START_PATH = '/';
+const DESKTOP_LOG_MAX_BYTES = 5 * 1024 * 1024;
+const DESKTOP_LOG_ROTATIONS = 2;
 
 let mainWindow: BrowserWindow | null = null;
 let localServer: RunningLocalServer | null = null;
 let quitting = false;
 
+// On-disk folder names stay space-free and independent of the display name.
+// Development and the installed app never share data (schema migrations only
+// move forward and the credential key is bound to the running binary).
+const DATA_DIRECTORY_NAME = app.isPackaged
+  ? 'open-img-generator'
+  : 'open-img-generator-dev';
+
 app.setName(APP_NAME);
-if (!app.isPackaged) {
-  app.setPath(
-    'userData',
-    path.join(app.getPath('appData'), `${APP_NAME} Development`),
-  );
-}
+app.setPath('userData', path.join(app.getPath('appData'), DATA_DIRECTORY_NAME));
+// Chromium profile files (cookies, local storage, HTTP and GPU caches) go in
+// their own subfolder, away from the business `data/` folder.
+app.setPath('sessionData', path.join(app.getPath('userData'), 'browser'));
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) app.quit();
@@ -56,6 +64,10 @@ if (!hasSingleInstanceLock) app.quit();
 function appendDesktopLog(logFile: string, message: string): void {
   const line = `${new Date().toISOString()} ${message}\n`;
   try {
+    rotateLogFileIfNeeded(logFile, Buffer.byteLength(line), {
+      maxBytes: DESKTOP_LOG_MAX_BYTES,
+      rotations: DESKTOP_LOG_ROTATIONS,
+    });
     fs.appendFileSync(logFile, line, { encoding: 'utf8', mode: 0o600 });
   } catch {
     // Logging must never prevent startup or shutdown.

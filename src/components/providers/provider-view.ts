@@ -36,3 +36,19 @@ export function getProviderMarkText(displayName: string): string {
   }
   return (words[0] ?? '?').slice(0, 2).toUpperCase();
 }
+
+const PROVIDER_LOGOS: Readonly<Record<string, string>> = {
+  fal: '/assets/providers/fal.svg',
+  zenmux: '/assets/providers/zenmux.svg',
+  siliconflow: '/assets/providers/siliconflow.svg',
+  zhipu: '/assets/providers/zhipu.svg',
+  doubao: '/assets/providers/doubao.svg',
+  qwen: '/assets/providers/qwen.svg',
+};
+
+/** Brand logo bundled under public/assets/providers, if one exists. */
+export function getProviderLogoSrc(providerId: string): string | undefined {
+  return Object.hasOwn(PROVIDER_LOGOS, providerId)
+    ? PROVIDER_LOGOS[providerId]
+    : undefined;
+}

@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, notExists } from 'drizzle-orm';
 import {
   db,
+  generationJobs,
+  generations,
+  images,
   projects,
   sessions,
+  videos,
   type DbClient,
   type Session,
 } from '../db';
+import { removeStoredFile } from '../storage';
 import {
   ConflictError,
   InitialSessionUnavailableError,
@@ -23,20 +28,57 @@ function normalizeTitle(title: unknown): string | null {
   return title.trim() || null;
 }
 
+/**
+ * A project holds at most one empty, untitled session. Asking for another
+ * untitled session reuses it (and folds away any older empty duplicates);
+ * naming a session or generating into it is what makes it permanent.
+ */
 export function createSession(
   input: { projectId: string; title?: unknown },
   client: DbClient = db,
 ): Session {
   getProject(input.projectId, client);
+  const title = normalizeTitle(input.title);
   const now = new Date().toISOString();
   const id = randomUUID();
+  let reusedId: string | null = null;
   try {
     client.transaction((tx) => {
+      if (title === null) {
+        const drafts = tx
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(
+            and(
+              eq(sessions.projectId, input.projectId),
+              isNull(sessions.title),
+              notExists(
+                tx
+                  .select({ id: generations.id })
+                  .from(generations)
+                  .where(eq(generations.sessionId, sessions.id)),
+              ),
+            ),
+          )
+          .orderBy(desc(sessions.updatedAt), desc(sessions.id))
+          .all();
+        const [keep, ...extra] = drafts;
+        if (keep) {
+          if (extra.length > 0) {
+            tx.delete(sessions)
+              .where(inArray(sessions.id, extra.map((draft) => draft.id)))
+              .run();
+          }
+          tx.update(sessions).set({ updatedAt: now }).where(eq(sessions.id, keep.id)).run();
+          reusedId = keep.id;
+          return;
+        }
+      }
       tx.insert(sessions)
         .values({
           id,
           projectId: input.projectId,
-          title: normalizeTitle(input.title),
+          title,
           createdAt: now,
           updatedAt: now,
         })
@@ -52,7 +94,7 @@ export function createSession(
     }
     throw err;
   }
-  return getSession(id, client);
+  return getSession(reusedId ?? id, client);
 }
 
 /**
@@ -162,4 +204,92 @@ export function moveSession(
       .run();
   });
   return getSession(id, client);
+}
+
+export type DeletedSession = {
+  id: string;
+  projectId: string;
+  generationCount: number;
+  imageCount: number;
+};
+
+/**
+ * Deletes a session with every generation, image, video and favorite in it.
+ * Refused while any job is still pending or running, so the worker never
+ * writes into a generation that no longer exists.
+ */
+export function deleteSession(id: string, client: DbClient = db): DeletedSession {
+  const now = new Date().toISOString();
+  const { result, storagePaths } = client.transaction((tx) => {
+    const session = getSession(id, tx);
+    const generationIds = tx
+      .select({ id: generations.id })
+      .from(generations)
+      .where(eq(generations.sessionId, id))
+      .all()
+      .map((row) => row.id);
+    const paths: string[] = [];
+    let imageCount = 0;
+    if (generationIds.length > 0) {
+      const active = tx
+        .select({ id: generationJobs.id })
+        .from(generationJobs)
+        .where(
+          and(
+            inArray(generationJobs.generationId, generationIds),
+            inArray(generationJobs.status, ['pending', 'running']),
+          ),
+        )
+        .get();
+      if (active) {
+        throw new ConflictError('Session has generations in progress');
+      }
+      const jobIds = tx
+        .select({ id: generationJobs.id })
+        .from(generationJobs)
+        .where(inArray(generationJobs.generationId, generationIds))
+        .all()
+        .map((row) => row.id);
+      if (jobIds.length > 0) {
+        const imageRows = tx
+          .select({ storagePath: images.storagePath })
+          .from(images)
+          .where(inArray(images.generationJobId, jobIds))
+          .all();
+        imageCount = imageRows.length;
+        const videoRows = tx
+          .select({ storagePath: videos.storagePath })
+          .from(videos)
+          .where(inArray(videos.generationJobId, jobIds))
+          .all();
+        for (const row of [...imageRows, ...videoRows]) {
+          if (row.storagePath) paths.push(row.storagePath);
+        }
+      }
+      // Jobs, images, videos and favorites cascade from generations.
+      tx.delete(generations).where(eq(generations.sessionId, id)).run();
+    }
+    tx.delete(sessions).where(eq(sessions.id, id)).run();
+    tx.update(projects)
+      .set({ updatedAt: now })
+      .where(eq(projects.id, session.projectId))
+      .run();
+    return {
+      result: {
+        id,
+        projectId: session.projectId,
+        generationCount: generationIds.length,
+        imageCount,
+      },
+      storagePaths: paths,
+    };
+  });
+  for (const storagePath of storagePaths) {
+    try {
+      removeStoredFile(storagePath);
+    } catch {
+      // The rows are gone; orphan cleanup can retry stray bytes later.
+    }
+  }
+  return result;
 }

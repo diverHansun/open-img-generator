@@ -1,0 +1,236 @@
+.placeholder,
+.thumbnail {
+  min-width: 0;
+  margin: 0;
+}
+
+.frame {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  background: var(--light-base, #e9e4dd);
+  /* Clip the moving pigment without filtering surrounding text or images. */
+  contain: paint;
+}
+
+.pigmentA,
+.pigmentB,
+.halo,
+.sheen {
+  position: absolute;
+  pointer-events: none;
+  animation-iteration-count: infinite;
+}
+
+.pigmentA,
+.pigmentB {
+  inset: -25%;
+  border-radius: 40%;
+  filter: blur(26px);
+  transform-origin: 50% 50%;
+  animation-timing-function: ease-in-out;
+  animation-direction: alternate;
+}
+
+.pigmentA {
+  background:
+    radial-gradient(ellipse 50% 60% at var(--light-a-x, 23%) var(--light-a-y, 32%), var(--light-c1, #d98470) 18%, transparent 85%),
+    radial-gradient(ellipse 50% 50% at var(--light-b-x, 76%) var(--light-b-y, 27%), var(--light-c2, #78a99f) 16%, transparent 82%),
+    radial-gradient(ellipse 60% 50% at var(--light-c-x, 64%) var(--light-c-y, 80%), var(--light-c3, #879fbe) 20%, transparent 85%),
+    radial-gradient(ellipse 50% 60% at var(--light-d-x, 27%) var(--light-d-y, 77%), var(--light-c4, #e2bd7b) 15%, transparent 86%);
+  animation-name: pigment-drift;
+  animation-duration: var(--light-drift, 13s);
+  animation-delay: var(--light-drift-delay, 0s);
+}
+
+.pigmentB {
+  inset: -20%;
+  opacity: 0.55;
+  background:
+    radial-gradient(ellipse 45% 60% at var(--light-c-x, 65%) var(--light-a-y, 30%), var(--light-c4, #f5dfb6) 12%, transparent 80%),
+    radial-gradient(ellipse 50% 45% at var(--light-a-x, 30%) var(--light-c-y, 70%), var(--light-c2, #b1c6ce) 12%, transparent 85%),
+    radial-gradient(ellipse 50% 60% at var(--light-b-x, 78%) var(--light-d-y, 85%), var(--light-c1, #c98b9b) 10%, transparent 85%);
+  animation-name: pigment-fold;
+  animation-duration: var(--light-fold, 17s);
+  animation-delay: var(--light-fold-delay, 0s);
+}
+
+/* A soft highlight that wanders over the pigment, like light on wet paint. */
+.halo {
+  top: 0;
+  left: 0;
+  width: 70%;
+  height: 70%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0.55), rgb(255 255 255 / 0) 62%);
+  mix-blend-mode: soft-light;
+  animation-name: halo-orbit;
+  animation-duration: var(--light-halo, 9s);
+  animation-delay: var(--light-halo-delay, 0s);
+  animation-direction: var(--light-halo-direction, normal);
+  animation-timing-function: ease-in-out;
+}
+
+/* One slow pass of light, then a rest, so the frame reads as working, not loading. */
+.sheen {
+  inset: -10% -60%;
+  background: linear-gradient(
+    var(--light-sheen-tilt, 115deg),
+    rgb(255 255 255 / 0) 38%,
+    rgb(255 255 255 / 0.22) 48%,
+    rgb(255 255 255 / 0.32) 50%,
+    rgb(255 255 255 / 0.22) 52%,
+    rgb(255 255 255 / 0) 62%
+  );
+  mix-blend-mode: soft-light;
+  transform: translateX(-60%);
+  animation-name: sheen-pass;
+  animation-duration: var(--light-sheen, 6.5s);
+  animation-delay: var(--light-sheen-delay, 0s);
+  animation-timing-function: cubic-bezier(0.45, 0, 0.25, 1);
+}
+
+.grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.7' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23000' filter='url(%23n)' d='M0 0h128v128H0z'/%3E%3C/svg%3E");
+  pointer-events: none;
+}
+
+.caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 30px;
+  padding: 3px 2px 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.caption > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--code);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caption > span:last-child {
+  flex: none;
+  color: var(--fg-2);
+}
+
+.thumbnail {
+  width: 52px;
+  height: 52px;
+  flex: none;
+}
+
+.thumbnail .frame {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+}
+
+.thumbnail .pigmentA,
+.thumbnail .pigmentB {
+  filter: blur(6px);
+}
+
+[data-status='pending'] > .frame {
+  opacity: 0.72;
+}
+
+[data-status='pending'] .sheen {
+  display: none;
+}
+
+@keyframes pigment-drift {
+  0% {
+    transform: translate(-7%, -3%) rotate(var(--light-angle, 0deg)) scale(1.03, 0.96);
+  }
+  50% {
+    transform: translate(5%, 6%) rotate(calc(var(--light-angle, 0deg) + var(--light-spin, 80deg) * 0.45)) scale(0.92, 1.12);
+  }
+  100% {
+    transform: translate(8%, -7%) rotate(calc(var(--light-angle, 0deg) + var(--light-spin, 80deg))) scale(1.12, 1.02);
+  }
+}
+
+@keyframes pigment-fold {
+  0% {
+    transform: translate(9%, 6%) rotate(calc(var(--light-angle, 0deg) + 20deg)) scale(1.05);
+  }
+  55% {
+    transform: translate(-9%, -3%) rotate(calc(var(--light-angle, 0deg) - var(--light-spin, 80deg) * 0.4)) scale(1.22, 0.94);
+  }
+  100% {
+    transform: translate(-5%, 9%) rotate(calc(var(--light-angle, 0deg) - var(--light-spin, 80deg))) scale(0.96, 1.16);
+  }
+}
+
+@keyframes halo-orbit {
+  0%,
+  100% {
+    transform: translate(-8%, -6%) scale(1);
+  }
+  25% {
+    transform: translate(48%, 4%) scale(1.12);
+  }
+  50% {
+    transform: translate(40%, 50%) scale(0.94);
+  }
+  75% {
+    transform: translate(-2%, 42%) scale(1.08);
+  }
+}
+
+@keyframes sheen-pass {
+  0% {
+    transform: translateX(-60%);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  48% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    transform: translateX(60%);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pigmentA,
+  .pigmentB {
+    animation: none;
+    transform: rotate(var(--light-angle, 0deg));
+  }
+
+  .halo,
+  .sheen {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .frame {
+    background: Canvas;
+    border: 1px solid CanvasText;
+  }
+
+  .pigmentA,
+  .pigmentB,
+  .halo,
+  .sheen,
+  .grain {
+    display: none;
+  }
+}

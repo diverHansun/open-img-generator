@@ -1,8 +1,10 @@
 'use client';
 
+import * as React from 'react';
 import Link from 'next/link';
 
 import { useLocale } from '@/components/i18n/locale-provider';
+import { ProviderMark } from '@/components/providers/provider-presentation';
 import { Input } from '@/components/ui/input';
 import { workspaceRoute } from '@/lib/routes';
 import type { GenerationControls, GenerationTarget } from '@/lib/web-client';
@@ -42,7 +44,6 @@ export function GenerateInspector({
   selectedKeys,
   controls,
   aspectRatio,
-  count,
   countInput,
   seed,
   negativePrompt,
@@ -59,24 +60,97 @@ export function GenerateInspector({
   const hasCountError = controls.maxCount > 0 && validCount === null;
 
   return (
-    <details className={styles.inspector} open>
-      <summary className={styles.inspectorSummary}>
-        <span>{t('generate.inspectorTitle')}</span>
-        <span>
-          {t('generate.modelsSelected', {
-            selected: selectedKeys.size,
-            total: models.length,
-          })}
-        </span>
-      </summary>
+    <div className={styles.inspectorStack}>
+      <section className={styles.paramCard} aria-label={t('generate.inspectorTitle')}>
+        <div className={styles.paramRow}>
+          <span className={styles.paramLabel}>{t('generate.aspectRatio')}</span>
+          <div className={styles.segs} role="group" aria-label={t('generate.aspectRatio')}>
+            {controls.aspectRatios.map((ratio) => (
+              <button
+                key={ratio}
+                type="button"
+                className={ratio === aspectRatio ? styles.segOn : styles.segOpt}
+                aria-pressed={ratio === aspectRatio}
+                onClick={() => onAspectRatioChange(ratio)}
+              >
+                {ratio}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      <div className={styles.inspectorBody}>
-        <div className={styles.inspectorHeading}>
-          <h2>{t('generate.inspectorTitle')}</h2>
+        <div className={styles.paramRow}>
+          <label className={styles.paramLabel} htmlFor={countInputId}>
+            <span>{t('generate.count')}</span>
+            {controls.maxCount > 0 ? (
+              <small
+                id={countHintId}
+                className={styles.countHint}
+                data-invalid={hasCountError || undefined}
+                role={hasCountError ? 'alert' : undefined}
+              >
+                {hasCountError
+                  ? t('generate.countRangeError', { max: controls.maxCount })
+                  : `1–${controls.maxCount}`}
+              </small>
+            ) : null}
+          </label>
+          <div className={styles.countControls}>
+            <Input
+              id={countInputId}
+              className={styles.countNumberInput}
+              type="number"
+              min={1}
+              max={Math.max(1, controls.maxCount)}
+              step={1}
+              inputMode="numeric"
+              value={countInput}
+              disabled={controls.maxCount === 0}
+              aria-invalid={hasCountError || undefined}
+              aria-describedby={controls.maxCount > 0 ? countHintId : undefined}
+              onChange={(event) => onCountChange(event.target.value)}
+            />
+          </div>
+        </div>
+
+        {controls.canSetSeed || controls.canSetNegativePrompt ? (
+          <details className={styles.advanced}>
+            <summary>{t('generate.advanced')}</summary>
+            <div className={styles.advancedFields}>
+              {controls.canSetSeed ? (
+                <label className={styles.advRow}>
+                  <span>{t('generate.seed')}</span>
+                  <Input
+                    inputMode="numeric"
+                    value={seed}
+                    placeholder={t('generate.randomSeed')}
+                    onChange={(event) => onSeedChange(event.target.value)}
+                  />
+                </label>
+              ) : null}
+              {controls.canSetNegativePrompt ? (
+                <label className={styles.advStack}>
+                  <span>{t('generate.negativePrompt')}</span>
+                  <textarea
+                    rows={2}
+                    value={negativePrompt}
+                    placeholder={t('generate.negativePlaceholder')}
+                    onChange={(event) => onNegativePromptChange(event.target.value)}
+                  />
+                </label>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
+      </section>
+
+      <section className={styles.modelsSection}>
+        <div className={styles.sectionHead}>
+          <h2>{t('generate.modelsTitle')}</h2>
           <span>
-            {t('generate.generationImpact', {
-              calls: selectedKeys.size,
-              images: selectedKeys.size * count,
+            {t('generate.modelsSelected', {
+              selected: selectedKeys.size,
+              total: models.length,
             })}
           </span>
         </div>
@@ -85,24 +159,33 @@ export function GenerateInspector({
           <div className={styles.modelList}>
             {models.map((model) => {
               const key = targetKey(model.target);
+              const checked = selectedKeys.has(key);
               return (
-                <label className={styles.modelRow} key={key}>
-                  <input
-                    type="checkbox"
-                    checked={selectedKeys.has(key)}
-                    onChange={() => onToggleModel(key)}
+                <label
+                  className={checked ? styles.modelRowSelected : styles.modelRow}
+                  key={key}
+                >
+                  <ProviderMark
+                    providerId={model.target.provider}
+                    displayName={model.providerName}
+                    size="sm"
                   />
                   <span className={styles.modelCopy}>
                     <strong>{model.displayName}</strong>
-                    <small>
-                      {model.providerName} ·{' '}
-                      {t(
-                        model.protocol === 'sync'
-                          ? 'generate.protocol.sync'
-                          : 'generate.protocol.async',
-                      )}
-                    </small>
+                    <small>{model.providerName}</small>
                   </span>
+                  <span className={styles.protoBadge}>
+                    {t(
+                      model.protocol === 'sync'
+                        ? 'generate.protocol.sync'
+                        : 'generate.protocol.async',
+                    )}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggleModel(key)}
+                  />
                 </label>
               );
             })}
@@ -126,79 +209,7 @@ export function GenerateInspector({
             </div>
           </div>
         )}
-
-        <div className={styles.parameterGrid}>
-          <label>
-            <span>{t('generate.aspectRatio')}</span>
-            <select
-              value={aspectRatio}
-              disabled={controls.aspectRatios.length === 0}
-              onChange={(event) => onAspectRatioChange(event.target.value)}
-            >
-              {controls.aspectRatios.map((ratio) => (
-                <option value={ratio} key={ratio}>
-                  {ratio}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>{t('generate.count')}</span>
-            <Input
-              id={countInputId}
-              type="number"
-              min={1}
-              max={Math.max(1, controls.maxCount)}
-              step={1}
-              inputMode="numeric"
-              value={countInput}
-              disabled={controls.maxCount === 0}
-              aria-invalid={hasCountError || undefined}
-              aria-describedby={controls.maxCount > 0 ? countHintId : undefined}
-              onChange={(event) => onCountChange(event.target.value)}
-            />
-            {controls.maxCount > 0 ? (
-              <small
-                id={countHintId}
-                className={styles.countHint}
-                data-invalid={hasCountError || undefined}
-                role={hasCountError ? 'alert' : undefined}
-              >
-                {hasCountError
-                  ? t('generate.countRangeError', { max: controls.maxCount })
-                  : t('generate.countHint', { max: controls.maxCount })}
-              </small>
-            ) : null}
-          </label>
-        </div>
-
-        <details className={styles.advanced}>
-          <summary>{t('generate.advanced')}</summary>
-          <div className={styles.advancedFields}>
-            {controls.canSetSeed ? (
-              <label>
-                <span>{t('generate.seed')}</span>
-                <Input
-                  inputMode="numeric"
-                  value={seed}
-                  onChange={(event) => onSeedChange(event.target.value)}
-                />
-              </label>
-            ) : null}
-            {controls.canSetNegativePrompt ? (
-              <label>
-                <span>{t('generate.negativePrompt')}</span>
-                <textarea
-                  rows={3}
-                  value={negativePrompt}
-                  placeholder={t('generate.negativePlaceholder')}
-                  onChange={(event) => onNegativePromptChange(event.target.value)}
-                />
-              </label>
-            ) : null}
-          </div>
-        </details>
-      </div>
-    </details>
+      </section>
+    </div>
   );
 }

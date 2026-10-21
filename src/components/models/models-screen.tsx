@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Search } from 'lucide-react';
 
 import { useLocale } from '@/components/i18n/locale-provider';
+import { ProviderMark } from '@/components/providers/provider-presentation';
 import { PageHeader } from '@/components/shell/page-header';
 import { Button } from '@/components/ui/button';
 import { InlineNotice } from '@/components/ui/inline-notice';
@@ -322,6 +323,11 @@ export function ModelsScreen({ projectId }: { projectId: string }) {
                 return (
                   <section className={styles.group} key={group.providerId}>
                     <header className={styles.groupHeader}>
+                      <ProviderMark
+                        providerId={group.providerId}
+                        displayName={group.providerName}
+                        size="sm"
+                      />
                       <h2>{group.providerName}</h2>
                       <span>
                         {t('models.groupCount', {
